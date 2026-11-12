@@ -1,0 +1,17 @@
+{
+  "teachers": [],
+  "messages": [
+    {
+      "id": "msg-1789995786386-190",
+      "teacherId": "gv-thuy",
+      "studentName": "Bạn học",
+      "sender": "student",
+      "senderName": "Kiểm tra hệ thống",
+      "content": "Em chào cô Thủy ạ!",
+      "timestamp": "13:03",
+      "read": false
+    }
+  ],
+  "lectures": [],
+  "colleagueMessages": []
+}

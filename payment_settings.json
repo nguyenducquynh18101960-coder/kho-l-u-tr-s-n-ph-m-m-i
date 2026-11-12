@@ -1,0 +1,12 @@
+{
+  "bankId": "MB",
+  "bankName": "MB Bank & Ví ZaloPay",
+  "accountNo": "0778901259",
+  "accountName": "MAC KHANH DUY",
+  "phone": "0778901259",
+  "customQrUrl": "",
+  "plusPrice": 100000,
+  "premiumPrice": 500000,
+  "autoApprove": true,
+  "updatedAt": 1728800000000
+}

@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.max10.education",
+      "sha256_cert_fingerprints": [
+        "14:6D:E9:7D:0F:52:AB:FC:02:83:2A:7E:6D:1A:E5:8E:D6:7F:32:86:14:EA:42:01:42:8A:2F:3F:8A:07:07:95"
+      ]
+    }
+  }
+]

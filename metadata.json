@@ -1,0 +1,6 @@
+{
+  "name": "Max10 - Gia Sư Chinh Phục Điểm 10",
+  "description": "Max10 - Trợ lý AI đồng hành học tập toàn diện cho học sinh săn điểm 10 trọn năm: Nhóm trò chuyện học tập cùng bạn bè & AI với luật nhóm kiểm duyệt thông minh, 5 bước học tập chuẩn điểm 10, giọng nói AI, giải chi tiết từng bước, sơ đồ tư duy, làm video học tập và cổng giáo viên THCS Nguyễn Du.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#059669"/>
+      <stop offset="50%" stop-color="#0d9488"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="star" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- Graduation Cap Icon -->
+  <path d="M256 120 L400 196 L256 272 L112 196 Z" fill="#ffffff" opacity="0.95"/>
+  <path d="M160 225 L160 300 C160 340 352 340 352 300 L352 225 L256 276 Z" fill="#ffffff" opacity="0.85"/>
+  <line x1="384" y1="205" x2="384" y2="280" stroke="#fef08a" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="384" cy="290" r="16" fill="url(#star)"/>
+  <!-- Max10 Badge -->
+  <rect x="146" y="356" width="220" height="76" rx="38" fill="#ffffff" filter="drop-shadow(0 10px 15px rgba(0,0,0,0.25))"/>
+  <text x="256" y="410" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="44" font-weight="900" fill="#059669" text-anchor="middle" letter-spacing="1">MAX10</text>
+</svg>
