@@ -34,6 +34,7 @@ import {
   kickStudentFromClass,
   isAiOrFakeStudent,
   loadCollectiveBadges,
+  loadClassSeatingPlan,
 } from '../../data/classSystemData';
 import { STORAGE_KEY_AUTH_USER, UserAccount } from '../../types/auth';
 
@@ -429,7 +430,7 @@ export const ClassroomLeaderboard: React.FC<ClassroomLeaderboardProps> = ({
                   <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-bold">Đang ôn</p>
                 </div>
 
-                {onNavigateToTab && (
+                {onNavigateToTab && loadClassSeatingPlan(selectedClass) && (
                   <button
                     type="button"
                     onClick={() => {
@@ -449,7 +450,7 @@ export const ClassroomLeaderboard: React.FC<ClassroomLeaderboardProps> = ({
                     title="Nhắn tin trao đổi nhóm lớp"
                   >
                     <MessageSquare className="w-3.5 h-3.5" />
-                    <span>Nhóm Lớp {selectedClass}</span>
+                    <span>{loadClassSeatingPlan(selectedClass)?.customClassName || `Nhóm Lớp ${selectedClass}`}</span>
                   </button>
                 )}
               </div>

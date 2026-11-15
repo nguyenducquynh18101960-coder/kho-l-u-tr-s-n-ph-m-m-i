@@ -45,12 +45,14 @@ import { AchievementsModal } from './components/chatgpt/AchievementsModal';
 import { PersonalSchedule } from './components/PersonalSchedule';
 import { ClassManagement } from './components/chatgpt/ClassManagement';
 import { BirthdaySurpriseModal } from './components/chatgpt/BirthdaySurpriseModal';
+import { HolidayGiftAnimationModal, detectActiveHoliday, HolidayId } from './components/chatgpt/HolidayGiftAnimationModal';
 import { STORAGE_KEY_USER_DOB } from './types/auth';
 import { loadStudentAchievements, saveStudentAchievements } from './data/initialAchievements';
 import { calculateLevel } from './types/achievements';
 import { celebrateMilestone } from './utils/confettiFireworks';
 import { soundEffects } from './utils/soundEffects';
 import { getDailyQuestionQuota, MAX_DAILY_QUESTIONS } from './data/questionQuota';
+import { purgeUnrelatedLegacyClassGroups } from './data/classSystemData';
 
 const STORAGE_KEY_SESSIONS = 'max10_chat_sessions_v3';
 const STORAGE_KEY_SELECTED_GRADE = 'max10_selected_grade_v1';
@@ -205,6 +207,9 @@ export function App() {
   const [showStoreModal, setShowStoreModal] = useState<boolean>(false);
   const [showPricingModal, setShowPricingModal] = useState<boolean>(false);
   const [showAchievementsModal, setShowAchievementsModal] = useState<boolean>(false);
+  const [showHolidayGiftModal, setShowHolidayGiftModal] = useState<boolean>(false);
+  const [holidayGiftInitialId, setHolidayGiftInitialId] = useState<HolidayId | undefined>(undefined);
+  const [isExactHolidayToday, setIsExactHolidayToday] = useState<boolean>(false);
   const [pricingInitialState, setPricingInitialState] = useState<{
     initialPlan?: 'plus' | 'premium';
     initialStep?: 'plans' | 'checkout';
@@ -221,8 +226,9 @@ export function App() {
     }
   }, [isDark]);
 
-  // Sync registered teacher classes from backend
+  // Purge legacy auto-created class groups ("Nhóm Học Tập Chính Thức") & sync registered teacher classes from backend
   useEffect(() => {
+    purgeUnrelatedLegacyClassGroups();
     fetch('/api/classes/registered')
       .then((r) => r.json())
       .then((data) => {
@@ -483,6 +489,37 @@ export function App() {
     } catch (e) {}
   }, [userDob]);
 
+  // Auto-detect Vietnamese Women's Day (8/3, 20/10) and Vietnamese Teachers' Day (20/11) + manual trigger listener
+  useEffect(() => {
+    const checkHoliday = () => {
+      const today = new Date();
+      const activeHoliday = detectActiveHoliday(today);
+      if (activeHoliday) {
+        setIsExactHolidayToday(true);
+        setHolidayGiftInitialId(activeHoliday.id);
+        const key = `max10_holiday_gift_shown_${today.getFullYear()}_${activeHoliday.id}`;
+        try {
+          if (!localStorage.getItem(key)) {
+            localStorage.setItem(key, 'true');
+            setShowHolidayGiftModal(true);
+          }
+        } catch {}
+      }
+    };
+    checkHoliday();
+
+    const handleOpenHolidayEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ holidayId?: HolidayId }>;
+      if (custom.detail?.holidayId) {
+        setHolidayGiftInitialId(custom.detail.holidayId);
+      }
+      setIsExactHolidayToday(Boolean(detectActiveHoliday()));
+      setShowHolidayGiftModal(true);
+    };
+    window.addEventListener('max10_open_holiday_gift', handleOpenHolidayEvent);
+    return () => window.removeEventListener('max10_open_holiday_gift', handleOpenHolidayEvent);
+  }, []);
+
   // Select background theme
   const handleSelectTheme = (theme: BackgroundTheme) => {
     setActiveTheme(theme);
@@ -500,6 +537,7 @@ export function App() {
   const handleLogout = () => {
     localStorage.removeItem(STORAGE_KEY_AUTH_USER);
     setCurrentUser(null);
+    setActiveTab('chat');
     setShowAuthModal(true);
   };
 
@@ -663,6 +701,7 @@ export function App() {
           onOpenPricingModal={handleOpenPricingModal}
           isAdmin={isAdmin}
           onOpenAchievementsModal={() => setShowAchievementsModal(true)}
+          onLogout={handleLogout}
         />
       )}
 
@@ -940,6 +979,7 @@ export function App() {
                 currentUser={currentUser}
                 onNavigateToTab={(tab) => setActiveTab(tab)}
                 onOpenAuthModal={() => setShowAuthModal(true)}
+                onLogout={handleLogout}
                 onOpenConversation={(type, targetId) => {
                   try {
                     localStorage.setItem(
@@ -1094,6 +1134,17 @@ export function App() {
         isTeacher={currentUser?.role === 'teacher'}
         isDark={isDark}
         onClaimBirthdayReward={handleClaimBirthdayReward}
+      />
+
+      {/* 12. Holiday Flower & Random Gift Modal (8/3, 20/10, 20/11) */}
+      <HolidayGiftAnimationModal
+        isOpen={showHolidayGiftModal}
+        onClose={() => setShowHolidayGiftModal(false)}
+        userName={currentUser?.name || userName}
+        isTeacher={currentUser?.role === 'teacher'}
+        isDark={isDark}
+        initialHolidayId={holidayGiftInitialId}
+        isExactHolidayToday={isExactHolidayToday}
       />
     </div>
   );

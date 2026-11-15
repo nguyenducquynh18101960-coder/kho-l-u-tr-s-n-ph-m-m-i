@@ -30,6 +30,8 @@ import {
   Sliders,
   Trophy,
   Flame,
+  LogOut,
+  Flower2,
 } from 'lucide-react';
 import { GradeLevel, ChatSession } from '../../types';
 import { BackgroundTheme } from '../../types/theme';
@@ -70,6 +72,7 @@ interface SidebarProps {
   isFullscreen?: boolean;
   unreadGroupMessagesCount?: number;
   onOpenAchievementsModal?: () => void;
+  onLogout?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -104,6 +107,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isFullscreen = false,
   unreadGroupMessagesCount = 0,
   onOpenAchievementsModal,
+  onLogout,
 }) => {
   if (isFullscreen) {
     return null;
@@ -535,11 +539,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </p>
                 </div>
               </div>
-              <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
-                {isAdmin ? 'Quản trị' : currentUser ? (currentUser.role === 'teacher' ? 'Thầy cô' : 'Học sinh') : 'Đăng nhập'}
-              </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                  {isAdmin ? 'Quản trị' : currentUser ? (currentUser.role === 'teacher' ? 'Thầy cô' : 'Học sinh') : 'Đăng nhập'}
+                </span>
+                {currentUser && onLogout && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onLogout();
+                    }}
+                    className="p-1 rounded-lg text-rose-500 hover:bg-rose-500/15 transition-colors cursor-pointer"
+                    title="Đăng xuất tài khoản"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
           )}
+
+          {/* Holiday Flower & Gift Celebration Quick Trigger (8/3 · 20/10 · 20/11) */}
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('max10_open_holiday_gift'))}
+            className={`w-full mb-2 p-2 rounded-xl border flex items-center justify-between text-xs font-bold transition-all cursor-pointer ${
+              isDark
+                ? 'bg-rose-950/20 border-rose-500/30 text-rose-300 hover:bg-rose-950/35'
+                : 'bg-rose-50/70 border-rose-200 text-rose-700 hover:bg-rose-100/70'
+            }`}
+            title="Hiệu ứng tặng hoa & quà ngẫu nhiên ngày 8/3, 20/10 và 20/11"
+          >
+            <span className="flex items-center gap-1.5 truncate">
+              <Flower2 className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+              <span className="truncate">Quà Lễ 8/3 · 20/10 · 20/11</span>
+            </span>
+            <span className="text-[10px] font-extrabold shrink-0">Mở quà</span>
+          </button>
 
           {/* Upgrade Plan Button (User requirement: Gói Plus 100k, Gói Premium 500k) */}
           {onOpenPricingModal && (

@@ -3816,6 +3816,63 @@ Yêu cầu kịch bản video gồm:
     res.json({ success: true, entries: db.registeredClasses });
   });
 
+  // Exam Library Resources (PDF / Image sample exams uploaded by teachers)
+  const EXAM_RESOURCES_DB_PATH = path.resolve(process.cwd(), "exam_resources_db.json");
+
+  function loadExamResourcesDb(): any[] {
+    try {
+      if (fs.existsSync(EXAM_RESOURCES_DB_PATH)) {
+        const parsed = JSON.parse(fs.readFileSync(EXAM_RESOURCES_DB_PATH, "utf-8"));
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  }
+
+  function saveExamResourcesDb(list: any[]) {
+    try {
+      fs.writeFileSync(EXAM_RESOURCES_DB_PATH, JSON.stringify(list, null, 2), "utf-8");
+    } catch (e) {
+      console.warn("Could not save exam_resources_db.json:", e);
+    }
+  }
+
+  app.get("/api/exam-resources", (_req, res) => {
+    const resources = loadExamResourcesDb();
+    res.json({ success: true, resources });
+  });
+
+  app.post("/api/exam-resources", (req, res) => {
+    try {
+      const resource = req.body;
+      if (!resource || !resource.id || !resource.title || !resource.fileDataUrl) {
+        return res.status(400).json({ success: false, error: "Thiếu dữ liệu tệp đề thi!" });
+      }
+      const list = loadExamResourcesDb().filter((r: any) => r.id !== resource.id);
+      list.unshift(resource);
+      saveExamResourcesDb(list);
+      res.json({ success: true, resource, resources: list });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "Server error" });
+    }
+  });
+
+  app.delete("/api/exam-resources/:id", (req, res) => {
+    const { id } = req.params;
+    const list = loadExamResourcesDb().filter((r: any) => r.id !== id);
+    saveExamResourcesDb(list);
+    res.json({ success: true, resources: list });
+  });
+
+  app.post("/api/exam-resources/:id/download", (req, res) => {
+    const { id } = req.params;
+    const list = loadExamResourcesDb().map((r: any) =>
+      r.id === id ? { ...r, downloadCount: (r.downloadCount || 0) + 1 } : r
+    );
+    saveExamResourcesDb(list);
+    res.json({ success: true });
+  });
+
   // Update presence status (online, dnd, gaming, offline)
   app.post("/api/users/status", (req, res) => {
     const { userId, status } = req.body;
@@ -4284,26 +4341,68 @@ Yêu cầu kịch bản video gồm:
   // STUDY GROUPS MANAGEMENT & SEARCH (LIKE ZALO)
   // (User Requested: "nhóm khi tạo chỉ bạn và bạn mới có thể thêm người vào thêm bạn bè hoặc tìm nhóm như zalo")
   // ==========================================
+  const isLegacyUnrelatedGroup = (g: any) => {
+    if (!g || !g.id) return true;
+    if (g.isCustomClassGroup) return false;
+    const name = (g.name || "").toString();
+    if (
+      g.id.startsWith("default-") ||
+      g.createdBy === "system" ||
+      g.id === "grp-noi-chuyen" ||
+      g.id === "grp-dai-hoi-do-an" ||
+      g.id === "grp-gia-dinh" ||
+      (g.id.startsWith("class-group-") && name.includes("Nhóm Học Tập Chính Thức"))
+    ) {
+      return true;
+    }
+    return false;
+  };
+
   app.get("/api/groups", (req, res) => {
     const q = ((req.query.search as string) || "").trim().toLowerCase();
     const db = loadSocialDb();
     if (!db.groups) db.groups = [];
 
-    let result = db.groups;
+    const cleanedGroups = db.groups.filter((g: any) => !isLegacyUnrelatedGroup(g));
+    if (cleanedGroups.length !== db.groups.length) {
+      db.groups = cleanedGroups;
+      saveSocialDb(db);
+    }
+
+    let result = cleanedGroups;
     if (q) {
       result = result.filter(
         (g: any) =>
           (g.name && g.name.toLowerCase().includes(q)) ||
           (g.code && g.code.toLowerCase().includes(q)) ||
           (g.subject && g.subject.toLowerCase().includes(q)) ||
-          (g.description && g.description.toLowerCase().includes(q))
+          (g.description && g.description.toLowerCase().includes(q)) ||
+          (g.classCode && g.classCode.toLowerCase().includes(q))
       );
     }
     res.json({ success: true, groups: result });
   });
 
   app.post("/api/groups", (req, res) => {
-    const { name, description, grade, subject, avatarIcon, createdBy, createdByName, creatorAvatar, code, onlyAdminCanAdd } = req.body;
+    const {
+      name,
+      description,
+      grade,
+      subject,
+      avatarIcon,
+      createdBy,
+      createdByName,
+      creatorAvatar,
+      code,
+      onlyAdminCanAdd,
+      isClassGroup,
+      isCustomClassGroup,
+      classCode,
+      studentCapacity,
+      maxMembers,
+      homeroomTeacherId,
+      homeroomTeacherName,
+    } = req.body;
     if (!name || !createdBy) {
       return res.status(400).json({ success: false, error: "Tên nhóm và người tạo không được để trống" });
     }
@@ -4332,13 +4431,20 @@ Yêu cầu kịch bản video gồm:
       grade: grade || "Lớp 9",
       subject: subject || "Toán",
       avatarIcon: avatarIcon || "📚",
-      createdAt: Date.now(),
+      createdAt: req.body.createdAt || Date.now(),
       createdBy,
       createdByName: createdByName || "Bạn",
       code: groupCode,
       onlyAdminCanAdd: onlyAdminCanAdd !== undefined ? onlyAdminCanAdd : true,
       members: initialMembers,
-      mutedUsers: {},
+      mutedUsers: req.body.mutedUsers || {},
+      ...(isClassGroup ? { isClassGroup: true } : {}),
+      ...(isCustomClassGroup ? { isCustomClassGroup: true } : {}),
+      ...(classCode ? { classCode } : {}),
+      ...(typeof studentCapacity === "number" ? { studentCapacity } : {}),
+      ...(typeof maxMembers === "number" ? { maxMembers } : {}),
+      ...(homeroomTeacherId ? { homeroomTeacherId } : {}),
+      ...(homeroomTeacherName ? { homeroomTeacherName } : {}),
     };
 
     const idx = db.groups.findIndex((g: any) => g.id === groupId);
@@ -4350,6 +4456,18 @@ Yêu cầu kịch bản video gồm:
     saveSocialDb(db);
 
     res.json({ success: true, group: newGroup });
+  });
+
+  app.delete("/api/groups/:id", (req, res) => {
+    const groupId = req.params.id;
+    const db = loadSocialDb();
+    if (!db.groups) db.groups = [];
+    db.groups = db.groups.filter((g: any) => g.id !== groupId);
+    if (db.groupMessages && db.groupMessages[groupId]) {
+      delete db.groupMessages[groupId];
+    }
+    saveSocialDb(db);
+    res.json({ success: true, deletedId: groupId });
   });
 
   app.post("/api/groups/:id/add-member", (req, res) => {

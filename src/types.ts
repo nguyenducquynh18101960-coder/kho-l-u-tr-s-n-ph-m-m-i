@@ -254,6 +254,13 @@ export interface ChatGroup {
   onlyAdminCanAdd?: boolean; // When true: only group creator / admin can add members (User requested: "nhóm khi tạo chỉ bạn và bạn mới có thể thêm người vào")
   isPublic?: boolean;
   pinnedNotice?: string;
+  isClassGroup?: boolean;
+  isCustomClassGroup?: boolean;
+  classCode?: string;
+  studentCapacity?: number;
+  maxMembers?: number;
+  homeroomTeacherId?: string;
+  homeroomTeacherName?: string;
 }
 
 export type UserPresenceStatus = 'online' | 'dnd' | 'gaming' | 'offline';

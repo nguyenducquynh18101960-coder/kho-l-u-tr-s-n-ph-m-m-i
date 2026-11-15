@@ -62,6 +62,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // Form states
   const [role, setRole] = useState<'student' | 'teacher'>('student');
   const [name, setName] = useState<string>('');
+  const [teacherTitle, setTeacherTitle] = useState<'Cô' | 'Thầy'>('Cô');
+  const [teacherPhone, setTeacherPhone] = useState<string>('');
+  const [teacherEmail, setTeacherEmail] = useState<string>('');
+  const [teacherVerifiedCommit, setTeacherVerifiedCommit] = useState<boolean>(true);
   const [teacherRoleType, setTeacherRoleType] = useState<TeacherRoleType>('both');
   const [teachingSubject, setTeachingSubject] = useState<string>(SUBJECT_LIST[0]);
   const [homeroomClass, setHomeroomClass] = useState<ClassCode>('9D1');
@@ -203,6 +207,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     if (role === 'teacher') {
+      if (!teacherVerifiedCommit) {
+        setNotification('Vui lòng tích xác nhận hồ sơ Giáo viên thật trước khi mở lớp!');
+        return;
+      }
       if ((teacherRoleType === 'subject' || teacherRoleType === 'both') && teachingClasses.length === 0) {
         setNotification('Vui lòng chọn ít nhất 1 lớp giảng dạy!');
         return;
@@ -227,16 +235,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             : teachingClasses
           : undefined;
 
+      const resolvedTeacherName =
+        role === 'teacher' &&
+        !finalName.toLowerCase().startsWith('cô ') &&
+        !finalName.toLowerCase().startsWith('thầy ')
+          ? `${teacherTitle} ${finalName}`
+          : finalName;
+
       const user: UserAccount = {
         id: 'real-' + (role === 'teacher' ? 'gv-' : 'hs-') + (cleanSlug || 'user') + '-' + Date.now().toString(36),
-        name: finalName,
-        email: `${cleanSlug || 'user'}@max10.edu.vn`,
+        name: resolvedTeacherName,
+        email: role === 'teacher' && teacherEmail.trim() ? teacherEmail.trim() : `${cleanSlug || 'user'}@max10.edu.vn`,
+        phone: role === 'teacher' && teacherPhone.trim() ? teacherPhone.trim() : undefined,
         avatar:
           role === 'teacher'
-            ? `https://api.dicebear.com/7.x/personas/svg?seed=${encodeURIComponent(finalName)}`
+            ? `https://api.dicebear.com/7.x/personas/svg?seed=${encodeURIComponent(resolvedTeacherName)}`
             : `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(finalName)}`,
-        gender: authGender,
-        dob: authDob,
+        gender: role === 'teacher' ? (teacherTitle === 'Cô' ? 'female' : 'male') : authGender,
+        dob: role === 'student' ? authDob : undefined,
         provider: 'guest',
         role: role,
         createdAt: new Date().toLocaleDateString('vi-VN'),
@@ -245,6 +261,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         isSuperAdmin: false,
         // Thông tin xác thực giáo viên / học sinh thật
         isVerifiedTeacher: role === 'teacher' ? true : undefined,
+        teacherTitle: role === 'teacher' ? teacherTitle : undefined,
         teacherRoleType: role === 'teacher' ? teacherRoleType : undefined,
         teachingSubject: role === 'teacher' && (teacherRoleType === 'subject' || teacherRoleType === 'both') ? teachingSubject : role === 'teacher' ? 'Chủ nhiệm lớp' : undefined,
         homeroomClass: role === 'teacher' && (teacherRoleType === 'homeroom' || teacherRoleType === 'both') ? homeroomClass : undefined,
@@ -253,7 +270,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         studentClass: role === 'student' && studentClass ? studentClass : undefined,
       };
 
-      localStorage.setItem('max10_user_dob_v1', authDob);
+      if (role === 'student') {
+        localStorage.setItem('max10_user_dob_v1', authDob);
+      }
       localStorage.setItem(STORAGE_KEY_AUTH_USER, JSON.stringify(user));
 
       if (role === 'teacher') {
@@ -519,121 +538,292 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   }}
                   className="space-y-4"
                 >
-                  {/* 2 Role Cards */}
-                  <div className="space-y-1.5 text-left">
-                    <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300">
-                      Chọn vai trò của bạn:
-                    </label>
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <div
-                        onClick={() => setRole('student')}
-                        className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
-                          role === 'student'
-                            ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-100 shadow-sm ring-2 ring-emerald-500/20'
-                            : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-850 hover:border-slate-300 dark:hover:border-zinc-700 text-slate-700 dark:text-zinc-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className={`p-2 rounded-xl ${role === 'student' ? 'bg-emerald-500 text-white shadow-xs' : 'bg-slate-100 dark:bg-zinc-800 text-emerald-600'}`}>
-                            <GraduationCap className="w-5 h-5" />
-                          </div>
-                          {role === 'student' && (
-                            <div className="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center">
-                              <Check className="w-3.5 h-3.5 stroke-[3]" />
-                            </div>
-                          )}
+                  {/* Distinct Portal Switcher: Cổng Học Sinh vs Cổng Giáo Viên */}
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRole('student');
+                        setNotification('');
+                      }}
+                      className={`p-3.5 rounded-2xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between ${
+                        role === 'student'
+                          ? 'border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/35 text-emerald-950 dark:text-emerald-100 shadow-sm'
+                          : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-slate-300 text-slate-700 dark:text-zinc-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className={`p-2 rounded-xl ${role === 'student' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-zinc-800 text-emerald-600'}`}>
+                          <GraduationCap className="w-5 h-5" />
                         </div>
-                        <div>
-                          <div className="font-extrabold text-sm flex items-center gap-1.5">
-                            Học Sinh
-                            <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-bold">THCS</span>
-                          </div>
-                          <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1 leading-snug">
-                            Vào lớp học thực tế, nộp bài tập, xem lịch thi chung & hỏi Gia sư AI.
-                          </p>
-                        </div>
+                        {role === 'student' && (
+                          <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-300">Đang chọn ✓</span>
+                        )}
                       </div>
+                      <div className="font-extrabold text-sm">Cổng Học Sinh</div>
+                      <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5 leading-snug">
+                        Vào lớp học thực tế, tải đề thi, nộp bài tập & hỏi Gia sư AI.
+                      </p>
+                    </button>
 
-                      <div
-                        onClick={() => setRole('teacher')}
-                        className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
-                          role === 'teacher'
-                            ? 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/30 text-indigo-900 dark:text-indigo-100 shadow-sm ring-2 ring-indigo-500/20'
-                            : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-850 hover:border-slate-300 dark:hover:border-zinc-700 text-slate-700 dark:text-zinc-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className={`p-2 rounded-xl ${role === 'teacher' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 dark:bg-zinc-800 text-indigo-600'}`}>
-                            <School className="w-5 h-5" />
-                          </div>
-                          {role === 'teacher' && (
-                            <div className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center">
-                              <Check className="w-3.5 h-3.5 stroke-[3]" />
-                            </div>
-                          )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRole('teacher');
+                        setNotification('');
+                      }}
+                      className={`p-3.5 rounded-2xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between ${
+                        role === 'teacher'
+                          ? 'border-indigo-600 bg-indigo-50/80 dark:bg-indigo-950/35 text-indigo-950 dark:text-indigo-100 shadow-sm'
+                          : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-slate-300 text-slate-700 dark:text-zinc-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className={`p-2 rounded-xl ${role === 'teacher' ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-zinc-800 text-indigo-600'}`}>
+                          <School className="w-5 h-5" />
                         </div>
-                        <div>
-                          <div className="font-extrabold text-sm flex items-center gap-1.5">
-                            Đăng Ký Giáo Viên
-                            <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 font-bold">Xác thực</span>
-                          </div>
-                          <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1 leading-snug">
-                            Mở lớp học thật, phân quyền GV bộ môn / chủ nhiệm & chấm bài.
-                          </p>
-                        </div>
+                        {role === 'teacher' && (
+                          <span className="text-[10px] font-black text-indigo-700 dark:text-indigo-300">Hồ sơ GV ✓</span>
+                        )}
                       </div>
-                    </div>
+                      <div className="font-extrabold text-sm">Cổng Giáo Viên</div>
+                      <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5 leading-snug">
+                        Hồ sơ chuyên môn xác thực để mở lớp, giao đề thi & chấm bài.
+                      </p>
+                    </button>
                   </div>
 
-                  {/* Name Input */}
-                  <div className="text-left">
-                    <label className="block text-xs font-bold mb-1.5 text-slate-700 dark:text-zinc-300">
-                      {role === 'teacher' ? 'Họ và tên Thầy / Cô giáo (Tên thật):' : 'Họ và tên Học sinh (Tên thật):'}
-                    </label>
-                    <div className="relative">
-                      <User className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-                      <input
-                        type="text"
-                        required
-                        autoFocus
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder={
-                          role === 'teacher'
-                            ? 'Nhập họ tên đầy đủ của Thầy / Cô...'
-                            : 'Nhập họ tên thật của bạn...'
-                        }
-                        className={`w-full pl-10 pr-3 py-2.5 rounded-xl text-sm font-semibold border outline-hidden transition-all ${
-                          isDark
-                            ? 'bg-zinc-800 border-zinc-700 text-white placeholder-zinc-500 focus:border-emerald-500'
-                            : 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-400 focus:border-emerald-600'
-                        }`}
-                      />
-                    </div>
-                  </div>
-
-                  {/* TEACHER VERIFICATION & ROLE DETAILS */}
-                  {role === 'teacher' && (
-                    <div className={`p-4 rounded-2xl border space-y-3.5 text-left ${isDark ? 'bg-indigo-950/20 border-indigo-500/30' : 'bg-indigo-50/70 border-indigo-200'}`}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-indigo-700 dark:text-indigo-300 uppercase tracking-wide">
-                          🏫 Thông tin Xác thực Giáo viên
+                  {/* ======================================================== */}
+                  {/* PORTAL A: GIAO DIỆN ĐĂNG KÝ HỌC SINH (ĐƠN GIẢN, TRẺ TRUNG) */}
+                  {/* ======================================================== */}
+                  {role === 'student' ? (
+                    <div className={`p-4 rounded-2xl border space-y-4 text-left ${isDark ? 'bg-emerald-950/15 border-emerald-500/25' : 'bg-emerald-50/40 border-emerald-200'}`}>
+                      <div className="flex items-center justify-between pb-2 border-b border-emerald-500/15">
+                        <span className="text-xs font-black text-emerald-700 dark:text-emerald-300">
+                          Hồ Sơ Nhanh Học Sinh THCS
                         </span>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 font-bold">
-                          Chỉ GV thật mới tạo được lớp
-                        </span>
+                        <span className="text-[11px] text-slate-500 dark:text-zinc-400">Bước 1 / Học tập</span>
                       </div>
 
-                      {/* Phân biệt vai trò: Giáo viên bộ môn / Giáo viên chủ nhiệm / Cả hai */}
                       <div>
                         <label className="block text-xs font-bold mb-1.5 text-slate-700 dark:text-zinc-300">
-                          Thầy / Cô đảm nhận vai trò nào?
+                          Họ và tên Học sinh (Tên thật):
+                        </label>
+                        <div className="relative">
+                          <User className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+                          <input
+                            type="text"
+                            required
+                            autoFocus
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            placeholder="VD: Nguyễn Minh Anh"
+                            className={`w-full pl-10 pr-3 py-2.5 rounded-xl text-sm font-semibold border outline-hidden transition-all ${
+                              isDark
+                                ? 'bg-zinc-800 border-zinc-700 text-white placeholder-zinc-500 focus:border-emerald-500'
+                                : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-emerald-600'
+                            }`}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold mb-1.5 text-slate-700 dark:text-zinc-300">
+                          Lớp đang theo học (chỉ lớp đã có Giáo viên thật mở):
+                        </label>
+                        <select
+                          value={studentClass}
+                          onChange={(e) => setStudentClass(e.target.value as ClassCode | '')}
+                          className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold border outline-none ${
+                            isDark ? 'bg-zinc-900 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                          }`}
+                        >
+                          <option value="">
+                            {activeClassCodes.length > 0
+                              ? '-- Chọn lớp đang theo học --'
+                              : '-- Chưa có giáo viên mở lớp (vẫn có thể tự học) --'}
+                          </option>
+                          {ALL_CLASSES_LIST.map((c) => {
+                            const hasTeacher = activeClassCodes.includes(c);
+                            return (
+                              <option key={c} value={c}>
+                                Lớp {c} {hasTeacher ? '✓ (Đã có Giáo viên mở lớp)' : '(Chưa có GV đăng ký)'}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-bold mb-1.5 text-slate-700 dark:text-zinc-300">
+                            Giới tính:
+                          </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setAuthGender('male')}
+                              className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                authGender === 'male'
+                                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                                  : 'bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-700'
+                              }`}
+                            >
+                              <span>👦</span>
+                              <span>Nam</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setAuthGender('female')}
+                              className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                authGender === 'female'
+                                  ? 'bg-pink-600 text-white border-pink-600 shadow-xs'
+                                  : 'bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-700'
+                              }`}
+                            >
+                              <span>👧</span>
+                              <span>Nữ</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold mb-1.5 text-slate-700 dark:text-zinc-300">
+                            🎂 Ngày sinh (nhận quà sinh nhật):
+                          </label>
+                          <input
+                            type="date"
+                            value={authDob}
+                            onChange={(e) => setAuthDob(e.target.value)}
+                            className={`w-full px-3 py-2 rounded-xl text-xs font-bold border outline-none ${
+                              isDark
+                                ? 'bg-zinc-800 border-zinc-700 text-white focus:border-amber-500'
+                                : 'bg-white border-slate-300 text-slate-900 focus:border-amber-500'
+                            }`}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* ================================================================== */
+                    /* PORTAL B: HỒ SƠ ĐĂNG KÝ GIÁO VIÊN XÁC THỰC (KHÁC BIỆT HOÀN TOÀN) */
+                    /* ================================================================== */
+                    <div className={`p-4 sm:p-5 rounded-2xl border-2 space-y-4 text-left ${isDark ? 'bg-[#11182c] border-indigo-500/40' : 'bg-slate-50 border-indigo-300'}`}>
+                      {/* Distinct Academic Faculty Header */}
+                      <div className={`p-3 rounded-xl border flex items-center justify-between gap-2 ${isDark ? 'bg-indigo-950/50 border-indigo-500/30' : 'bg-indigo-600 text-white border-indigo-600'}`}>
+                        <div>
+                          <div className="text-xs font-black tracking-tight">
+                            HỒ SƠ GIẢNG VIÊN & XÁC THỰC CHUYÊN MÔN
+                          </div>
+                          <div className={`text-[11px] mt-0.5 ${isDark ? 'text-indigo-200' : 'text-indigo-100'}`}>
+                            Thiết kế riêng cho Thầy/Cô · Mở lớp thật & Thư viện Đề thi
+                          </div>
+                        </div>
+                        <School className="w-6 h-6 shrink-0 opacity-90" />
+                      </div>
+
+                      {/* 1. Danh xưng + Họ tên Giảng viên */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
+                            Danh xưng:
+                          </label>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {(['Cô', 'Thầy'] as const).map((t) => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => setTeacherTitle(t)}
+                                className={`py-2 rounded-xl border text-xs font-extrabold cursor-pointer transition-all ${
+                                  teacherTitle === t
+                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                    : isDark
+                                    ? 'bg-zinc-800 border-zinc-700 text-zinc-300'
+                                    : 'bg-white border-slate-300 text-slate-700'
+                                }`}
+                              >
+                                {t} giáo
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
+                            Họ và tên Giáo viên (Tên thật):
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            autoFocus
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            placeholder="VD: Nguyễn Thị Minh Thu"
+                            className={`w-full px-3.5 py-2 rounded-xl text-sm font-semibold border outline-hidden ${
+                              isDark
+                                ? 'bg-zinc-800 border-zinc-700 text-white placeholder-zinc-500 focus:border-indigo-500'
+                                : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-indigo-600'
+                            }`}
+                          />
+                        </div>
+                      </div>
+
+                      {/* 2. Đơn vị công tác & Thông tin liên hệ */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div>
+                          <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
+                            Trường THCS công tác:
+                          </label>
+                          <input
+                            type="text"
+                            value={schoolName}
+                            onChange={(e) => setSchoolName(e.target.value)}
+                            placeholder="THCS Nguyễn Du"
+                            className={`w-full px-3 py-2 rounded-xl text-xs font-semibold border outline-none ${
+                              isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                            }`}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
+                            SĐT liên hệ (hiển thị cho PH/HS):
+                          </label>
+                          <input
+                            type="tel"
+                            value={teacherPhone}
+                            onChange={(e) => setTeacherPhone(e.target.value)}
+                            placeholder="09xx xxx xxx"
+                            className={`w-full px-3 py-2 rounded-xl text-xs font-semibold border outline-none ${
+                              isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                            }`}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
+                            Email công tác:
+                          </label>
+                          <input
+                            type="email"
+                            value={teacherEmail}
+                            onChange={(e) => setTeacherEmail(e.target.value)}
+                            placeholder="giaovien@truong.edu.vn"
+                            className={`w-full px-3 py-2 rounded-xl text-xs font-semibold border outline-none ${
+                              isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                            }`}
+                          />
+                        </div>
+                      </div>
+
+                      {/* 3. Phân biệt vai trò: Giáo viên bộ môn / Giáo viên chủ nhiệm / Cả hai */}
+                      <div>
+                        <label className="block text-xs font-bold mb-1.5 text-slate-700 dark:text-zinc-300">
+                          Chức vụ & Quyền hạn trên hệ thống:
                         </label>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           {[
-                            { id: 'subject' as const, label: 'Giáo viên bộ môn', sub: 'Dạy theo môn học' },
-                            { id: 'homeroom' as const, label: 'Giáo viên chủ nhiệm', sub: 'Quản lý toàn diện lớp' },
-                            { id: 'both' as const, label: 'Cả Bộ môn & Chủ nhiệm', sub: 'Phụ trách cả hai' },
+                            { id: 'subject' as const, label: 'Giáo viên bộ môn', sub: 'Dạy chuyên môn & up đề' },
+                            { id: 'homeroom' as const, label: 'Giáo viên chủ nhiệm', sub: 'Quản lý lớp & điểm danh' },
+                            { id: 'both' as const, label: 'Cả Bộ môn & Chủ nhiệm', sub: 'Toàn quyền phụ trách' },
                           ].map((opt) => (
                             <button
                               key={opt.id}
@@ -656,57 +846,58 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         </div>
                       </div>
 
-                      {/* Môn giảng dạy */}
-                      {(teacherRoleType === 'subject' || teacherRoleType === 'both') && (
-                        <div>
-                          <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
-                            Bộ môn giảng dạy:
-                          </label>
-                          <select
-                            value={teachingSubject}
-                            onChange={(e) => setTeachingSubject(e.target.value)}
-                            className={`w-full px-3 py-2 rounded-xl text-xs font-bold border outline-none ${
-                              isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
-                            }`}
-                          >
-                            {SUBJECT_LIST.map((s) => (
-                              <option key={s} value={s}>{s}</option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
+                      {/* 4. Bộ môn & Lớp chủ nhiệm */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {(teacherRoleType === 'subject' || teacherRoleType === 'both') && (
+                          <div>
+                            <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
+                              Bộ môn giảng dạy:
+                            </label>
+                            <select
+                              value={teachingSubject}
+                              onChange={(e) => setTeachingSubject(e.target.value)}
+                              className={`w-full px-3 py-2 rounded-xl text-xs font-bold border outline-none ${
+                                isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                              }`}
+                            >
+                              {SUBJECT_LIST.map((s) => (
+                                <option key={s} value={s}>{s}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
 
-                      {/* Lớp chủ nhiệm */}
-                      {(teacherRoleType === 'homeroom' || teacherRoleType === 'both') && (
-                        <div>
-                          <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
-                            Chọn Lớp Chủ Nhiệm (tạo lớp học thực tế trên hệ thống):
-                          </label>
-                          <select
-                            value={homeroomClass}
-                            onChange={(e) => {
-                              const next = e.target.value as ClassCode;
-                              setHomeroomClass(next);
-                              if (!teachingClasses.includes(next)) {
-                                setTeachingClasses((prev) => [...prev, next]);
-                              }
-                            }}
-                            className={`w-full px-3 py-2 rounded-xl text-xs font-bold border outline-none ${
-                              isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
-                            }`}
-                          >
-                            {ALL_CLASSES_LIST.map((c) => (
-                              <option key={c} value={c}>Lớp {c}</option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
+                        {(teacherRoleType === 'homeroom' || teacherRoleType === 'both') && (
+                          <div>
+                            <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
+                              Lớp Chủ Nhiệm (tạo lớp thật):
+                            </label>
+                            <select
+                              value={homeroomClass}
+                              onChange={(e) => {
+                                const next = e.target.value as ClassCode;
+                                setHomeroomClass(next);
+                                if (!teachingClasses.includes(next)) {
+                                  setTeachingClasses((prev) => [...prev, next]);
+                                }
+                              }}
+                              className={`w-full px-3 py-2 rounded-xl text-xs font-bold border outline-none ${
+                                isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                              }`}
+                            >
+                              {ALL_CLASSES_LIST.map((c) => (
+                                <option key={c} value={c}>Lớp {c}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
 
-                      {/* Các lớp giảng dạy bộ môn */}
+                      {/* 5. Các lớp giảng dạy bộ môn */}
                       {(teacherRoleType === 'subject' || teacherRoleType === 'both') && (
                         <div>
                           <label className="block text-xs font-bold mb-1.5 text-slate-700 dark:text-zinc-300">
-                            Chọn các lớp giảng dạy (6A1 - 9D6):
+                            Chọn các lớp trực tiếp giảng dạy (6A1 - 9D6):
                           </label>
                           <div className="grid grid-cols-6 gap-1.5">
                             {ALL_CLASSES_LIST.map((c) => {
@@ -732,102 +923,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         </div>
                       )}
 
-                      <div>
-                        <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
-                          Trường THCS đang công tác:
-                        </label>
+                      {/* 6. Cam kết tài khoản giáo viên thật */}
+                      <label className="flex items-start gap-2.5 text-xs cursor-pointer pt-1">
                         <input
-                          type="text"
-                          value={schoolName}
-                          onChange={(e) => setSchoolName(e.target.value)}
-                          placeholder="Ví dụ: THCS Nguyễn Du"
-                          className={`w-full px-3 py-2 rounded-xl text-xs font-semibold border outline-none ${
-                            isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
-                          }`}
+                          type="checkbox"
+                          checked={teacherVerifiedCommit}
+                          onChange={(e) => setTeacherVerifiedCommit(e.target.checked)}
+                          className="mt-0.5 w-4 h-4 accent-indigo-600 rounded"
                         />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* STUDENT CLASS SELECTION */}
-                  {role === 'student' && (
-                    <div className={`p-3.5 rounded-2xl border text-left ${isDark ? 'bg-zinc-800/60 border-zinc-700' : 'bg-slate-50 border-slate-200'}`}>
-                      <label className="block text-xs font-bold mb-1.5 text-slate-700 dark:text-zinc-300">
-                        🏫 Lớp học của bạn (chỉ các lớp có Thầy/Cô đăng ký mới có giáo viên phụ trách):
+                        <span className="text-slate-600 dark:text-zinc-300 leading-snug">
+                          Tôi xác nhận đăng ký với tư cách <strong>Giáo viên thật</strong> để mở lớp, duyệt bài tập và tải lên đề thi mẫu cho học sinh.
+                        </span>
                       </label>
-                      <select
-                        value={studentClass}
-                        onChange={(e) => setStudentClass(e.target.value as ClassCode | '')}
-                        className={`w-full px-3 py-2 rounded-xl text-xs font-bold border outline-none ${
-                          isDark ? 'bg-zinc-900 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
-                        }`}
-                      >
-                        <option value="">
-                          {activeClassCodes.length > 0
-                            ? '-- Chọn lớp đang theo học --'
-                            : '-- Chưa có giáo viên mở lớp (vẫn có thể học tự do) --'}
-                        </option>
-                        {ALL_CLASSES_LIST.map((c) => {
-                          const hasTeacher = activeClassCodes.includes(c);
-                          return (
-                            <option key={c} value={c}>
-                              Lớp {c} {hasTeacher ? '✓ (Đã có Giáo viên mở lớp)' : '(Chưa có GV đăng ký)'}
-                            </option>
-                          );
-                        })}
-                      </select>
                     </div>
                   )}
-
-                  {/* Gender Selector */}
-                  <div className="text-left">
-                    <label className="block text-xs font-bold mb-1.5 text-slate-700 dark:text-zinc-300">
-                      Giới tính:
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setAuthGender('male')}
-                        className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                          authGender === 'male'
-                            ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                            : 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-700'
-                        }`}
-                      >
-                        <span className="text-sm">👦</span>
-                        <span>Nam</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAuthGender('female')}
-                        className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                          authGender === 'female'
-                            ? 'bg-pink-600 text-white border-pink-600 shadow-xs'
-                            : 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-700'
-                        }`}
-                      >
-                        <span className="text-sm">👧</span>
-                        <span>Nữ</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Birthday */}
-                  <div className="text-left p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25">
-                    <label className="block text-xs font-bold mb-1.5 text-slate-800 dark:text-zinc-200">
-                      🎂 Ngày tháng năm sinh (để nhận bất ngờ sinh nhật):
-                    </label>
-                    <input
-                      type="date"
-                      value={authDob}
-                      onChange={(e) => setAuthDob(e.target.value)}
-                      className={`w-full px-3 py-2 rounded-xl text-xs font-bold border outline-none ${
-                        isDark
-                          ? 'bg-zinc-800 border-zinc-700 text-white focus:border-amber-500'
-                          : 'bg-white border-amber-300 text-slate-900 focus:border-amber-500'
-                      }`}
-                    />
-                  </div>
 
                   {/* Submit button */}
                   <button
@@ -842,9 +951,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <Check className="w-4 h-4 stroke-[3]" />
                     <span>
                       {loadingProvider === 'guest'
-                        ? 'Đang xác thực...'
+                        ? 'Đang xác thực hồ sơ...'
                         : role === 'teacher'
-                        ? 'Xác Thực & Mở Lớp Học Giáo Viên 🏫'
+                        ? 'Xác Thực Hồ Sơ Giáo Viên & Mở Lớp 🏫'
                         : 'Vào Học Ngay: Học Sinh 🚀'}
                     </span>
                   </button>

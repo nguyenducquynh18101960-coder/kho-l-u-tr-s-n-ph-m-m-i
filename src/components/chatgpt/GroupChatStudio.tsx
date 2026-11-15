@@ -76,7 +76,6 @@ import {
 } from '../../types';
 import { UserAccount, ADMIN_ID, ADMIN_NAME, ADMIN_EMAIL } from '../../types/auth';
 import {
-  INITIAL_GROUPS,
   INITIAL_GROUP_MESSAGES,
   DEFAULT_STUDENT_FRIENDS,
   DEFAULT_DIRECT_MESSAGES,
@@ -85,6 +84,14 @@ import { checkProfanity, calculateMuteDurationMinutes } from '../../utils/profan
 import { UserAvatarWithStatus, PRESENCE_STATUS_CONFIG } from './UserAvatarWithStatus';
 import { formatDolaMath } from '../../utils/dolaMathFormatter';
 import { VideoAudioCallModal, CallParticipant } from './VideoAudioCallModal';
+import {
+  ALL_CLASSES_LIST,
+  ClassCode,
+  purgeUnrelatedLegacyClassGroups,
+  isLegacyAutoCreatedClassGroup,
+  createOrUpdateCustomClassGroup,
+  deleteClassSeatingPlan,
+} from '../../data/classSystemData';
 
 /** Helper to strictly detect and exclude AI bots and assistants from friend search and peer discovery */
 export const isAiEntity = (member: { id?: string; name?: string; isAi?: boolean; role?: string }) => {
@@ -310,7 +317,9 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
   onToggleFullscreen,
   onExitFullscreen,
 }) => {
-  // Purge any stale fake seeded chats from old sessions
+  // Purge any stale fake seeded chats and legacy auto-created "Nhóm Học Tập Chính Thức" groups
+  const deletedGroupIdsRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     [
       'max10_study_groups_v4',
@@ -329,6 +338,24 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         localStorage.removeItem(k);
       } catch (e) {}
     });
+    const removed = purgeUnrelatedLegacyClassGroups();
+    if (removed > 0) {
+      setGroups((prev) => prev.filter((g) => !isLegacyAutoCreatedClassGroup(g)));
+    }
+
+    const onGroupsUpdated = () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY_GROUPS);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            setGroups(parsed.filter((g: ChatGroup) => !isLegacyAutoCreatedClassGroup(g) && !deletedGroupIdsRef.current.has(g.id)));
+          }
+        }
+      } catch (e) {}
+    };
+    window.addEventListener('max10_groups_updated', onGroupsUpdated);
+    return () => window.removeEventListener('max10_groups_updated', onGroupsUpdated);
   }, []);
 
   // Current logged in / active user representation
@@ -408,14 +435,15 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
   const [chatSearchText, setChatSearchText] = useState<string>('');
   const [sharedFilesTab, setSharedFilesTab] = useState<'media' | 'files'>('media');
 
-  // Groups list state: ONLY user created or joined groups (no fake groups)
+  // Groups list state: ONLY user/teacher explicitly created or joined groups (no fake or legacy auto-created groups)
   const [groups, setGroups] = useState<ChatGroup[]>(() => {
     try {
+      purgeUnrelatedLegacyClassGroups();
       const saved = localStorage.getItem(STORAGE_KEY_GROUPS);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.filter((g: ChatGroup) => g && g.id && !g.id.startsWith('default-') && g.createdBy !== 'system' && g.id !== 'grp-noi-chuyen' && g.id !== 'grp-dai-hoi-do-an' && g.id !== 'grp-gia-dinh');
+          return parsed.filter((g: ChatGroup) => !isLegacyAutoCreatedClassGroup(g));
         }
       }
     } catch (e) {
@@ -719,12 +747,17 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       if (res.ok) {
         const data = await res.json();
         if (data && data.success && Array.isArray(data.groups)) {
-          setServerGroups(data.groups);
-          // Merge with local groups
+          const cleanServerGroups = data.groups.filter(
+            (g: ChatGroup) => !isLegacyAutoCreatedClassGroup(g) && !deletedGroupIdsRef.current.has(g.id)
+          );
+          setServerGroups(cleanServerGroups);
+          // Merge with local groups cleanly
           setGroups((prev) => {
             const map = new Map<string, ChatGroup>();
-            data.groups.forEach((g: ChatGroup) => map.set(g.id, g));
-            prev.forEach((g: ChatGroup) => map.set(g.id, g));
+            cleanServerGroups.forEach((g: ChatGroup) => map.set(g.id, g));
+            prev
+              .filter((g) => !isLegacyAutoCreatedClassGroup(g) && !deletedGroupIdsRef.current.has(g.id))
+              .forEach((g: ChatGroup) => map.set(g.id, g));
             return Array.from(map.values());
           });
         }
@@ -1103,15 +1136,24 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     const targetGroup = groups.find((g) => g.id === groupId);
     if (!targetGroup) return;
 
+    deletedGroupIdsRef.current.add(groupId);
     const remainingGroups = groups.filter((g) => g.id !== groupId);
-    const finalGroups = remainingGroups.length > 0 ? remainingGroups : INITIAL_GROUPS;
 
-    setGroups(finalGroups);
+    setGroups(remainingGroups);
+    setServerGroups((prev) => prev.filter((g) => g.id !== groupId));
     try {
-      localStorage.setItem(STORAGE_KEY_GROUPS, JSON.stringify(finalGroups));
+      localStorage.setItem(STORAGE_KEY_GROUPS, JSON.stringify(remainingGroups));
     } catch (e) {
       console.warn('Lỗi cập nhật nhóm sau khi xóa', e);
     }
+
+    if (targetGroup.isClassGroup && targetGroup.classCode) {
+      deleteClassSeatingPlan(targetGroup.classCode as ClassCode);
+    }
+
+    fetch(`/api/groups/${encodeURIComponent(groupId)}`, {
+      method: 'DELETE',
+    }).catch(() => {});
 
     // Clean messages
     setGroupMessages((prev) => {
@@ -1126,7 +1168,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     });
 
     if (activeGroupId === groupId) {
-      setActiveGroupId(finalGroups[0]?.id || 'group-nguyendu-9a');
+      setActiveGroupId(remainingGroups[0]?.id || '');
     }
 
     setGroupToDelete(null);
@@ -1135,11 +1177,27 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
   };
 
   // New Group Form State
+  const isVerifiedTeacherOrAdmin = Boolean(
+    currentUser &&
+      ((currentUser.role === 'teacher' && currentUser.isVerifiedTeacher !== false) ||
+        currentUser.role === 'admin' ||
+        currentUser.isSuperAdmin)
+  );
+  const [newGroupMode, setNewGroupMode] = useState<'class_homeroom' | 'study'>(() =>
+    isVerifiedTeacherOrAdmin ? 'class_homeroom' : 'study'
+  );
   const [newGroupName, setNewGroupName] = useState<string>('');
   const [newGroupSubject, setNewGroupSubject] = useState<string>('Toán học');
   const [newGroupGrade, setNewGroupGrade] = useState<GradeLevel>(currentGrade);
-  const [newGroupDesc, setNewGroupDesc] = useState<string>('Nhóm học tập & thảo luận điểm 10 THCS Nguyễn Du');
-  const [newGroupIcon, setNewGroupIcon] = useState<string>('📚');
+  const [newGroupDesc, setNewGroupDesc] = useState<string>('');
+  const [newGroupIcon, setNewGroupIcon] = useState<string>('🏫');
+  const [newClassCode, setNewClassCode] = useState<ClassCode>(
+    (currentUser?.homeroomClass as ClassCode) || '9D1'
+  );
+  const [newClassStudentCount, setNewClassStudentCount] = useState<number>(36);
+  const [newSeatingRows, setNewSeatingRows] = useState<number>(5);
+  const [newSeatingCols, setNewSeatingCols] = useState<number>(4);
+  const [newSeatsPerDesk, setNewSeatsPerDesk] = useState<1 | 2>(2);
 
   // Input & Sending State
   const [inputMessage, setInputMessage] = useState<string>('');
@@ -1544,10 +1602,75 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     }
   };
 
-  // Create a new group (User requested: "nhóm khi tạo chỉ bạn và bạn mới có thể thêm người vào")
+  // Create a new group (Teacher can create named Class Group + Seating Chart; others create study group)
   const handleCreateGroup = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGroupName.trim()) return;
+
+    if (isVerifiedTeacherOrAdmin && newGroupMode === 'class_homeroom') {
+      const { groupId, seatingPlan } = createOrUpdateCustomClassGroup({
+        classCode: newClassCode,
+        customClassName: newGroupName.trim(),
+        studentCapacity: newClassStudentCount,
+        rows: newSeatingRows,
+        cols: newSeatingCols,
+        seatsPerDesk: newSeatsPerDesk,
+        teacher: {
+          id: activeUserId,
+          name: activeUserName,
+          avatar: activeUserAvatar,
+          email: currentUser?.email,
+          phone: currentUser?.phone,
+          schoolName: currentUser?.schoolName || 'THCS Max10',
+          teachingSubject: newGroupSubject || currentUser?.teachingSubject || 'Chủ nhiệm lớp',
+        },
+      });
+      deletedGroupIdsRef.current.delete(groupId);
+
+      // Reload updated groups list from localStorage
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY_GROUPS);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            setGroups(parsed.filter((g: ChatGroup) => !isLegacyAutoCreatedClassGroup(g)));
+          }
+        }
+      } catch (err) {}
+
+      const initialNotice: GroupChatMessage = {
+        id: 'rule-' + Date.now(),
+        groupId,
+        senderId: 'system',
+        senderName: 'Hệ thống Quản trị Lớp học Max10',
+        senderRole: 'system',
+        content:
+          `🏫 **CHÀO MỪNG ĐẾN VỚI LỚP: ${seatingPlan.customClassName.toUpperCase()} (${seatingPlan.classCode})**\n\n` +
+          `👩‍🏫 **Giáo viên chủ nhiệm:** ${seatingPlan.homeroomTeacherName}\n` +
+          `👥 **Sĩ số lớp quy định:** ${seatingPlan.studentCapacity} học sinh\n` +
+          `🪑 **Sơ đồ chỗ ngồi:** ${seatingPlan.cols} dãy × ${seatingPlan.rows} bàn (${seatingPlan.seatsPerDesk} chỗ/bàn · Tổng ${seatingPlan.cols * seatingPlan.rows * seatingPlan.seatsPerDesk} ghế)\n\n` +
+          `Thầy/Cô có thể mở mục **Quản lý lớp → Sơ đồ chỗ ngồi** để xếp vị trí từng học sinh và quản lý lớp học.`,
+        timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+        isSystemNotice: true,
+      };
+
+      setGroupMessages((prev) => ({
+        ...prev,
+        [groupId]: [initialNotice, ...(prev[groupId] || [])],
+      }));
+
+      setActiveGroupId(groupId);
+      setActiveMode('group');
+      setSidebarTab('groups');
+      setShowCreateGroupModal(false);
+      setNewGroupName('');
+      setNewGroupDesc('');
+      setToastMessage(
+        `Đã lập nhóm lớp "${seatingPlan.customClassName}" (${seatingPlan.classCode} · ${seatingPlan.studentCapacity} HS) & tạo sơ đồ chỗ ngồi thành công!`
+      );
+      setTimeout(() => setToastMessage(''), 4500);
+      return;
+    }
 
     const groupCode = 'ZL-' + Math.floor(1000 + Math.random() * 9000);
     const newGroup: ChatGroup = {
@@ -1568,7 +1691,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           name: activeUserName + ' (Bạn - Trưởng nhóm)',
           avatar: activeUserAvatar,
           role: 'admin',
-          school: 'THCS Nguyễn Du',
+          school: currentUser?.schoolName || 'THCS Max10',
         },
       ],
       mutedUsers: {},
@@ -1579,7 +1702,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       id: 'rule-' + Date.now(),
       groupId: newGroup.id,
       senderId: 'system',
-      senderName: 'Hệ thống Quản trị Nhóm THCS Nguyễn Du',
+      senderName: 'Hệ thống Quản trị Nhóm Max10',
       senderRole: 'system',
       content:
         `📜 **CHÀO MỪNG ĐẾN VỚI NHÓM: ${newGroup.name.toUpperCase()}**\n\n` +
@@ -3794,22 +3917,30 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         </div>
       )}
 
-      {/* MODAL 2: TẠO NHÓM CHAT MỚI */}
+      {/* MODAL 2: TẠO NHÓM CHAT MỚI / LẬP NHÓM LỚP CHỦ NHIỆM */}
       {showCreateGroupModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
           <div
-            className={`w-full max-w-lg rounded-3xl border ${
+            className={`w-full max-w-lg max-h-[90vh] flex flex-col rounded-3xl border ${
               isDark ? 'bg-zinc-900 border-zinc-800 text-white' : 'bg-white border-slate-200 text-slate-900'
             } shadow-2xl overflow-hidden`}
           >
-            <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between">
+            <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs">
                   <Users className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-sm sm:text-base">Tạo Nhóm Trò Chuyện Học Tập Mới</h3>
-                  <p className="text-xs text-slate-500 dark:text-zinc-400">Kết nối bạn bè và Trợ lý AI Điểm 10</p>
+                  <h3 className="font-extrabold text-sm sm:text-base">
+                    {isVerifiedTeacherOrAdmin && newGroupMode === 'class_homeroom'
+                      ? 'Lập Nhóm Lớp Mới & Sơ Đồ Chỗ Ngồi'
+                      : 'Tạo Nhóm Trò Chuyện Học Tập Mới'}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">
+                    {isVerifiedTeacherOrAdmin && newGroupMode === 'class_homeroom'
+                      ? 'Thầy/Cô tự đặt tên lớp, sĩ số học sinh & sơ đồ bàn học'
+                      : 'Kết nối bạn bè và Trợ lý AI Điểm 10'}
+                  </p>
                 </div>
               </div>
               <button
@@ -3820,15 +3951,59 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleCreateGroup} className="p-5 space-y-4">
+            <form onSubmit={handleCreateGroup} className="p-5 space-y-4 overflow-y-auto">
+              {isVerifiedTeacherOrAdmin ? (
+                <div className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-slate-100 dark:bg-zinc-800/80">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewGroupMode('class_homeroom');
+                      setNewGroupIcon('🏫');
+                    }}
+                    className={`py-2 px-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                      newGroupMode === 'class_homeroom'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-zinc-300'
+                    }`}
+                  >
+                    🏫 Lập Nhóm Lớp & Chỗ Ngồi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewGroupMode('study');
+                      setNewGroupIcon('📚');
+                    }}
+                    className={`py-2 px-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                      newGroupMode === 'study'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-zinc-300'
+                    }`}
+                  >
+                    📚 Nhóm Học Tập Tự Do
+                  </button>
+                </div>
+              ) : (
+                <div className="p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-500/25 text-[11px] text-blue-700 dark:text-blue-300">
+                  🏫 Lưu ý: <strong>Nhóm Lớp chính thức</strong> (gồm học sinh, giáo viên chủ nhiệm và sơ đồ chỗ ngồi) chỉ xuất hiện khi có <strong>Thầy/Cô giáo</strong> lập lớp và đặt tên.
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
-                  Tên nhóm học tập: <span className="text-rose-500">*</span>
+                  {isVerifiedTeacherOrAdmin && newGroupMode === 'class_homeroom'
+                    ? 'Tên nhóm lớp do Thầy/Cô đặt:'
+                    : 'Tên nhóm học tập:'}{' '}
+                  <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="Ví dụ: Hội Luyện Đề Toán Chuyên 9A, Nhóm Học KHTN..."
+                  placeholder={
+                    isVerifiedTeacherOrAdmin && newGroupMode === 'class_homeroom'
+                      ? 'VD: Tập thể 9D1 - Chinh phục Điểm 10...'
+                      : 'Ví dụ: Hội Luyện Đề Toán Chuyên 9A, Nhóm Học KHTN...'
+                  }
                   value={newGroupName}
                   onChange={(e) => setNewGroupName(e.target.value)}
                   className={`w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm border outline-hidden ${
@@ -3837,120 +4012,219 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
-                    Khối lớp:
-                  </label>
-                  <select
-                    value={newGroupGrade}
-                    onChange={(e) => setNewGroupGrade(e.target.value as GradeLevel)}
-                    className={`w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm border outline-hidden ${
-                      isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
-                    }`}
-                  >
-                    <option value="Lớp 6">Lớp 6</option>
-                    <option value="Lớp 7">Lớp 7</option>
-                    <option value="Lớp 8">Lớp 8</option>
-                    <option value="Lớp 9">Lớp 9</option>
-                  </select>
-                </div>
+              {isVerifiedTeacherOrAdmin && newGroupMode === 'class_homeroom' ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
+                        Chọn Lớp học (6A1 - 9D6):
+                      </label>
+                      <select
+                        value={newClassCode}
+                        onChange={(e) => setNewClassCode(e.target.value as ClassCode)}
+                        className={`w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm border outline-hidden ${
+                          isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                        }`}
+                      >
+                        {ALL_CLASSES_LIST.map((code) => (
+                          <option key={code} value={code}>
+                            Lớp {code}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                <div>
-                  <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
-                    Môn học trọng tâm:
-                  </label>
-                  <select
-                    value={newGroupSubject}
-                    onChange={(e) => setNewGroupSubject(e.target.value)}
-                    className={`w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm border outline-hidden ${
-                      isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
-                    }`}
-                  >
-                    <option value="Toán học">Toán học</option>
-                    <option value="Khoa học Tự nhiên">Khoa học Tự nhiên</option>
-                    <option value="Ngữ văn">Ngữ văn</option>
-                    <option value="Tiếng Anh">Tiếng Anh</option>
-                    <option value="Tin học và Công nghệ">Tin học và Công nghệ</option>
-                    <option value="Tổng hợp">Tổng hợp các môn</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
-                  Biểu tượng nhóm (Emoji):
-                </label>
-                <div className="flex items-center gap-2">
-                  {['🚀', '📚', '🔬', '💡', '🏆', '🎯', '🌟'].map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      onClick={() => setNewGroupIcon(emoji)}
-                      className={`w-9 h-9 rounded-xl border text-base flex items-center justify-center transition-all ${
-                        newGroupIcon === emoji
-                          ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/50 scale-110'
-                          : 'border-slate-200 dark:border-zinc-700'
-                      }`}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
-                  Mô tả nhóm:
-                </label>
-                <input
-                  type="text"
-                  placeholder="Mục tiêu của nhóm..."
-                  value={newGroupDesc}
-                  onChange={(e) => setNewGroupDesc(e.target.value)}
-                  className={`w-full px-3.5 py-2 rounded-xl text-xs border outline-hidden ${
-                    isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
-                  }`}
-                />
-              </div>
-
-              <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/20 border border-amber-300/50 text-[11px] text-amber-800 dark:text-amber-300">
-                ⚡ Nhóm mới tạo sẽ tự động áp dụng <strong>Luật nói chuyện</strong>: Xưng hô mày - tao thoải mái, nói bậy nhắc nhở 1 lần, tái phạm cấm chat từ 5p đến 1h.
-              </div>
-
-              {/* User requirement: "nhóm khi tạo chỉ bạn và bạn mới có thể thêm người vào" */}
-              <div className="p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-300/40 text-xs">
-                <label className="flex items-start gap-2.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={newGroupOnlyAdminCanAdd}
-                    onChange={(e) => setNewGroupOnlyAdminCanAdd(e.target.checked)}
-                    className="mt-0.5 rounded border-blue-400 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
-                  />
-                  <div>
-                    <span className="font-bold text-blue-900 dark:text-blue-200 block">
-                      🔒 Chỉ bạn (Trưởng nhóm) mới có quyền thêm người vào nhóm
-                    </span>
-                    <span className="text-[11px] text-blue-700/80 dark:text-blue-300/80 block mt-0.5">
-                      Ban đầu nhóm chỉ có bạn. Chỉ có bạn mới có quyền mời hoặc thêm bạn bè vào nhóm.
-                    </span>
+                    <div>
+                      <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
+                        Số lượng học sinh của lớp:
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={60}
+                        required
+                        value={newClassStudentCount}
+                        onChange={(e) => setNewClassStudentCount(Math.max(1, Math.min(60, Number(e.target.value) || 1)))}
+                        className={`w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold border outline-hidden ${
+                          isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                        }`}
+                      />
+                    </div>
                   </div>
-                </label>
-              </div>
+
+                  <div className={`p-3.5 rounded-2xl border space-y-2.5 ${isDark ? 'bg-emerald-950/20 border-emerald-500/30' : 'bg-emerald-50/70 border-emerald-200'}`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-emerald-700 dark:text-emerald-300">
+                        🪑 Cấu hình Sơ đồ chỗ ngồi lớp {newClassCode}
+                      </span>
+                      <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                        Tổng {newSeatingCols * newSeatingRows * newSeatsPerDesk} ghế
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-bold mb-1">Số dãy bàn:</label>
+                        <select
+                          value={newSeatingCols}
+                          onChange={(e) => setNewSeatingCols(Number(e.target.value))}
+                          className={`w-full px-2.5 py-1.5 rounded-xl text-xs font-bold border outline-hidden ${
+                            isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300'
+                          }`}
+                        >
+                          {[2, 3, 4, 5].map((n) => (
+                            <option key={n} value={n}>{n} dãy</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold mb-1">Số bàn / dãy:</label>
+                        <select
+                          value={newSeatingRows}
+                          onChange={(e) => setNewSeatingRows(Number(e.target.value))}
+                          className={`w-full px-2.5 py-1.5 rounded-xl text-xs font-bold border outline-hidden ${
+                            isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300'
+                          }`}
+                        >
+                          {[3, 4, 5, 6, 7, 8].map((n) => (
+                            <option key={n} value={n}>{n} bàn</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold mb-1">Chỗ / bàn:</label>
+                        <select
+                          value={newSeatsPerDesk}
+                          onChange={(e) => setNewSeatsPerDesk(Number(e.target.value) as 1 | 2)}
+                          className={`w-full px-2.5 py-1.5 rounded-xl text-xs font-bold border outline-hidden ${
+                            isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300'
+                          }`}
+                        >
+                          <option value={2}>2 học sinh</option>
+                          <option value={1}>1 học sinh</option>
+                        </select>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-zinc-300">
+                      👩‍🏫 Giáo viên chủ nhiệm: <strong>{activeUserName}</strong> · Sau khi lập nhóm, Thầy/Cô vào tab <strong>Quản lý lớp → Sơ đồ chỗ ngồi</strong> để xếp chỗ cho {newClassStudentCount} học sinh.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
+                        Khối lớp:
+                      </label>
+                      <select
+                        value={newGroupGrade}
+                        onChange={(e) => setNewGroupGrade(e.target.value as GradeLevel)}
+                        className={`w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm border outline-hidden ${
+                          isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                        }`}
+                      >
+                        <option value="Lớp 6">Lớp 6</option>
+                        <option value="Lớp 7">Lớp 7</option>
+                        <option value="Lớp 8">Lớp 8</option>
+                        <option value="Lớp 9">Lớp 9</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
+                        Môn học trọng tâm:
+                      </label>
+                      <select
+                        value={newGroupSubject}
+                        onChange={(e) => setNewGroupSubject(e.target.value)}
+                        className={`w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm border outline-hidden ${
+                          isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                        }`}
+                      >
+                        <option value="Toán học">Toán học</option>
+                        <option value="Khoa học Tự nhiên">Khoa học Tự nhiên</option>
+                        <option value="Ngữ văn">Ngữ văn</option>
+                        <option value="Tiếng Anh">Tiếng Anh</option>
+                        <option value="Tin học và Công nghệ">Tin học và Công nghệ</option>
+                        <option value="Tổng hợp">Tổng hợp các môn</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
+                      Biểu tượng nhóm (Emoji):
+                    </label>
+                    <div className="flex items-center gap-2">
+                      {['🚀', '📚', '🔬', '💡', '🏆', '🎯', '🌟'].map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => setNewGroupIcon(emoji)}
+                          className={`w-9 h-9 rounded-xl border text-base flex items-center justify-center transition-all ${
+                            newGroupIcon === emoji
+                              ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/50 scale-110'
+                              : 'border-slate-200 dark:border-zinc-700'
+                          }`}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
+                      Mô tả nhóm:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Mục tiêu của nhóm..."
+                      value={newGroupDesc}
+                      onChange={(e) => setNewGroupDesc(e.target.value)}
+                      className={`w-full px-3.5 py-2 rounded-xl text-xs border outline-hidden ${
+                        isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                      }`}
+                    />
+                  </div>
+
+                  {/* User requirement: "nhóm khi tạo chỉ bạn và bạn mới có thể thêm người vào" */}
+                  <div className="p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-300/40 text-xs">
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newGroupOnlyAdminCanAdd}
+                        onChange={(e) => setNewGroupOnlyAdminCanAdd(e.target.checked)}
+                        className="mt-0.5 rounded border-blue-400 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
+                      />
+                      <div>
+                        <span className="font-bold text-blue-900 dark:text-blue-200 block">
+                          🔒 Chỉ bạn (Trưởng nhóm) mới có quyền thêm người vào nhóm
+                        </span>
+                        <span className="text-[11px] text-blue-700/80 dark:text-blue-300/80 block mt-0.5">
+                          Ban đầu nhóm chỉ có bạn. Chỉ có bạn mới có quyền mời hoặc thêm bạn bè vào nhóm.
+                        </span>
+                      </div>
+                    </label>
+                  </div>
+                </>
+              )}
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowCreateGroupModal(false)}
-                  className="py-2.5 px-4 rounded-xl border text-xs font-semibold hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+                  className="py-2.5 px-4 rounded-xl border text-xs font-semibold hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
-                  className="py-2.5 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition-colors"
+                  className="py-2.5 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
                 >
-                  Tạo Nhóm Ngay
+                  {isVerifiedTeacherOrAdmin && newGroupMode === 'class_homeroom'
+                    ? 'Lập Nhóm Lớp & Sơ Đồ Chỗ Ngồi'
+                    : 'Tạo Nhóm Ngay'}
                 </button>
               </div>
             </form>

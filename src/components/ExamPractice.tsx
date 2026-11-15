@@ -24,6 +24,9 @@ import {
   Trash2,
   Users,
   BarChart3,
+  Download,
+  Eye,
+  X,
 } from 'lucide-react';
 import { HonorRollLeaderboard } from './HonorRollLeaderboard';
 import { awardStudentActivity } from '../data/initialAchievements';
@@ -31,9 +34,13 @@ import {
   ALL_CLASSES_LIST,
   ClassCode,
   ClassMockExam,
+  ClassExamResource,
   loadMockExams,
   saveMockExams,
   getClassHomeroomTeacher,
+  loadClassExamResources,
+  fetchClassExamResourcesFromServer,
+  incrementExamResourceDownload,
 } from '../data/classSystemData';
 
 interface ExamPracticeProps {
@@ -57,6 +64,10 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
   const [libraryClassFilter, setLibraryClassFilter] = useState<string>('all');
   const [librarySubjectFilter, setLibrarySubjectFilter] = useState<string>('all');
   const [mockExamsList, setMockExamsList] = useState<ClassMockExam[]>(() => loadMockExams());
+  const [teacherExamResources, setTeacherExamResources] = useState<ClassExamResource[]>(() =>
+    loadClassExamResources('all')
+  );
+  const [previewResource, setPreviewResource] = useState<ClassExamResource | null>(null);
   const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
   const [newExamTitle, setNewExamTitle] = useState<string>('');
   const [newExamClass, setNewExamClass] = useState<ClassCode>('9D1');
@@ -86,6 +97,13 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
       setSelectedTopic('Kiến thức trọng tâm');
     }
   }, [currentGrade, currentSubject.id]);
+
+  useEffect(() => {
+    fetchClassExamResourcesFromServer().then((list) => setTeacherExamResources(list));
+    const onUpdated = () => setTeacherExamResources(loadClassExamResources('all'));
+    window.addEventListener('max10_exam_resources_updated', onUpdated);
+    return () => window.removeEventListener('max10_exam_resources_updated', onUpdated);
+  }, []);
 
   // Countdown timer when taking exam
   useEffect(() => {
@@ -601,6 +619,165 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
               })}
             </div>
           )}
+
+          {/* Teacher-Uploaded PDF & Image Sample Exams for Student Download */}
+          {(() => {
+            const filteredResources = teacherExamResources.filter((r) => {
+              const matchClass = libraryClassFilter === 'all' || r.classCode === libraryClassFilter;
+              const matchSubject =
+                librarySubjectFilter === 'all' ||
+                r.subject.toLowerCase().includes(librarySubjectFilter.toLowerCase());
+              return matchClass && matchSubject;
+            });
+
+            return (
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-base font-black text-slate-900 dark:text-white">
+                      Tài Liệu Đề Thi Mẫu PDF & Hình Ảnh Từ Thầy Cô ({filteredResources.length})
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-zinc-400">
+                      Học sinh có thể xem trực tiếp hoặc tải file đề thi mẫu về máy để luyện tập
+                    </p>
+                  </div>
+                </div>
+
+                {filteredResources.length === 0 ? (
+                  <div
+                    className={`p-6 rounded-3xl border text-center text-xs text-slate-500 dark:text-zinc-400 ${
+                      isDark ? 'bg-zinc-900/70 border-white/10' : 'bg-white border-slate-200'
+                    }`}
+                  >
+                    Chưa có file PDF hoặc ảnh đề thi mẫu nào được Thầy/Cô tải lên cho bộ lọc này.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {filteredResources.map((res) => (
+                      <div
+                        key={res.id}
+                        className={`p-4 rounded-3xl border flex flex-col justify-between gap-3 ${
+                          isDark
+                            ? 'bg-[#121827] border-white/10 hover:border-emerald-500/40'
+                            : 'bg-white border-slate-200 hover:border-emerald-400 shadow-2xs'
+                        }`}
+                      >
+                        <div className="space-y-2">
+                          <div className="text-[11px] font-bold text-slate-500 dark:text-zinc-400 flex items-center gap-1.5 flex-wrap">
+                            <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">Lớp {res.classCode}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>{res.subject}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>{res.fileType === 'pdf' ? 'PDF' : 'Hình ảnh'} ({res.fileSizeLabel})</span>
+                          </div>
+                          <h4 className="text-sm font-black text-slate-900 dark:text-white leading-snug">
+                            {res.title}
+                          </h4>
+                          {res.description && (
+                            <p className="text-xs text-slate-600 dark:text-zinc-300 line-clamp-2">
+                              {res.description}
+                            </p>
+                          )}
+                          <div className="text-[11px] text-slate-400">
+                            {res.uploaderName} · {res.createdAt} · {res.downloadCount || 0} lượt tải
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-white/5">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewResource(res)}
+                            className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Xem trước</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const a = document.createElement('a');
+                              a.href = res.fileDataUrl;
+                              a.download = res.fileName;
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                              const updated = incrementExamResourceDownload(res.id);
+                              setTeacherExamResources(updated);
+                            }}
+                            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-sm"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Tải về luyện tập</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {previewResource && (
+                  <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
+                    <div
+                      className={`w-full max-w-4xl max-h-[90vh] flex flex-col rounded-3xl border overflow-hidden shadow-2xl ${
+                        isDark ? 'bg-zinc-900 border-zinc-800 text-white' : 'bg-white border-slate-200 text-slate-900'
+                      }`}
+                    >
+                      <div className="p-4 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <h3 className="font-black text-sm sm:text-base truncate">{previewResource.title}</h3>
+                          <p className="text-xs text-slate-500 dark:text-zinc-400">
+                            Lớp {previewResource.classCode} · {previewResource.subject} · {previewResource.fileName}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const a = document.createElement('a');
+                              a.href = previewResource.fileDataUrl;
+                              a.download = previewResource.fileName;
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                              const updated = incrementExamResourceDownload(previewResource.id);
+                              setTeacherExamResources(updated);
+                            }}
+                            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Tải về</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewResource(null)}
+                            className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer"
+                          >
+                            <X className="w-5 h-5" />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex-1 overflow-auto p-4 bg-slate-100 dark:bg-zinc-950 flex items-center justify-center min-h-[420px]">
+                        {previewResource.fileType === 'image' ? (
+                          <img
+                            src={previewResource.fileDataUrl}
+                            alt={previewResource.title}
+                            referrerPolicy="no-referrer"
+                            className="max-w-full max-h-[72vh] rounded-xl object-contain"
+                          />
+                        ) : (
+                          <iframe
+                            src={previewResource.fileDataUrl}
+                            title={previewResource.title}
+                            className="w-full h-[72vh] rounded-xl border border-slate-300 dark:border-zinc-800 bg-white"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Modal: Tải Lên / Tạo Đề Thi Thử Mới Cho Giáo Viên */}
           {showUploadModal && (

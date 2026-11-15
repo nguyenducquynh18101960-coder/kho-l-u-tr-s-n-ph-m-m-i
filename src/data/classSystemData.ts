@@ -193,6 +193,40 @@ export interface CollectiveClassBadge {
   awardedAt: string;
 }
 
+export interface ClassExamResource {
+  id: string;
+  title: string;
+  subject: string;
+  classCode: ClassCode;
+  fileName: string;
+  fileType: 'pdf' | 'image';
+  mimeType: string;
+  fileDataUrl: string;
+  fileSizeLabel: string;
+  description?: string;
+  uploaderId?: string;
+  uploaderName: string;
+  uploaderRole: string;
+  createdAt: string;
+  downloadCount: number;
+}
+
+export interface ClassSeatingPlan {
+  id: string;
+  classCode: ClassCode;
+  customClassName: string;
+  groupId: string;
+  homeroomTeacherId: string;
+  homeroomTeacherName: string;
+  homeroomTeacherAvatar?: string;
+  studentCapacity: number;
+  rows: number;
+  cols: number;
+  seatsPerDesk: 1 | 2;
+  assignments: Record<string, string>; // seatKey (e.g. "r0-c0-s0") -> studentId
+  updatedAt: string;
+}
+
 export const COLLECTIVE_BADGE_TEMPLATES = [
   {
     badgeId: 'hardest-working-class',
@@ -282,6 +316,8 @@ export const STORAGE_KEY_CLASS_BULLETINS = 'max10_real_class_bulletins_v2';
 export const STORAGE_KEY_SHARED_CLASS_EXAMS = 'max10_real_shared_class_exams_v2';
 export const STORAGE_KEY_ATTENDANCE_SESSIONS = 'max10_real_attendance_sessions_v2';
 export const STORAGE_KEY_COLLECTIVE_BADGES = 'max10_real_collective_badges_v2';
+export const STORAGE_KEY_CLASS_EXAM_RESOURCES = 'max10_real_class_exam_resources_v2';
+export const STORAGE_KEY_CLASS_SEATING = 'max10_real_class_seating_v1';
 
 // Không còn bất kỳ mock teacher hay mock student nào
 export const INITIAL_MOCK_EXAMS: ClassMockExam[] = [];
@@ -375,7 +411,313 @@ export function getClassHomeroomTeacher(classCode: ClassCode): HomeroomTeacher |
 }
 
 /**
- * Tự động tạo/cập nhật nhóm chat của lớp (không giới hạn số lượng học sinh)
+ * Nhận diện nhóm tự sinh cũ không còn phù hợp ("Nhóm Học Tập Chính Thức" chưa do GV đặt tên)
+ */
+export function isLegacyAutoCreatedClassGroup(g: any): boolean {
+  if (!g || !g.id) return true;
+  if (g.isCustomClassGroup) return false;
+  const name = (g.name || '').toString();
+  if (
+    g.id.startsWith('default-') ||
+    g.createdBy === 'system' ||
+    g.id === 'grp-noi-chuyen' ||
+    g.id === 'grp-dai-hoi-do-an' ||
+    g.id === 'grp-gia-dinh' ||
+    (g.id.startsWith('class-group-') && name.includes('Nhóm Học Tập Chính Thức'))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Xóa sạch các nhóm tự sinh / không liên quan khỏi localStorage
+ */
+export function purgeUnrelatedLegacyClassGroups(): number {
+  let removedCount = 0;
+  try {
+    const GROUP_KEY = 'max10_real_groups_v15';
+    const MSG_KEY = 'max10_real_group_messages_v15';
+    const raw = localStorage.getItem(GROUP_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const removedIds = new Set<string>();
+        const cleaned = parsed.filter((g: any) => {
+          if (isLegacyAutoCreatedClassGroup(g)) {
+            if (g?.id) removedIds.add(g.id);
+            removedCount++;
+            return false;
+          }
+          return true;
+        });
+        if (removedCount > 0) {
+          localStorage.setItem(GROUP_KEY, JSON.stringify(cleaned));
+          const rawMsgs = localStorage.getItem(MSG_KEY);
+          if (rawMsgs) {
+            const parsedMsgs = JSON.parse(rawMsgs);
+            if (parsedMsgs && typeof parsedMsgs === 'object') {
+              removedIds.forEach((id) => {
+                delete parsedMsgs[id];
+              });
+              localStorage.setItem(MSG_KEY, JSON.stringify(parsedMsgs));
+            }
+          }
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('max10_groups_updated'));
+          }
+        }
+      }
+    }
+  } catch (e) {}
+  return removedCount;
+}
+
+// ==========================================
+// 1B. CLASSROOM SEATING PLANS & CUSTOM TEACHER CLASS GROUPS
+// ==========================================
+export function loadAllClassSeatingPlans(): Record<string, ClassSeatingPlan> {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_CLASS_SEATING);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch (e) {}
+  return {};
+}
+
+export function loadClassSeatingPlan(classCode: ClassCode): ClassSeatingPlan | null {
+  const all = loadAllClassSeatingPlans();
+  return all[classCode] || null;
+}
+
+export function saveClassSeatingPlan(plan: ClassSeatingPlan): void {
+  try {
+    const all = loadAllClassSeatingPlans();
+    all[plan.classCode] = {
+      ...plan,
+      updatedAt: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' ' + new Date().toLocaleDateString('vi-VN'),
+    };
+    localStorage.setItem(STORAGE_KEY_CLASS_SEATING, JSON.stringify(all));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('max10_classes_updated'));
+    }
+  } catch (e) {}
+}
+
+export function deleteClassSeatingPlan(classCode: ClassCode): void {
+  try {
+    const all = loadAllClassSeatingPlans();
+    if (all[classCode]) {
+      delete all[classCode];
+      localStorage.setItem(STORAGE_KEY_CLASS_SEATING, JSON.stringify(all));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('max10_classes_updated'));
+      }
+    }
+  } catch (e) {}
+}
+
+/**
+ * Thầy/Cô giáo chủ động lập nhóm lớp, tự đặt tên lớp, nhập số lượng học sinh & tạo sơ đồ chỗ ngồi
+ */
+export function createOrUpdateCustomClassGroup(params: {
+  classCode: ClassCode;
+  customClassName: string;
+  studentCapacity: number;
+  rows: number;
+  cols: number;
+  seatsPerDesk: 1 | 2;
+  teacher: {
+    id: string;
+    name: string;
+    avatar?: string;
+    email?: string;
+    phone?: string;
+    schoolName?: string;
+    teachingSubject?: string;
+  };
+}): { groupId: string; seatingPlan: ClassSeatingPlan } {
+  const { classCode, customClassName, studentCapacity, rows, cols, seatsPerDesk, teacher } = params;
+  const cleanName = customClassName.trim() || `Lớp ${classCode} - ${teacher.name}`;
+  const groupId = `class-group-${classCode.toLowerCase()}`;
+
+  // Đảm bảo giáo viên được ghi nhận quản lý lớp này
+  const regs = loadRegisteredClasses();
+  const hasTeacher = regs.some((r) => r.classCode === classCode && r.teacherId === teacher.id);
+  if (!hasTeacher) {
+    const newEntry: RegisteredTeacherClass = {
+      id: `reg-${teacher.id}-${classCode}`,
+      classCode,
+      teacherId: teacher.id,
+      teacherName: teacher.name,
+      teacherAvatar:
+        teacher.avatar || `https://api.dicebear.com/7.x/personas/svg?seed=${encodeURIComponent(teacher.name)}`,
+      teacherEmail: teacher.email || '',
+      teacherPhone: teacher.phone || '',
+      teacherRoleType: 'homeroom',
+      subject: teacher.teachingSubject || 'Chủ nhiệm lớp',
+      schoolName: teacher.schoolName || 'THCS Max10',
+      createdAt: new Date().toLocaleDateString('vi-VN'),
+    };
+    saveRegisteredClasses([newEntry, ...regs]);
+  }
+
+  // Tạo hoặc cập nhật sơ đồ chỗ ngồi
+  const existingPlan = loadClassSeatingPlan(classCode);
+  const seatingPlan: ClassSeatingPlan = {
+    id: existingPlan?.id || `seat-plan-${classCode.toLowerCase()}`,
+    classCode,
+    customClassName: cleanName,
+    groupId,
+    homeroomTeacherId: teacher.id,
+    homeroomTeacherName: teacher.name,
+    homeroomTeacherAvatar:
+      teacher.avatar || `https://api.dicebear.com/7.x/personas/svg?seed=${encodeURIComponent(teacher.name)}`,
+    studentCapacity: Math.max(1, Math.min(60, studentCapacity)),
+    rows: Math.max(2, Math.min(10, rows)),
+    cols: Math.max(2, Math.min(5, cols)),
+    seatsPerDesk,
+    assignments: existingPlan?.assignments || {},
+    updatedAt: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' ' + new Date().toLocaleDateString('vi-VN'),
+  };
+  saveClassSeatingPlan(seatingPlan);
+
+  // Tạo hoặc cập nhật nhóm chat lớp với tên do Thầy/Cô đặt
+  try {
+    const GROUP_KEY = 'max10_real_groups_v15';
+    const raw = localStorage.getItem(GROUP_KEY);
+    const groups: any[] = raw ? JSON.parse(raw) : [];
+    const cleanedGroups = groups.filter((g) => !isLegacyAutoCreatedClassGroup(g));
+    const existingIdx = cleanedGroups.findIndex((g) => g.id === groupId);
+
+    const students = loadClassStudents(classCode);
+    const classTeachers = getClassTeachers(classCode);
+    const membersMap = new Map<string, any>();
+
+    membersMap.set(teacher.id, {
+      id: teacher.id,
+      name: teacher.name,
+      avatar:
+        teacher.avatar || `https://api.dicebear.com/7.x/personas/svg?seed=${encodeURIComponent(teacher.name)}`,
+      role: 'teacher',
+      school: teacher.schoolName || `GVCN Lớp ${classCode}`,
+    });
+
+    classTeachers.forEach((t) => {
+      membersMap.set(t.teacherId, {
+        id: t.teacherId,
+        name: t.teacherName,
+        avatar:
+          t.teacherAvatar || `https://api.dicebear.com/7.x/personas/svg?seed=${encodeURIComponent(t.teacherName)}`,
+        role: 'teacher',
+        school: t.schoolName || `Lớp ${classCode}`,
+      });
+    });
+
+    students.forEach((s) => {
+      membersMap.set(s.id, {
+        id: s.id,
+        name: s.name,
+        avatar: s.avatar,
+        role: 'member',
+        school: `Lớp ${classCode}`,
+      });
+    });
+
+    if (existingIdx >= 0 && Array.isArray(cleanedGroups[existingIdx].members)) {
+      cleanedGroups[existingIdx].members.forEach((om: any) => {
+        if (om && om.id && !membersMap.has(om.id) && !om.id.startsWith('ai-') && !om.id.startsWith('std-')) {
+          membersMap.set(om.id, om);
+        }
+      });
+    }
+
+    const groupPayload = {
+      id: groupId,
+      name: cleanName,
+      description: `Lớp ${classCode} · GVCN: ${teacher.name} · Sĩ số: ${students.length}/${seatingPlan.studentCapacity} học sinh · Có sơ đồ chỗ ngồi`,
+      grade: `Lớp ${classCode[0]}`,
+      subject: teacher.teachingSubject || 'Chủ nhiệm lớp',
+      avatarIcon: '🏫',
+      createdAt: existingIdx >= 0 ? cleanedGroups[existingIdx].createdAt : Date.now(),
+      createdBy: teacher.id,
+      code: existingIdx >= 0 && cleanedGroups[existingIdx].code ? cleanedGroups[existingIdx].code : `LOP-${classCode}`,
+      onlyAdminCanAdd: false,
+      isClassGroup: true,
+      isCustomClassGroup: true,
+      classCode,
+      studentCapacity: seatingPlan.studentCapacity,
+      maxMembers: seatingPlan.studentCapacity + 10,
+      homeroomTeacherId: teacher.id,
+      homeroomTeacherName: teacher.name,
+      members: Array.from(membersMap.values()),
+      mutedUsers: existingIdx >= 0 ? cleanedGroups[existingIdx].mutedUsers || {} : {},
+    };
+
+    if (existingIdx >= 0) {
+      cleanedGroups[existingIdx] = groupPayload;
+    } else {
+      cleanedGroups.unshift(groupPayload);
+    }
+
+    localStorage.setItem(GROUP_KEY, JSON.stringify(cleanedGroups));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('max10_groups_updated'));
+    }
+
+    if (typeof fetch !== 'undefined') {
+      fetch('/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...groupPayload,
+          createdByName: teacher.name,
+          creatorAvatar: teacher.avatar || '',
+        }),
+      }).catch(() => {});
+    }
+  } catch (e) {}
+
+  return { groupId, seatingPlan };
+}
+
+export function deleteCustomClassGroup(classCode: ClassCode): void {
+  const groupId = `class-group-${classCode.toLowerCase()}`;
+  deleteClassSeatingPlan(classCode);
+  try {
+    const GROUP_KEY = 'max10_real_groups_v15';
+    const MSG_KEY = 'max10_real_group_messages_v15';
+    const raw = localStorage.getItem(GROUP_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const filtered = parsed.filter((g: any) => g.id !== groupId);
+        localStorage.setItem(GROUP_KEY, JSON.stringify(filtered));
+      }
+    }
+    const rawMsgs = localStorage.getItem(MSG_KEY);
+    if (rawMsgs) {
+      const parsedMsgs = JSON.parse(rawMsgs);
+      if (parsedMsgs && typeof parsedMsgs === 'object' && parsedMsgs[groupId]) {
+        delete parsedMsgs[groupId];
+        localStorage.setItem(MSG_KEY, JSON.stringify(parsedMsgs));
+      }
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('max10_groups_updated'));
+      window.dispatchEvent(new CustomEvent('max10_classes_updated'));
+    }
+  } catch (e) {}
+  if (typeof fetch !== 'undefined') {
+    fetch(`/api/groups/${encodeURIComponent(groupId)}`, { method: 'DELETE' }).catch(() => {});
+  }
+}
+
+/**
+ * CHỈ đồng bộ thành viên khi Thầy/Cô đã chủ động lập nhóm lớp (có tên riêng / sơ đồ chỗ ngồi).
+ * KHÔNG tự động đẻ ra nhóm "Lớp XX - Nhóm Học Tập Chính Thức".
  */
 export function syncClassGroupChat(classCode: ClassCode, teacher?: UserAccount | RegisteredTeacherClass): void {
   try {
@@ -384,10 +726,16 @@ export function syncClassGroupChat(classCode: ClassCode, teacher?: UserAccount |
     const groups: any[] = raw ? JSON.parse(raw) : [];
     const groupId = `class-group-${classCode.toLowerCase()}`;
     const existingIdx = groups.findIndex((g) => g.id === groupId);
+    const seatingPlan = loadClassSeatingPlan(classCode);
+
+    // Nếu nhóm lớp chưa được Giáo viên chủ động lập & đặt tên -> KHÔNG tự ý tạo mới
+    const existingGroup = existingIdx >= 0 ? groups[existingIdx] : null;
+    if (!seatingPlan && (!existingGroup || !existingGroup.isCustomClassGroup)) {
+      return;
+    }
 
     const students = loadClassStudents(classCode);
     const classTeachers = getClassTeachers(classCode);
-
     const membersMap = new Map<string, any>();
 
     classTeachers.forEach((t) => {
@@ -421,25 +769,41 @@ export function syncClassGroupChat(classCode: ClassCode, teacher?: UserAccount |
     });
 
     const primaryTeacher = classTeachers[0];
+    const teacherName =
+      seatingPlan?.homeroomTeacherName ||
+      existingGroup?.homeroomTeacherName ||
+      primaryTeacher?.teacherName ||
+      'Giáo viên chủ nhiệm';
+    const capacity = seatingPlan?.studentCapacity || existingGroup?.studentCapacity || 40;
+    const customName =
+      seatingPlan?.customClassName ||
+      existingGroup?.name ||
+      `Lớp ${classCode} - ${teacherName}`;
+
     const groupPayload = {
       id: groupId,
-      name: `Lớp ${classCode} - Nhóm Học Tập Chính Thức`,
-      description: `Nhóm lớp ${classCode} do ${primaryTeacher?.teacherName || 'Giáo viên'} phụ trách (Không giới hạn số lượng học sinh)`,
+      name: customName,
+      description: `Lớp ${classCode} · GVCN: ${teacherName} · Sĩ số: ${students.length}/${capacity} học sinh · Có sơ đồ chỗ ngồi`,
       grade: `Lớp ${classCode[0]}`,
-      subject: primaryTeacher?.subject || 'Tổng hợp',
-      avatarIcon: '🏫',
-      createdAt: existingIdx >= 0 ? groups[existingIdx].createdAt : Date.now(),
-      createdBy: primaryTeacher?.teacherId || (teacher && 'id' in teacher ? teacher.id : 'teacher'),
-      code: `LOP-${classCode}`,
+      subject: primaryTeacher?.subject || existingGroup?.subject || 'Chủ nhiệm lớp',
+      avatarIcon: existingGroup?.avatarIcon || '🏫',
+      createdAt: existingGroup?.createdAt || Date.now(),
+      createdBy: seatingPlan?.homeroomTeacherId || existingGroup?.createdBy || primaryTeacher?.teacherId || 'teacher',
+      code: existingGroup?.code || `LOP-${classCode}`,
       onlyAdminCanAdd: false,
-      maxMembers: 999999,
+      isClassGroup: true,
+      isCustomClassGroup: true,
+      classCode,
+      studentCapacity: capacity,
+      maxMembers: capacity + 10,
+      homeroomTeacherId: seatingPlan?.homeroomTeacherId || existingGroup?.homeroomTeacherId || primaryTeacher?.teacherId,
+      homeroomTeacherName: teacherName,
       members: Array.from(membersMap.values()),
-      mutedUsers: existingIdx >= 0 ? groups[existingIdx].mutedUsers || {} : {},
+      mutedUsers: existingGroup?.mutedUsers || {},
     };
 
     if (existingIdx >= 0) {
-      // Merge existing extra human members too
-      const oldMembers = groups[existingIdx].members || [];
+      const oldMembers = existingGroup.members || [];
       oldMembers.forEach((om: any) => {
         if (om && om.id && !membersMap.has(om.id) && !om.id.startsWith('ai-') && !om.id.startsWith('std-')) {
           membersMap.set(om.id, om);
@@ -452,16 +816,18 @@ export function syncClassGroupChat(classCode: ClassCode, teacher?: UserAccount |
     }
 
     localStorage.setItem(GROUP_KEY, JSON.stringify(groups));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('max10_groups_updated'));
+    }
 
-    // Sync to backend groups API
     if (typeof fetch !== 'undefined') {
       fetch('/api/groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...groupPayload,
-          createdByName: primaryTeacher?.teacherName || 'Giáo viên',
-          creatorAvatar: primaryTeacher?.teacherAvatar || '',
+          createdByName: teacherName,
+          creatorAvatar: seatingPlan?.homeroomTeacherAvatar || primaryTeacher?.teacherAvatar || '',
         }),
       }).catch(() => {});
     }
@@ -470,6 +836,7 @@ export function syncClassGroupChat(classCode: ClassCode, teacher?: UserAccount |
 
 /**
  * Kích hoạt lớp học khi Thầy/Cô giáo thật đăng ký tài khoản Giáo viên
+ * (Không tự động tạo nhóm chat rác nếu Giáo viên chưa lập tên nhóm & sơ đồ chỗ ngồi)
  */
 export function registerTeacherForClasses(user: UserAccount): RegisteredTeacherClass[] {
   if (user.role !== 'teacher') return loadRegisteredClasses();
@@ -514,9 +881,6 @@ export function registerTeacherForClasses(user: UserAccount): RegisteredTeacherC
 
   const updated = [...newEntries, ...filtered];
   saveRegisteredClasses(updated);
-
-  // Tạo nhóm lớp tương ứng (không giới hạn sĩ số) & đồng bộ server
-  targetClasses.forEach((code) => syncClassGroupChat(code, user));
 
   if (typeof fetch !== 'undefined') {
     fetch('/api/classes/register-teacher', {
@@ -1015,3 +1379,125 @@ export function dispatchClassPushNotification(notif: ClassPushNotification): voi
     }
   }
 }
+
+// ==========================================
+// 9. EXAM LIBRARY RESOURCES (PDF / IMAGES)
+// ==========================================
+export function loadClassExamResources(
+  classCode?: ClassCode | 'all',
+  subjectFilter?: string
+): ClassExamResource[] {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_CLASS_EXAM_RESOURCES);
+    const all: ClassExamResource[] = saved ? JSON.parse(saved) : [];
+    if (!Array.isArray(all)) return [];
+    return all.filter((item) => {
+      const matchClass = !classCode || classCode === 'all' || item.classCode === classCode;
+      const matchSubject =
+        !subjectFilter ||
+        subjectFilter === 'all' ||
+        item.subject.toLowerCase().includes(subjectFilter.toLowerCase());
+      return matchClass && matchSubject;
+    });
+  } catch (e) {
+    return [];
+  }
+}
+
+function persistClassExamResourcesLocal(list: ClassExamResource[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_CLASS_EXAM_RESOURCES, JSON.stringify(list));
+  } catch (e) {
+    // If localStorage quota is exceeded due to large base64 PDFs, keep metadata + recent items
+    try {
+      const trimmed = list.slice(0, Math.max(1, list.length - 1));
+      localStorage.setItem(STORAGE_KEY_CLASS_EXAM_RESOURCES, JSON.stringify(trimmed));
+    } catch {}
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('max10_exam_resources_updated'));
+  }
+}
+
+export async function fetchClassExamResourcesFromServer(): Promise<ClassExamResource[]> {
+  try {
+    const res = await fetch('/api/exam-resources');
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.resources)) {
+        const local = loadClassExamResources('all');
+        const map = new Map<string, ClassExamResource>();
+        data.resources.forEach((r: ClassExamResource) => map.set(r.id, r));
+        local.forEach((r) => {
+          if (!map.has(r.id)) map.set(r.id, r);
+        });
+        const merged = Array.from(map.values());
+        persistClassExamResourcesLocal(merged);
+        return merged;
+      }
+    }
+  } catch (e) {}
+  return loadClassExamResources('all');
+}
+
+export async function saveClassExamResource(
+  resource: ClassExamResource
+): Promise<ClassExamResource[]> {
+  const current = loadClassExamResources('all');
+  const updated = [resource, ...current.filter((r) => r.id !== resource.id)];
+  persistClassExamResourcesLocal(updated);
+
+  try {
+    await fetch('/api/exam-resources', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(resource),
+    });
+  } catch (e) {}
+
+  dispatchClassPushNotification({
+    id: `notif-exam-lib-${Date.now()}`,
+    classCode: resource.classCode,
+    title: `[THƯ VIỆN ĐỀ THI LỚP ${resource.classCode}] Đề mới: ${resource.title}`,
+    body: `${resource.uploaderName} đã tải lên đề thi mẫu môn ${resource.subject} (${resource.fileName}). Học sinh có thể tải về luyện tập ngay!`,
+    category: 'exam',
+    priority: 'high',
+    senderTeacherName: resource.uploaderName,
+    createdAt: 'Vừa xong',
+    deliveredCount: loadClassStudents(resource.classCode).length || 1,
+    readCount: 0,
+  });
+
+  return updated;
+}
+
+export async function deleteClassExamResource(id: string): Promise<ClassExamResource[]> {
+  const current = loadClassExamResources('all');
+  const updated = current.filter((r) => r.id !== id);
+  persistClassExamResourcesLocal(updated);
+
+  try {
+    await fetch(`/api/exam-resources/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  } catch (e) {}
+
+  return updated;
+}
+
+export function incrementExamResourceDownload(id: string): ClassExamResource[] {
+  const current = loadClassExamResources('all');
+  const updated = current.map((r) =>
+    r.id === id ? { ...r, downloadCount: (r.downloadCount || 0) + 1 } : r
+  );
+  persistClassExamResourcesLocal(updated);
+
+  if (typeof fetch !== 'undefined') {
+    fetch(`/api/exam-resources/${encodeURIComponent(id)}/download`, {
+      method: 'POST',
+    }).catch(() => {});
+  }
+
+  return updated;
+}
+

@@ -18,6 +18,7 @@ export interface UserAccount {
   isSuperAdmin?: boolean;
   // Teacher registration & verification fields
   isVerifiedTeacher?: boolean;
+  teacherTitle?: 'Cô' | 'Thầy';
   teacherRoleType?: TeacherRoleType; // 'subject' = GV bộ môn, 'homeroom' = GV chủ nhiệm, 'both' = Cả hai
   teachingSubject?: string;
   homeroomClass?: string; // e.g., '9D1'
