@@ -33,7 +33,7 @@ import {
   ClassMockExam,
   loadMockExams,
   saveMockExams,
-  HOMEROOM_TEACHERS,
+  getClassHomeroomTeacher,
 } from '../data/classSystemData';
 
 interface ExamPracticeProps {
@@ -240,7 +240,7 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
     e.preventDefault();
     if (!newExamTitle.trim()) return;
 
-    const teacher = HOMEROOM_TEACHERS[newExamClass];
+    const teacher = getClassHomeroomTeacher(newExamClass);
     const newExam: ClassMockExam = {
       id: `exam-${Date.now()}`,
       title: newExamTitle.trim(),
@@ -649,11 +649,14 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
                           isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-800'
                         }`}
                       >
-                        {ALL_CLASSES_LIST.map((c) => (
-                          <option key={c} value={c}>
-                            Lớp {c} (GVCN: {HOMEROOM_TEACHERS[c].name})
-                          </option>
-                        ))}
+                        {ALL_CLASSES_LIST.map((c) => {
+                          const t = getClassHomeroomTeacher(c);
+                          return (
+                            <option key={c} value={c}>
+                              Lớp {c} {t ? `(GV: ${t.name})` : '(Chưa có GV đăng ký)'}
+                            </option>
+                          );
+                        })}
                       </select>
                     </div>
 

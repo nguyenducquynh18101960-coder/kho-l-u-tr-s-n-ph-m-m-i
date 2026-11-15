@@ -177,7 +177,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       color: 'text-emerald-500',
     },
     // User Requirement: "Thêm một tab 'Quản lý Lớp học' trong sidebar chỉ hiển thị cho người dùng có vai trò là giáo viên. Tab này cho phép giáo viên chọn lớp (từ danh sách 6A1-9D6) và xem bảng điều khiển tổng hợp về danh sách học sinh, bài tập đã nộp, và tiến độ ôn luyện của từng học sinh trong lớp đó."
-    ...(currentUser?.role === 'teacher' || isAdmin
+    ...((currentUser?.role === 'teacher' && currentUser?.isVerifiedTeacher !== false) || isAdmin
       ? [
           {
             id: 'class_management' as const,

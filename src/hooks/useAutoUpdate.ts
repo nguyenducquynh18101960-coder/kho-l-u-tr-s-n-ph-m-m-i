@@ -81,7 +81,7 @@ export function useAutoUpdate() {
                   id: 'dm-auto-update-' + Date.now(),
                   senderId: 'admin-mac-khanh-duy',
                   senderName: 'Mạc Khánh Duy (Quản trị viên)',
-                  senderAvatar: 'https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuyAdmin',
+                  senderAvatar: 'https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy',
                   content:
                     '📢 [THÔNG BÁO TỰ ĐỘNG - CẬP NHẬT ỨNG DỤNG]\nQuản trị viên Mạc Khánh Duy vừa phát hành bản cập nhật mới nhất cho hệ thống Max10 AI!\n✨ Tính năng mới: "Thông báo học tập" - Gửi thông báo đẩy và nhắc nhở trong ứng dụng 30 phút trước lịch kiểm tra hoặc hạn nộp bài tập đã lưu.\n📅 Tab "Lịch học cá nhân" & 🏆 "Bảng xếp hạng lớp học" trong tab Thành tích giúp bạn thi đua cùng bạn bè.\nChúc bạn học tập đạt trọn vẹn Điểm 10!',
                   timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),

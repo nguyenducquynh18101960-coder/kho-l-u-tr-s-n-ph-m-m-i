@@ -31,6 +31,8 @@ import {
   saveStudentAchievements,
   getTodayDateString,
 } from '../data/initialAchievements';
+import { loadHomeworkSubmissions } from '../data/classSystemData';
+import { STORAGE_KEY_AUTH_USER, UserAccount } from '../types/auth';
 import { GlobalXpLeaderboard } from './chatgpt/GlobalXpLeaderboard';
 import { ClassroomLeaderboard } from './chatgpt/ClassroomLeaderboard';
 import { soundEffects } from '../utils/soundEffects';
@@ -64,8 +66,67 @@ export const Achievements: React.FC<AchievementsProps> = ({
   const [hasCheckedInToday, setHasCheckedInToday] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<'classroom' | 'badges' | 'leaderboard'>('classroom');
 
-  // Listen for updates from other tabs/components
+  // Sync completed assignments, study minutes, and unlock digital badges dynamically
   useEffect(() => {
+    const syncAssignmentsAndStudyTime = () => {
+      try {
+        const rawUser = localStorage.getItem(STORAGE_KEY_AUTH_USER);
+        const user: UserAccount | null = rawUser ? JSON.parse(rawUser) : null;
+        const submissions = loadHomeworkSubmissions('all');
+        const userSubs = user
+          ? submissions.filter((s) => s.studentId === user.id || s.studentName === user.name)
+          : submissions;
+        const completedCount = Math.max(stats.completedAssignments || 0, userSubs.length);
+        const studyMins = Math.max(
+          stats.totalStudyMinutes || 0,
+          stats.streak.totalDaysActive * 25 + completedCount * 30
+        );
+
+        const today = getTodayDateString();
+        let changed =
+          completedCount !== (stats.completedAssignments || 0) ||
+          studyMins !== (stats.totalStudyMinutes || 0);
+
+        const updatedBadges = stats.badges.map((b) => {
+          if (b.id === 'badge-math-genius') {
+            const cur = Math.max(b.current, completedCount);
+            const unlocked = b.isUnlocked || cur >= b.target;
+            if (cur !== b.current || unlocked !== b.isUnlocked) changed = true;
+            return {
+              ...b,
+              current: Math.min(b.target, cur),
+              isUnlocked: unlocked,
+              unlockedAt: unlocked && !b.unlockedAt ? today : b.unlockedAt,
+            };
+          }
+          if (b.id === 'badge-hardworking-star') {
+            const cur = Math.max(b.current, studyMins);
+            const unlocked = b.isUnlocked || cur >= b.target;
+            if (cur !== b.current || unlocked !== b.isUnlocked) changed = true;
+            return {
+              ...b,
+              current: Math.min(b.target, cur),
+              isUnlocked: unlocked,
+              unlockedAt: unlocked && !b.unlockedAt ? today : b.unlockedAt,
+            };
+          }
+          return b;
+        });
+
+        if (changed) {
+          const nextStats: StudentAchievementStats = {
+            ...stats,
+            completedAssignments: completedCount,
+            totalStudyMinutes: studyMins,
+            badges: updatedBadges,
+          };
+          setStats(nextStats);
+          saveStudentAchievements(nextStats);
+        }
+      } catch (e) {}
+    };
+
+    syncAssignmentsAndStudyTime();
     const handleUpdate = (e: any) => {
       if (e.detail) {
         setStats(e.detail);
@@ -382,32 +443,104 @@ export const Achievements: React.FC<AchievementsProps> = ({
             </div>
           </div>
 
-          {/* 7-Day Activity Visual Row */}
-          <div className="mt-6 pt-5 border-t border-slate-200/60 dark:border-white/10 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-xs font-bold text-slate-500 dark:text-zinc-400">
-              <Calendar className="w-4 h-4 text-emerald-500" />
-              <span>Nhật ký 7 ngày gần nhất:</span>
+          {/* 7-Day Activity Visual Row & Student Profile Achievement Badges Showcase */}
+          <div className="mt-6 pt-5 border-t border-slate-200/60 dark:border-white/10 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-500 dark:text-zinc-400">
+                <Calendar className="w-4 h-4 text-emerald-500" />
+                <span>Nhật ký 7 ngày gần nhất:</span>
+              </div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                {past7Days.map((day) => (
+                  <div
+                    key={day.date}
+                    className={`flex flex-col items-center justify-center w-9 h-11 sm:w-11 sm:h-13 rounded-xl border text-xs font-bold transition-all ${
+                      day.isActive
+                        ? 'bg-emerald-500 text-white border-emerald-400 shadow-sm shadow-emerald-500/30'
+                        : day.isToday
+                        ? 'bg-amber-500/20 text-amber-500 border-amber-500/50'
+                        : isDark
+                        ? 'bg-white/5 text-zinc-500 border-white/5'
+                        : 'bg-slate-100 text-slate-400 border-slate-200'
+                    }`}
+                    title={`${day.date}: ${day.isActive ? 'Đã học' : 'Chưa điểm danh'}`}
+                  >
+                    <span className="text-[10px] uppercase opacity-75">{day.dayName}</span>
+                    <span className="text-xs font-black">{day.dayNum}</span>
+                    {day.isActive && <CheckCircle2 className="w-3 h-3 mt-0.5 fill-current" />}
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="flex items-center gap-2 sm:gap-3">
-              {past7Days.map((day) => (
-                <div
-                  key={day.date}
-                  className={`flex flex-col items-center justify-center w-9 h-11 sm:w-11 sm:h-13 rounded-xl border text-xs font-bold transition-all ${
-                    day.isActive
-                      ? 'bg-emerald-500 text-white border-emerald-400 shadow-sm shadow-emerald-500/30'
-                      : day.isToday
-                      ? 'bg-amber-500/20 text-amber-500 border-amber-500/50'
-                      : isDark
-                      ? 'bg-white/5 text-zinc-500 border-white/5'
-                      : 'bg-slate-100 text-slate-400 border-slate-200'
-                  }`}
-                  title={`${day.date}: ${day.isActive ? 'Đã học' : 'Chưa điểm danh'}`}
-                >
-                  <span className="text-[10px] uppercase opacity-75">{day.dayName}</span>
-                  <span className="text-xs font-black">{day.dayNum}</span>
-                  {day.isActive && <CheckCircle2 className="w-3 h-3 mt-0.5 fill-current" />}
+
+            {/* Student Profile Digital Achievement Badges Showcase */}
+            <div className="pt-4 border-t border-slate-200/50 dark:border-white/10">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <Award className="w-4 h-4 text-amber-500" />
+                  <h3 className="text-xs sm:text-sm font-black">
+                    Huy Hiệu Thành Tích Hồ Sơ Học Sinh (Achievement Badges)
+                  </h3>
                 </div>
-              ))}
+                <div className="flex items-center gap-3 text-[11px] font-bold">
+                  <span className="px-2.5 py-1 rounded-lg bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30">
+                    📝 {stats.completedAssignments || 0} bài tập hoàn thành
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30">
+                    ⏱️ {stats.totalStudyMinutes || 0} phút học tập
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('badges')}
+                    className="text-amber-600 dark:text-amber-400 hover:underline cursor-pointer font-black"
+                  >
+                    Xem tất cả ({unlockedCount}/{totalBadgesCount}) →
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                {stats.badges
+                  .filter((b) =>
+                    ['badge-math-genius', 'badge-hardworking-star', 'badge-score-10', 'badge-streak-10'].includes(b.id)
+                  )
+                  .map((b) => {
+                    const pct = Math.min(100, Math.round((b.current / Math.max(1, b.target)) * 100));
+                    return (
+                      <div
+                        key={b.id}
+                        onClick={() => setSelectedBadge(b)}
+                        className={`p-3 rounded-2xl border cursor-pointer transition-all hover:scale-[1.02] ${
+                          b.isUnlocked
+                            ? isDark
+                              ? 'bg-emerald-500/10 border-emerald-500/40'
+                              : 'bg-emerald-50/80 border-emerald-300'
+                            : isDark
+                            ? 'bg-white/5 border-white/10'
+                            : 'bg-white/80 border-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span className={`text-2xl ${b.isUnlocked ? '' : 'grayscale opacity-70'}`}>{b.icon}</span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-black truncate">{b.title}</p>
+                            <p className="text-[10px] text-slate-500 dark:text-zinc-400">
+                              {b.isUnlocked ? '✓ Đã mở khóa' : `${b.current}/${b.target} (${pct}%)`}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-white/10 mt-2 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${
+                              b.isUnlocked ? 'bg-emerald-500' : 'bg-amber-500'
+                            }`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
             </div>
           </div>
         </div>

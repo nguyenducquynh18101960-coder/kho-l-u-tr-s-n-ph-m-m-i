@@ -200,11 +200,11 @@ async function startServer() {
         id: "dm-admin-update-" + Date.now(),
         senderId: "admin-mac-khanh-duy",
         senderName: "Mạc Khánh Duy (Quản trị viên)",
-        senderAvatar: "https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuyAdmin",
+        senderAvatar: "https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy",
         recipientId: "all_broadcast",
         content:
           customMessage ||
-          "📢 [THÔNG BÁO TỰ ĐỘNG - MAX10 VỪA CẬP NHẬT PHIÊN BẢN MỚI]\nQuản trị viên Mạc Khánh Duy vừa phát hành bản cập nhật mới nhất cho hệ thống Max10 AI!\n✨ Tính năng mới: 'Thông báo học tập' - Gửi thông báo đẩy (push notification) và nhắc nhở trong ứng dụng 30 phút trước lịch kiểm tra hoặc hạn nộp bài tập đã lưu.\n📅 'Lịch học cá nhân' & 🏆 'Bảng xếp hạng lớp học' trong tab Thành tích giúp bạn thi đua cùng bạn bè.\n🎂 Đã bổ sung câu hỏi ngày tháng năm sinh với bất ngờ sinh nhật đặc biệt dành cho cả bạn học và quý thầy cô!\nỨng dụng hoạt động mượt mà, chúc các bạn học tập bứt phá Điểm 10!",
+          "📢 [THÔNG BÁO TỰ ĐỘNG - MAX10 VỪA CẬP NHẬT PHIÊN BẢN MỚI]\nQuản trị viên Mạc Khánh Duy vừa phát hành bản cập nhật mới nhất cho hệ thống Max10 AI!\n✨ Đã nâng cấp Quản lý Lớp học thực tế (Chỉ kích hoạt khi có Thầy/Cô đăng ký), Lịch thi chung, Duyệt bài tập & Biểu đồ Tổng hợp.\n💬 Hỗ trợ nhóm lớp không giới hạn học sinh và tag @từng thành viên + @Max10 AI.\nỨng dụng hoạt động mượt mà, chúc các bạn học tập bứt phá Điểm 10!",
         timestamp: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
         createdAt: Date.now(),
         isAdminUpdate: true,
@@ -224,6 +224,104 @@ async function startServer() {
       status: current,
       message: "Đã cập nhật rồi! Chỉ cần xuất bản là cập nhật, không phải chờ 1 tiếng và không quay lại ngày hôm sau, chỉ sau 60 giây!",
     });
+  });
+
+  // Real Admin Broadcast & Update Announcement right inside GroupChatStudio
+  app.post("/api/admin/broadcast", (req, res) => {
+    const { content, publishUpdate = false, senderId, senderName, senderAvatar } = req.body;
+    if (!content || !String(content).trim()) {
+      return res.status(400).json({ success: false, error: "Nội dung tin nhắn không được để trống" });
+    }
+
+    const db = loadSocialDb();
+    if (!db.directMessages) db.directMessages = [];
+
+    const now = Date.now();
+    const broadcastMsg = {
+      id: "dm-admin-broadcast-" + now + "-" + Math.random().toString(36).substring(2, 6),
+      senderId: senderId || "admin-mac-khanh-duy",
+      senderName: senderName || "Mạc Khánh Duy (Quản trị viên)",
+      senderAvatar: senderAvatar || "https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy",
+      recipientId: "all_broadcast",
+      content: String(content).trim(),
+      timestamp: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
+      createdAt: now,
+      isAdminUpdate: !!publishUpdate,
+    };
+
+    db.directMessages.push(broadcastMsg);
+    if (db.directMessages.length > 500) {
+      db.directMessages = db.directMessages.slice(-500);
+    }
+    saveSocialDb(db);
+
+    let updatedSystemStatus = null;
+    if (publishUpdate) {
+      const current = loadSystemStatus();
+      current.version = "v-" + now;
+      current.updatedAt = now;
+      current.lastPublishedAt = now;
+      current.isUpdating = false;
+      current.message = String(content).trim();
+      saveSystemStatus(current);
+      updatedSystemStatus = current;
+    }
+
+    res.json({ success: true, message: broadcastMsg, systemStatus: updatedSystemStatus });
+  });
+
+  // Real Admin Inbox: returns all threads with Admin + official broadcast channel
+  app.get("/api/admin/inbox", (_req, res) => {
+    const db = loadSocialDb();
+    const allDms = db.directMessages || [];
+    const usersMap = new Map<string, any>();
+    (db.users || []).forEach((u: any) => usersMap.set(u.id, u));
+
+    const broadcastMessages = allDms
+      .filter((m: any) => m.recipientId === "all_broadcast")
+      .sort((a: any, b: any) => (a.createdAt || 0) - (b.createdAt || 0));
+
+    const threadMap = new Map<string, any>();
+    allDms.forEach((m: any) => {
+      if (m.recipientId === "all_broadcast") return;
+      const involvesAdmin = m.senderId === "admin-mac-khanh-duy" || m.recipientId === "admin-mac-khanh-duy";
+      if (!involvesAdmin) return;
+
+      const partnerId = m.senderId === "admin-mac-khanh-duy" ? m.recipientId : m.senderId;
+      if (!partnerId || partnerId === "admin-mac-khanh-duy") return;
+
+      const partnerUser = usersMap.get(partnerId);
+      if (!threadMap.has(partnerId)) {
+        threadMap.set(partnerId, {
+          partnerId,
+          partnerName:
+            partnerUser?.name ||
+            (m.senderId === partnerId ? m.senderName : "Người dùng Max10"),
+          partnerAvatar:
+            partnerUser?.avatar ||
+            (m.senderId === partnerId ? m.senderAvatar : ""),
+          partnerRole: partnerUser?.role || "student",
+          presenceStatus: partnerUser?.presenceStatus || "online",
+          messages: [],
+        });
+      }
+      threadMap.get(partnerId).messages.push(m);
+    });
+
+    const threads = Array.from(threadMap.values()).map((t) => {
+      t.messages.sort((a: any, b: any) => (a.createdAt || 0) - (b.createdAt || 0));
+      const last = t.messages[t.messages.length - 1];
+      return {
+        ...t,
+        lastMessage: last?.content || "",
+        lastTimestamp: last?.timestamp || "Mới",
+        lastCreatedAt: last?.createdAt || 0,
+      };
+    });
+
+    threads.sort((a, b) => b.lastCreatedAt - a.lastCreatedAt);
+
+    res.json({ success: true, broadcastMessages, threads });
   });
 
   // ================= PAYMENT & AUTO-UPGRADE SYSTEM (VIETQR) =================
@@ -3542,6 +3640,7 @@ Yêu cầu kịch bản video gồm:
     blockedUsers?: { userId: string; blockedId: string; createdAt: string }[];
     groups?: any[];
     groupMessages?: Record<string, any[]>;
+    registeredClasses?: any[];
   }
 
   function loadSocialDb(): SocialDb {
@@ -3576,6 +3675,7 @@ Yêu cầu kịch bản video gồm:
           if (!parsed.blockedUsers) parsed.blockedUsers = [];
           if (!parsed.groups) parsed.groups = [];
           if (!parsed.groupMessages) parsed.groupMessages = {};
+          if (!parsed.registeredClasses) parsed.registeredClasses = [];
           return parsed;
         }
       }
@@ -3590,6 +3690,7 @@ Yêu cầu kịch bản video gồm:
       blockedUsers: [],
       groups: [],
       groupMessages: {},
+      registeredClasses: [],
     };
     try {
       fs.writeFileSync(SOCIAL_DB_PATH, JSON.stringify(initDb, null, 2), "utf-8");
@@ -3631,9 +3732,24 @@ Yêu cầu kịch bản video gồm:
     res.json({ success: true, users: formatted });
   });
 
-  // Sync / register user profile (Google, Facebook, Email, or Name)
+  // Sync / register user profile (Google, Facebook, Email, or Name + Teacher Verification)
   app.post("/api/users/sync", (req, res) => {
-    const { id, name, email, avatar, provider = "name", role = "student", presenceStatus = "online" } = req.body;
+    const {
+      id,
+      name,
+      email,
+      avatar,
+      provider = "name",
+      role = "student",
+      presenceStatus = "online",
+      isVerifiedTeacher,
+      teacherRoleType,
+      teachingSubject,
+      homeroomClass,
+      teachingClasses,
+      schoolName,
+      studentClass,
+    } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: "Name is required" });
     }
@@ -3650,6 +3766,13 @@ Yêu cầu kịch bản video gồm:
       provider,
       role,
       presenceStatus: presenceStatus || "online",
+      isVerifiedTeacher: Boolean(isVerifiedTeacher),
+      teacherRoleType,
+      teachingSubject,
+      homeroomClass,
+      teachingClasses,
+      schoolName,
+      studentClass,
       lastActive: Date.now(),
       createdAt: new Date().toLocaleDateString("vi-VN"),
     };
@@ -3662,6 +3785,35 @@ Yêu cầu kịch bản video gồm:
 
     saveSocialDb(db);
     res.json({ success: true, user: userObj });
+  });
+
+  // Real Class Registrations Endpoint (No fake teachers)
+  app.get("/api/classes/registered", (_req, res) => {
+    const db = loadSocialDb();
+    res.json({ success: true, entries: db.registeredClasses || [] });
+  });
+
+  app.post("/api/classes/register-teacher", (req, res) => {
+    const { entries = [] } = req.body;
+    const db = loadSocialDb();
+    if (!db.registeredClasses) db.registeredClasses = [];
+
+    if (Array.isArray(entries)) {
+      entries.forEach((entry: any) => {
+        if (!entry || !entry.classCode || !entry.teacherId) return;
+        const idx = db.registeredClasses!.findIndex(
+          (r: any) => r.teacherId === entry.teacherId && r.classCode === entry.classCode
+        );
+        if (idx >= 0) {
+          db.registeredClasses![idx] = entry;
+        } else {
+          db.registeredClasses!.unshift(entry);
+        }
+      });
+      saveSocialDb(db);
+    }
+
+    res.json({ success: true, entries: db.registeredClasses });
   });
 
   // Update presence status (online, dnd, gaming, offline)
@@ -4112,12 +4264,18 @@ Yêu cầu kịch bản video gồm:
     }
 
     const db = loadSocialDb();
-    const dms = (db.directMessages || []).filter(
-      (m: any) =>
-        (m.senderId === userId && m.recipientId === friendId) ||
-        (m.senderId === friendId && m.recipientId === userId) ||
-        (friendId === "admin-mac-khanh-duy" && m.senderId === "admin-mac-khanh-duy" && m.recipientId === "all_broadcast")
-    );
+    const dms = (db.directMessages || [])
+      .filter((m: any) => {
+        if (friendId === "all_broadcast") {
+          return m.recipientId === "all_broadcast";
+        }
+        return (
+          (m.senderId === userId && m.recipientId === friendId) ||
+          (m.senderId === friendId && m.recipientId === userId) ||
+          (friendId === "admin-mac-khanh-duy" && m.senderId === "admin-mac-khanh-duy" && m.recipientId === "all_broadcast")
+        );
+      })
+      .sort((a: any, b: any) => (a.createdAt || 0) - (b.createdAt || 0));
 
     res.json({ success: true, messages: dms });
   });
@@ -4369,14 +4527,13 @@ Yêu cầu kịch bản video gồm:
 
   // ==========================================
   // 🎛️ BẢNG ĐIỀU KHIỂN QUẢN TRỊ MAX10 AI (ADMIN CONTROL CENTER)
-  // (User Requested: "thanh điều khiển để điều khiển Max10 và xem tất cả tài khoản là cho quyền của bạn mạc khánh duy gmail là mackhanhduy992012@gmail.com chỉ có bạn đấy mới xem được tất cả và làm quản trị viên của Max10")
+  // (Mạc Khánh Duy - mackhanhduy992012@gmail.com là Quản trị viên tối cao thật duy nhất)
   // ==========================================
-  // User requirement: Mạc Khánh Duy là Quản trị viên tối cao (nguyenducquynh18101960@gmail.com)
   const SUPER_ADMIN_ACCOUNT = {
     id: "admin-mac-khanh-duy",
     name: "Mạc Khánh Duy",
-    email: "nguyenducquynh18101960@gmail.com",
-    emailOrPhone: "nguyenducquynh18101960@gmail.com",
+    email: "mackhanhduy992012@gmail.com",
+    emailOrPhone: "mackhanhduy992012@gmail.com",
     phone: "0778901259",
     school: "Ban Quản Trị Tối Cao Max10 AI",
     department: "Quản Trị Viên Hệ Thống",
@@ -4384,7 +4541,7 @@ Yêu cầu kịch bản video gồm:
     role: "admin",
     plan: "premium",
     status: "active",
-    avatar: "https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuyAdmin",
+    avatar: "https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy",
     joinedAt: "13/10/2026",
     lecturesCount: 25,
     questionsCount: 150,

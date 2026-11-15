@@ -1,5 +1,7 @@
 export type AuthProvider = 'google' | 'facebook' | 'email' | 'name' | 'guest' | 'admin';
 
+export type TeacherRoleType = 'subject' | 'homeroom' | 'both';
+
 export interface UserAccount {
   id: string;
   name: string;
@@ -14,6 +16,15 @@ export interface UserAccount {
   presenceStatus?: 'online' | 'dnd' | 'gaming' | 'offline';
   plan?: 'free' | 'plus' | 'premium';
   isSuperAdmin?: boolean;
+  // Teacher registration & verification fields
+  isVerifiedTeacher?: boolean;
+  teacherRoleType?: TeacherRoleType; // 'subject' = GV bộ môn, 'homeroom' = GV chủ nhiệm, 'both' = Cả hai
+  teachingSubject?: string;
+  homeroomClass?: string; // e.g., '9D1'
+  teachingClasses?: string[]; // e.g., ['9D1', '9D2']
+  schoolName?: string;
+  // Student class field
+  studentClass?: string;
 }
 
 export const STORAGE_KEY_AUTH_USER = 'max10_logged_in_user_v1';

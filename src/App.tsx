@@ -221,6 +221,27 @@ export function App() {
     }
   }, [isDark]);
 
+  // Sync registered teacher classes from backend
+  useEffect(() => {
+    fetch('/api/classes/registered')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.success && Array.isArray(data.classes) && data.classes.length > 0) {
+          try {
+            const raw = localStorage.getItem('max10_registered_classes_v2');
+            const existing = raw ? JSON.parse(raw) : [];
+            const map = new Map<string, any>();
+            [...data.classes, ...(Array.isArray(existing) ? existing : [])].forEach((c: any) => {
+              if (c && c.id) map.set(c.id, c);
+            });
+            localStorage.setItem('max10_registered_classes_v2', JSON.stringify(Array.from(map.values())));
+            window.dispatchEvent(new CustomEvent('max10_classes_updated'));
+          } catch {}
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Save Sessions
   useEffect(() => {
     try {
@@ -918,9 +939,15 @@ export function App() {
                 isDark={isDark}
                 currentUser={currentUser}
                 onNavigateToTab={(tab) => setActiveTab(tab)}
-                onOpenConversation={(teacherName) => {
-                  setActiveTab('chat');
-                  handleSendMessage(`Xin chào cô ${teacherName}, em muốn trao đổi về bài tập và tình hình học tập của lớp.`);
+                onOpenAuthModal={() => setShowAuthModal(true)}
+                onOpenConversation={(type, targetId) => {
+                  try {
+                    localStorage.setItem(
+                      'max10_target_chat_open',
+                      JSON.stringify({ type, targetId, timestamp: Date.now() })
+                    );
+                  } catch (e) {}
+                  setActiveTab('group');
                 }}
               />
             </div>

@@ -34,6 +34,8 @@ import {
 import { GradeLevel } from '../types';
 import { celebrationEngine } from '../utils/confettiFireworks';
 import { soundEffects } from '../utils/soundEffects';
+import { loadSharedClassExams, SharedClassExamEvent } from '../data/classSystemData';
+import { STORAGE_KEY_AUTH_USER, UserAccount } from '../types/auth';
 
 export type ScheduleCategory = 'exam' | 'homework' | 'event';
 export type SchedulePriority = 'urgent' | 'high' | 'normal' | 'low';
@@ -169,6 +171,66 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
     } catch (e) {}
     return INITIAL_SCHEDULE_EVENTS;
   });
+
+  // Lịch thi chung từ Giáo viên Chủ nhiệm (tự động hiển thị trên giao diện học sinh lớp đó)
+  const [sharedExams, setSharedExams] = useState<SharedClassExamEvent[]>(() => loadSharedClassExams('all'));
+  const [sharedCompletedMap, setSharedCompletedMap] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('max10_shared_exams_completed_v1');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_SCHEDULE, JSON.stringify(events));
+    } catch (e) {}
+  }, [events]);
+
+  useEffect(() => {
+    const refreshShared = () => setSharedExams(loadSharedClassExams('all'));
+    window.addEventListener('max10_shared_class_exams_updated', refreshShared);
+    window.addEventListener('storage', refreshShared);
+    return () => {
+      window.removeEventListener('max10_shared_class_exams_updated', refreshShared);
+      window.removeEventListener('storage', refreshShared);
+    };
+  }, []);
+
+  const currentUser: UserAccount | null = useMemo(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_AUTH_USER);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const relevantSharedExams = useMemo(() => {
+    if (currentUser?.role === 'student' && currentUser.studentClass) {
+      return sharedExams.filter((e) => e.classCode === currentUser.studentClass);
+    }
+    return sharedExams;
+  }, [sharedExams, currentUser]);
+
+  const allEvents = useMemo<ScheduleEvent[]>(() => {
+    const mappedShared: ScheduleEvent[] = relevantSharedExams.map((e) => ({
+      id: `shared-exam-${e.id}`,
+      title: `[Lịch Thi Chung Lớp ${e.classCode}] ${e.title}`,
+      category: 'exam',
+      subject: e.subject,
+      date: e.date,
+      time: e.time,
+      priority: 'urgent',
+      syllabus: e.syllabus,
+      notes: `Thông báo từ GVCN/GV ${e.creatorTeacherName}${e.notes ? `: ${e.notes}` : ''}`,
+      isCompleted: Boolean(sharedCompletedMap[`shared-exam-${e.id}`]),
+      createdAt: e.createdAt,
+    }));
+    return [...mappedShared, ...events];
+  }, [relevantSharedExams, sharedCompletedMap, events]);
 
   const [activeTab, setActiveTab] = useState<'timeline' | 'calendar'>('timeline');
   const [filterCategory, setFilterCategory] = useState<ScheduleCategory | 'all'>('all');
@@ -321,7 +383,7 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
       const now = Date.now();
       const leadMs = (alertSettings.leadMinutes || 30) * 60000;
 
-      for (const evt of events) {
+      for (const evt of allEvents) {
         if (evt.isCompleted) continue;
         if (evt.category === 'exam' && !alertSettings.notifyExams) continue;
         if (evt.category === 'homework' && !alertSettings.notifyHomework) continue;
@@ -391,7 +453,7 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
     checkStudyAlerts();
     const interval = setInterval(checkStudyAlerts, 20000);
     return () => clearInterval(interval);
-  }, [events, alertSettings]);
+  }, [allEvents, alertSettings]);
 
   const openAddModal = (category: ScheduleCategory = 'exam') => {
     setEditingEvent(null);
@@ -467,6 +529,21 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
 
   const handleToggleComplete = (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    if (id.startsWith('shared-exam-')) {
+      setSharedCompletedMap((prev) => {
+        const nextVal = !prev[id];
+        if (nextVal) {
+          soundEffects.playBadgeUnlocked();
+          celebrationEngine.launchConfetti(50);
+        }
+        const nextMap = { ...prev, [id]: nextVal };
+        try {
+          localStorage.setItem('max10_shared_exams_completed_v1', JSON.stringify(nextMap));
+        } catch {}
+        return nextMap;
+      });
+      return;
+    }
     setEvents((prev) =>
       prev.map((item) => {
         if (item.id === id) {
@@ -521,7 +598,7 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
 
   // Filtered & Sorted events
   const filteredEvents = useMemo(() => {
-    return events
+    return allEvents
       .filter((evt) => {
         if (filterCategory !== 'all' && evt.category !== filterCategory) return false;
         if (filterSubject !== 'all' && evt.subject !== filterSubject) return false;
@@ -544,13 +621,13 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
         }
         return a.date.localeCompare(b.date);
       });
-  }, [events, filterCategory, filterSubject, filterStatus, searchQuery]);
+  }, [allEvents, filterCategory, filterSubject, filterStatus, searchQuery]);
 
   // Statistics
-  const examCount = events.filter((e) => e.category === 'exam' && !e.isCompleted).length;
-  const homeworkCount = events.filter((e) => e.category === 'homework' && !e.isCompleted).length;
-  const eventCount = events.filter((e) => e.category === 'event' && !e.isCompleted).length;
-  const completedCount = events.filter((e) => e.isCompleted).length;
+  const examCount = allEvents.filter((e) => e.category === 'exam' && !e.isCompleted).length;
+  const homeworkCount = allEvents.filter((e) => e.category === 'homework' && !e.isCompleted).length;
+  const eventCount = allEvents.filter((e) => e.category === 'event' && !e.isCompleted).length;
+  const completedCount = allEvents.filter((e) => e.isCompleted).length;
 
   // Ask AI Study Plan for an event
   const handleAskAiForEvent = (evt: ScheduleEvent, e: React.MouseEvent) => {
@@ -580,7 +657,7 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
   const upcomingNearEvents = useMemo(() => {
     const now = Date.now();
     const next24h = now + 24 * 3600 * 1000;
-    return events
+    return allEvents
       .filter((evt) => !evt.isCompleted)
       .map((evt) => {
         try {
@@ -612,7 +689,7 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
       })
       .filter((item): item is NonNullable<typeof item> => item !== null && (item.isDueSoon || item.isOverdue))
       .sort((a, b) => a.targetTime - b.targetTime);
-  }, [events]);
+  }, [allEvents]);
 
   return (
     <div className="w-full h-full overflow-y-auto p-4 sm:p-6 lg:p-8">
@@ -1047,6 +1124,52 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
           )}
         </div>
 
+        {/* SHARED CLASS EXAMS AUTO-SYNCED FROM HOMEROOM TEACHER */}
+        {relevantSharedExams.length > 0 && (
+          <div
+            className={`p-4 sm:p-5 rounded-3xl border shadow-md space-y-3 ${
+              isDark
+                ? 'bg-gradient-to-r from-rose-950/60 via-[#151226] to-amber-950/40 border-rose-500/40 text-white'
+                : 'bg-gradient-to-r from-rose-50 via-amber-50/70 to-white border-rose-300 text-slate-900'
+            }`}
+          >
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <BellRing className="w-5 h-5 text-rose-500 animate-bounce" />
+                <h3 className="text-sm font-black">
+                  📢 Lịch Thi Chung Chính Thức Từ Giáo Viên Chủ Nhiệm ({relevantSharedExams.length} lịch thi)
+                </h3>
+              </div>
+              <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-rose-500 text-white">
+                Tự động đồng bộ
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {relevantSharedExams.map((se) => (
+                <div
+                  key={se.id}
+                  className={`p-3 rounded-2xl border ${
+                    isDark ? 'bg-black/30 border-white/10' : 'bg-white/90 border-rose-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400">
+                      Lớp {se.classCode} · {se.subject}
+                    </span>
+                    <span className="text-[11px] font-mono font-bold text-amber-600 dark:text-amber-400">
+                      {se.time} · {se.date}
+                    </span>
+                  </div>
+                  <p className="text-xs font-black">{se.title}</p>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5">
+                    Trọng tâm: {se.syllabus} · GV: {se.creatorTeacherName}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* View Switcher & Filter Controls Bar */}
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
           {/* View Tab Switcher: Timeline vs Calendar */}
@@ -1336,7 +1459,7 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
                   Tháng {calendarMonth + 1} / {calendarYear}
                 </h2>
                 <span className="text-xs text-slate-400 dark:text-zinc-500 font-semibold">
-                  ({events.length} lịch học trong hệ thống)
+                  ({allEvents.length} lịch học trong hệ thống)
                 </span>
               </div>
 
@@ -1389,7 +1512,7 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
               {Array.from({ length: daysInMonth }).map((_, idx) => {
                 const dayNum = idx + 1;
                 const formattedDate = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-                const dayEvents = events.filter((e) => e.date === formattedDate);
+                const dayEvents = allEvents.filter((e) => e.date === formattedDate);
                 const isToday = formattedDate === new Date().toISOString().split('T')[0];
                 const isSelected = selectedCalendarDay === formattedDate;
 
@@ -1469,16 +1592,18 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
                   </button>
                 </div>
 
-                {events.filter((e) => e.date === selectedCalendarDay).length === 0 ? (
+                {allEvents.filter((e) => e.date === selectedCalendarDay).length === 0 ? (
                   <p className="text-xs text-slate-400 italic">Không có bài kiểm tra hay bài tập nào trong ngày này.</p>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {events
+                    {allEvents
                       .filter((e) => e.date === selectedCalendarDay)
                       .map((evt) => (
                         <div
                           key={evt.id}
-                          onClick={() => openEditModal(evt)}
+                          onClick={() => {
+                            if (!evt.id.startsWith('shared-exam-')) openEditModal(evt);
+                          }}
                           className={`p-3 rounded-2xl border cursor-pointer ${
                             isDark ? 'bg-zinc-800/80 border-white/10' : 'bg-slate-50 border-slate-200'
                           }`}

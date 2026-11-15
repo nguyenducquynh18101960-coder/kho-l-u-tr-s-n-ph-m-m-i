@@ -191,7 +191,7 @@ export interface GroupMember {
   id: string;
   name: string;
   avatar?: string;
-  role: 'admin' | 'member' | 'ai_tutor' | 'deputy';
+  role: 'admin' | 'teacher' | 'member' | 'ai_tutor' | 'deputy';
   isAi?: boolean;
   school?: string;
   presenceStatus?: UserPresenceStatus;
@@ -203,7 +203,7 @@ export interface GroupChatMessage {
   senderId: string;
   senderName: string;
   senderAvatar?: string;
-  senderRole?: 'admin' | 'member' | 'ai_tutor' | 'system' | 'deputy';
+  senderRole?: 'admin' | 'teacher' | 'member' | 'ai_tutor' | 'system' | 'deputy';
   isAi?: boolean;
   content: string;
   timestamp: string;

@@ -42,6 +42,8 @@ export interface StudentAchievementStats {
   trapsDiscovered: number;
   questionsAsked: number;
   groupChatsSent: number;
+  completedAssignments?: number;
+  totalStudyMinutes?: number;
 }
 
 export const STORAGE_KEY_STUDENT_ACHIEVEMENTS = 'max10_student_achievements_v4';

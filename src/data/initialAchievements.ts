@@ -219,6 +219,36 @@ export const INITIAL_BADGES: StudentBadge[] = [
     xpReward: 300,
     isPinnedToProfile: false,
   },
+  {
+    id: 'badge-math-genius',
+    title: 'Toán Học Đại Tài',
+    englishTitle: 'Math Prodigy',
+    description: 'Hoàn thành xuất sắc 10 bài tập về nhà và luyện đề đạt điểm giỏi.',
+    icon: '🧮',
+    tier: 'gold',
+    category: 'mastery',
+    target: 10,
+    current: 0,
+    isUnlocked: false,
+    isClaimed: false,
+    xpReward: 650,
+    isPinnedToProfile: false,
+  },
+  {
+    id: 'badge-hardworking-star',
+    title: 'Chăm Chỉ Nhất Lớp',
+    englishTitle: 'Most Diligent Student',
+    description: 'Tích lũy từ 300 phút (5 giờ) ôn luyện học tập và nộp bài tập đầy đủ đúng hạn.',
+    icon: '🏅',
+    tier: 'diamond',
+    category: 'study',
+    target: 300,
+    current: 0,
+    isUnlocked: false,
+    isClaimed: false,
+    xpReward: 800,
+    isPinnedToProfile: false,
+  },
 ];
 
 export function getTodayDateString(): string {
@@ -242,6 +272,8 @@ export function loadStudentAchievements(): StudentAchievementStats {
 
         return {
           ...parsed,
+          completedAssignments: parsed.completedAssignments || 0,
+          totalStudyMinutes: parsed.totalStudyMinutes || 0,
           badges: mergedBadges,
           level: levelData.level,
           levelTitle: levelData.title,
@@ -279,6 +311,8 @@ export function loadStudentAchievements(): StudentAchievementStats {
     trapsDiscovered: 0,
     questionsAsked: 0,
     groupChatsSent: 0,
+    completedAssignments: 0,
+    totalStudyMinutes: 0,
   };
 }
 

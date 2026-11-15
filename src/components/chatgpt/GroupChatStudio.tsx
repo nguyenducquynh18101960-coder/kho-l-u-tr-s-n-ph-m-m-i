@@ -74,7 +74,7 @@ import {
   UserPresenceStatus,
   BlockedUserItem,
 } from '../../types';
-import { UserAccount } from '../../types/auth';
+import { UserAccount, ADMIN_ID, ADMIN_NAME, ADMIN_EMAIL } from '../../types/auth';
 import {
   INITIAL_GROUPS,
   INITIAL_GROUP_MESSAGES,
@@ -331,10 +331,36 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     });
   }, []);
 
-  // Current logged in / active user representation (Mạc Khánh Duy - Admin)
+  // Current logged in / active user representation
   const activeUserId = currentUser ? currentUser.id : 'user-local-' + userName.toLowerCase().replace(/\s+/g, '-');
-  const activeUserName = currentUser ? currentUser.name : userName || 'Mạc Khánh Duy';
+  const activeUserName = currentUser ? currentUser.name : userName || 'Bạn học';
   const activeUserAvatar = currentUser?.avatar || userAvatar;
+  const isRealAdmin = Boolean(
+    currentUser?.id === ADMIN_ID ||
+    currentUser?.isSuperAdmin ||
+    (currentUser?.email || '').toLowerCase() === ADMIN_EMAIL
+  );
+  const REAL_ADMIN_AVATAR = 'https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy';
+
+  // Admin Real Inbox & Broadcast states
+  const [adminInboxThreads, setAdminInboxThreads] = useState<Array<{
+    partnerId: string;
+    partnerName: string;
+    partnerAvatar?: string;
+    partnerRole?: string;
+    presenceStatus?: UserPresenceStatus;
+    lastMessage: string;
+    lastTimestamp: string;
+    lastCreatedAt: number;
+    messages: DirectChatMessage[];
+  }>>([]);
+  const [adminBroadcastMessages, setAdminBroadcastMessages] = useState<DirectChatMessage[]>([]);
+  const [adminQuickBroadcastText, setAdminQuickBroadcastText] = useState<string>('');
+  const [isSendingBroadcast, setIsSendingBroadcast] = useState<boolean>(false);
+
+  // @Mention autocomplete state for Group Chat
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionActiveIdx, setMentionActiveIdx] = useState<number>(0);
 
   // Presence status of current user
   const [userPresence, setUserPresence] = useState<UserPresenceStatus>(() => {
@@ -598,6 +624,26 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           setBlockedUsers(data.blocked);
         }
       }
+
+      // If logged in as REAL Admin (Mạc Khánh Duy), fetch full Admin Inbox & Broadcast channel
+      if (isRealAdmin) {
+        const resInbox = await fetch('/api/admin/inbox');
+        if (resInbox.ok) {
+          const data = await resInbox.json();
+          if (data && data.success) {
+            setAdminBroadcastMessages(data.broadcastMessages || []);
+            setAdminInboxThreads(data.threads || []);
+            setDirectMessages((prev) => {
+              const next = { ...prev };
+              next['all_broadcast'] = data.broadcastMessages || [];
+              (data.threads || []).forEach((t: any) => {
+                next[t.partnerId] = t.messages || [];
+              });
+              return next;
+            });
+          }
+        }
+      }
     } catch (e) {
       // Offline fallback
     }
@@ -756,7 +802,13 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     }, 2500);
 
     return () => clearInterval(interval);
-  }, [activeUserId, activeFriendId, activeGroupId, activeMode]);
+  }, [activeUserId, activeFriendId, activeGroupId, activeMode, isRealAdmin]);
+
+  useEffect(() => {
+    if (isRealAdmin && activeMode === 'direct' && !activeFriendId) {
+      setActiveFriendId('all_broadcast');
+    }
+  }, [isRealAdmin, activeMode, activeFriendId]);
 
   // Trigger search whenever friendSearchQuery changes or modal opens
   useEffect(() => {
@@ -1119,21 +1171,47 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
   const activeGroup = groups.find((g) => g.id === activeGroupId) || groups[0];
   const messages = activeGroupId ? groupMessages[activeGroupId] || [] : [];
 
-  // Active friend for 1-on-1 private chat (supports connecting with Admin Mạc Khánh Duy)
+  // Active friend for 1-on-1 private chat or Admin real inbox / broadcast channel
+  const matchedAdminThread = isRealAdmin
+    ? adminInboxThreads.find((t) => t.partnerId === activeFriendId)
+    : undefined;
+
   const activeFriend =
-    friends.find((f) => f.id === activeFriendId) ||
-    (activeFriendId === 'admin-mac-khanh-duy'
+    activeFriendId === 'all_broadcast'
       ? {
-          id: 'admin-mac-khanh-duy',
-          name: 'Mạc Khánh Duy (Quản trị viên)',
-          avatar: 'https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuyAdmin',
-          school: 'Ban Quản Trị Hệ Thống Max10 AI',
+          id: 'all_broadcast',
+          name: '📢 Thông Báo & Cập Nhật Từ Admin',
+          avatar: REAL_ADMIN_AVATAR,
+          school: `Kênh phát hành chính thức · ${ADMIN_EMAIL}`,
           status: 'friend' as const,
           presenceStatus: 'online' as const,
           role: 'admin',
         }
-      : undefined);
-  const isConfirmedFriend = !!activeFriend && (activeFriend.id === 'admin-mac-khanh-duy' || isFriend(activeFriend.id));
+      : friends.find((f) => f.id === activeFriendId) ||
+        (matchedAdminThread
+          ? {
+              id: matchedAdminThread.partnerId,
+              name: matchedAdminThread.partnerName,
+              avatar: matchedAdminThread.partnerAvatar,
+              school: matchedAdminThread.partnerRole === 'teacher' ? 'Giáo viên Max10' : 'Học sinh Max10',
+              status: 'friend' as const,
+              presenceStatus: matchedAdminThread.presenceStatus || ('online' as const),
+              role: matchedAdminThread.partnerRole || 'student',
+            }
+          : activeFriendId === ADMIN_ID && !isRealAdmin
+          ? {
+              id: ADMIN_ID,
+              name: `${ADMIN_NAME} (Quản trị viên Thật)`,
+              avatar: REAL_ADMIN_AVATAR,
+              school: `Quản trị viên tối cao · ${ADMIN_EMAIL}`,
+              status: 'friend' as const,
+              presenceStatus: 'online' as const,
+              role: 'admin',
+            }
+          : undefined);
+  const isConfirmedFriend =
+    !!activeFriend &&
+    (isRealAdmin || activeFriend.id === ADMIN_ID || activeFriend.id === 'all_broadcast' || isFriend(activeFriend.id));
   const currentDirectMsgs = activeFriendId ? directMessages[activeFriendId] || [] : [];
   const isFriendBlocked = useMemo(() => {
     if (!activeFriend) return false;
@@ -1219,6 +1297,36 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       setIsSendingDm(true);
 
       setInputMessage('');
+
+      // If Real Admin is sending in the official broadcast channel
+      if (activeFriend.id === 'all_broadcast' && isRealAdmin) {
+        try {
+          const res = await fetch('/api/admin/broadcast', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              content: text,
+              publishUpdate: false,
+              senderId: ADMIN_ID,
+              senderName: `${ADMIN_NAME} (Quản trị viên)`,
+              senderAvatar: REAL_ADMIN_AVATAR,
+            }),
+          });
+          const data = await res.json();
+          if (data?.success && data.message) {
+            setAdminBroadcastMessages((prev) => [...prev, data.message]);
+            setDirectMessages((prev) => ({
+              ...prev,
+              all_broadcast: [...(prev['all_broadcast'] || []), data.message],
+            }));
+          }
+        } catch (err) {}
+        setTimeout(() => setIsSendingDm(false), 250);
+        setToastMessage('Đã gửi thông báo Admin tới toàn bộ người dùng!');
+        setTimeout(() => setToastMessage(''), 2500);
+        return;
+      }
+
       const dmMsgId = 'dm-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
       const dmMsg: DirectChatMessage = {
         id: dmMsgId,
@@ -1352,6 +1460,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     }
 
     setInputMessage('');
+    setMentionQuery(null);
 
     // Clean group message sent normally:
     const userMsg: GroupChatMessage = {
@@ -1360,7 +1469,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       senderId: activeUserId,
       senderName: activeUserName,
       senderAvatar: activeUserAvatar,
-      senderRole: 'member',
+      senderRole: currentUser?.role === 'teacher' ? 'teacher' : currentUser?.role === 'admin' ? 'admin' : 'member',
       content: text,
       timestamp: timeStr,
       status: 'delivered',
@@ -1380,77 +1489,59 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       body: JSON.stringify(userMsg),
     }).catch(() => {});
 
-    // User Requirement: "khi gửi tin nhắn vào trong nhóm thì chỉ có người thật mới được nhắn tin ko cho AI nhắn"
-    // CẤM TUYỆT ĐỐI AI NHẮN TIN TRONG NHÓM - CHỈ CÓ NGƯỜI THẬT MỚI ĐƯỢC NHẮN TIN
+    // Trigger @Max10 AI in group ONLY when explicitly tagged with @Max10 AI or @AI
     const lower = text.toLowerCase();
     const isTaggingAi =
-      lower.includes('@ai') ||
+      lower.includes('@max10 ai') ||
       lower.includes('@max10') ||
-      lower.includes('@cô') ||
-      lower.includes('@thầy') ||
-      lower.includes('@giáo viên');
+      /(^|\s)@ai(\s|$|[.,!?])/.test(lower);
 
     if (isTaggingAi) {
-      setToastMessage('Trong nhóm chỉ có người thật mới được nhắn tin! AI không được nhắn tin trong nhóm. Để hỏi bài AI, bạn hãy mở mục Max10 AI.');
-      setTimeout(() => setToastMessage(''), 3500);
-    }
+      setIsAiReplying(true);
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: `Bạn là Max10 AI - trợ lý học tập trong nhóm lớp "${activeGroup.name}". Học sinh "${activeUserName}" vừa tag bạn: "${text}". Hãy giải thích ngắn gọn, rõ ràng và dễ hiểu bằng tiếng Việt.`,
+            grade: currentGrade,
+            subject: activeGroup.subject || 'Toán',
+          }),
+        });
+        const data = await res.json();
+        const aiText =
+          data?.reply ||
+          data?.text ||
+          `Chào **${activeUserName}**! Mình đã nhận được câu hỏi của bạn trong nhóm **${activeGroup.name}**. Hãy gửi thêm đề bài chi tiết để mình hướng dẫn từng bước đạt Điểm 10 nhé!`;
 
-    // THÀNH VIÊN NGƯỜI THẬT TRONG NHÓM TƯƠNG TÁC (CHỈ NGƯỜI THẬT MỚI ĐƯỢC NHẮN TIN, KHÔNG CÓ AI)
-    const otherMembers = (activeGroup.members || []).filter(
-      (m) =>
-        m.id !== activeUserId &&
-        !isAiEntity(m) &&
-        !m.id.startsWith('ai-') &&
-        !m.id.startsWith('teacher-')
-    );
+        const aiGroupReply: GroupChatMessage = {
+          id: 'ai-group-' + Date.now(),
+          groupId: activeGroupId,
+          senderId: 'ai-max10-group',
+          senderName: 'Max10 AI (AI trong nhóm)',
+          senderAvatar: '/max10-avatar.jpg',
+          senderRole: 'ai_tutor',
+          isAi: true,
+          content: aiText,
+          timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+        };
 
-      if (otherMembers.length > 0) {
-        // Kiểm tra xem tin nhắn có tag thành viên nào không
-        const taggedMember = otherMembers.find((m) =>
-          lower.includes(`@${m.name.toLowerCase()}`) ||
-          lower.includes(m.name.toLowerCase())
-        );
+        setGroupMessages((prev) => ({
+          ...prev,
+          [activeGroupId]: [...(prev[activeGroupId] || []), aiGroupReply],
+        }));
 
-        const respondingMember = taggedMember || otherMembers[Math.floor(Math.random() * otherMembers.length)];
-
-        setTimeout(() => {
-          let peerReply = '';
-          if (taggedMember) {
-            peerReply = `Chào **${activeUserName}**! Mình nghe nè, bài tập này bạn làm đến đâu rồi? Để mình gửi thử cách giải và đáp số nhé!`;
-          } else if (lower.includes('chào') || lower.includes('hello') || lower.includes('hi')) {
-            peerReply = `Chào **${activeUserName}** nhé! Hôm nay nhóm mình cùng thảo luận và làm bài tập nào thế?`;
-          } else if (lower.includes('bài') || lower.includes('toán') || lower.includes('văn') || lower.includes('lý') || lower.includes('hóa') || lower.includes('sinh') || lower.includes('anh') || lower.includes('?') || lower.includes('sao')) {
-            peerReply = `Câu này hay đó **${activeUserName}**! Mình cũng đang xem lại phần công thức và phương pháp giải, bạn chú ý tránh mấy cái bẫy đề bài nhé!`;
-          } else {
-            peerReply = `Đúng rồi đó, mình hoàn toàn đồng ý! Có câu nào cần giải chi tiết nữa thì ${activeUserName} cứ gửi lên nhóm để mọi người cùng thảo luận nha 👍`;
-          }
-
-          const peerMsg: GroupChatMessage = {
-            id: 'peer-' + Date.now(),
-            groupId: activeGroupId,
-            senderId: respondingMember.id,
-            senderName: respondingMember.name,
-            senderAvatar: respondingMember.avatar,
-            senderRole: respondingMember.role || 'member',
-            content: peerReply,
-            timestamp: new Date().toLocaleTimeString('vi-VN', {
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-          };
-
-          setGroupMessages((prev) => ({
-            ...prev,
-            [activeGroupId]: [...(prev[activeGroupId] || []), peerMsg],
-          }));
-
-          fetch(`/api/groups/${encodeURIComponent(activeGroupId)}/messages`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(peerMsg),
-          }).catch(() => {});
-        }, 1200);
+        fetch(`/api/groups/${encodeURIComponent(activeGroupId)}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(aiGroupReply),
+        }).catch(() => {});
+      } catch (err) {
+        // Silent fail on network error
+      } finally {
+        setIsAiReplying(false);
       }
+    }
   };
 
   // Create a new group (User requested: "nhóm khi tạo chỉ bạn và bạn mới có thể thêm người vào")
@@ -1789,24 +1880,54 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       });
     });
 
-    // Always provide Administrator Mạc Khánh Duy as an official contact for non-admin users
-    if (activeUserId !== 'admin-mac-khanh-duy' && friends.every((f) => f.id !== 'admin-mac-khanh-duy')) {
-      const msgs = directMessages['admin-mac-khanh-duy'] || [];
+    // Add official Admin conversations:
+    // - If logged in as Real Admin: show Official Broadcast/Update Channel + every real student/teacher thread in Admin Inbox
+    // - If logged in as Student/Teacher: show Real Admin (Mạc Khánh Duy) contact backed by server
+    if (isRealAdmin) {
+      const lastBc = adminBroadcastMessages[adminBroadcastMessages.length - 1];
+      list.unshift({
+        id: 'all_broadcast',
+        type: 'direct',
+        name: '📢 Tin nhắn & Cập nhật từ Admin (Toàn hệ thống)',
+        avatar: REAL_ADMIN_AVATAR,
+        presenceStatus: 'online',
+        lastMessage: lastBc ? lastBc.content : 'Gửi tin nhắn & thông báo cập nhật tới toàn bộ học sinh và thầy cô',
+        lastTimestamp: lastBc ? lastBc.timestamp : 'Sẵn sàng',
+        unreadCount: 0,
+        data: { id: 'all_broadcast', role: 'admin' },
+      });
+
+      adminInboxThreads.forEach((t) => {
+        if (list.some((x) => x.id === t.partnerId && x.type === 'direct')) return;
+        list.push({
+          id: t.partnerId,
+          type: 'direct',
+          name: t.partnerName,
+          avatar: t.partnerAvatar,
+          presenceStatus: t.presenceStatus || 'online',
+          lastMessage: t.lastMessage,
+          lastTimestamp: t.lastTimestamp,
+          unreadCount: 0,
+          data: { id: t.partnerId, role: t.partnerRole || 'student' },
+        });
+      });
+    } else if (friends.every((f) => f.id !== ADMIN_ID)) {
+      const msgs = directMessages[ADMIN_ID] || [];
       const lastMsg = msgs[msgs.length - 1];
       list.unshift({
-        id: 'admin-mac-khanh-duy',
+        id: ADMIN_ID,
         type: 'direct',
-        name: 'Mạc Khánh Duy (Quản trị viên)',
-        avatar: 'https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuyAdmin',
+        name: `${ADMIN_NAME} (Quản trị viên Thật)`,
+        avatar: REAL_ADMIN_AVATAR,
         presenceStatus: 'online',
-        lastMessage: lastMsg ? lastMsg.content : '📢 Quản trị viên hệ thống Max10 AI',
-        lastTimestamp: lastMsg ? lastMsg.timestamp : 'Luôn hoạt động',
+        lastMessage: lastMsg ? lastMsg.content : `📩 Nhắn tin trực tiếp tới Quản trị viên (${ADMIN_EMAIL})`,
+        lastTimestamp: lastMsg ? lastMsg.timestamp : 'Trực tuyến',
         unreadCount: 0,
         data: {
-          id: 'admin-mac-khanh-duy',
-          name: 'Mạc Khánh Duy (Quản trị viên)',
-          avatar: 'https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuyAdmin',
-          school: 'Ban Quản Trị Hệ Thống Max10 AI',
+          id: ADMIN_ID,
+          name: `${ADMIN_NAME} (Quản trị viên Thật)`,
+          avatar: REAL_ADMIN_AVATAR,
+          school: `Quản trị viên hệ thống · ${ADMIN_EMAIL}`,
           status: 'friend',
           presenceStatus: 'online',
           role: 'admin',
@@ -1814,7 +1935,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       });
     }
 
-    // Add groups
+    // Add groups (including class groups with unlimited members)
     groups.forEach((g) => {
       const msgs = groupMessages[g.id] || [];
       const lastMsg = msgs[msgs.length - 1];
@@ -1836,8 +1957,10 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       });
     });
 
-    // Sort by activity
+    // Keep official broadcast first for Admin, sort remaining by activity
     list.sort((a, b) => {
+      if (a.id === 'all_broadcast') return -1;
+      if (b.id === 'all_broadcast') return 1;
       return (b.lastTimestamp || '').localeCompare(a.lastTimestamp || '');
     });
 
@@ -1854,7 +1977,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     if (categoryFilter !== 'all') {
       filtered = filtered.filter((item) => {
         const cat = getSenderCategory(
-          { name: item.name, role: item.type === 'group' ? 'admin' : undefined },
+          { name: item.name, role: item.data?.role || (item.type === 'group' ? 'admin' : undefined) },
           { isDirectFriend: item.type === 'direct' }
         );
         return cat === categoryFilter;
@@ -1868,7 +1991,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     }
 
     return filtered;
-  }, [friends, groups, directMessages, groupMessages, searchQuery, filterTab, categoryFilter, activeUserId]);
+  }, [friends, groups, directMessages, groupMessages, searchQuery, filterTab, categoryFilter, activeUserId, isRealAdmin, adminInboxThreads, adminBroadcastMessages]);
 
   // Handler to select conversation
   const handleSelectConversation = (item: { id: string; type: 'direct' | 'group' }) => {
@@ -1902,22 +2025,98 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
   }, [currentDirectMsgs, chatSearchText]);
 
   const displayedGroupMsgs = useMemo(() => {
-    // Chỉ có người thật mới được nhắn tin trong nhóm, loại bỏ tuyệt đối tin nhắn AI
-    const humanOnlyMsgs = messages.filter(
+    // Hiển thị thành viên người thật + Max10 AI (khi được tag @Max10 AI trong nhóm), loại bỏ bot giả cũ
+    const cleanMsgs = messages.filter(
       (m) =>
-        !m.isAi &&
-        m.senderRole !== 'ai_tutor' &&
-        !(m.senderId || '').startsWith('ai-') &&
+        m.senderId !== 'user-quynh' &&
         !(m.senderId || '').startsWith('teacher-') &&
-        !(m.senderName || '').toLowerCase().includes('max10 ai') &&
-        !(m.senderName || '').toLowerCase().includes('trợ lý ai')
+        !(m.senderId || '').startsWith('std-')
     );
-    if (!chatSearchText.trim()) return humanOnlyMsgs;
+    if (!chatSearchText.trim()) return cleanMsgs;
     const q = chatSearchText.toLowerCase();
-    return humanOnlyMsgs.filter(
+    return cleanMsgs.filter(
       (m) => m.content.toLowerCase().includes(q) || m.senderName.toLowerCase().includes(q)
     );
   }, [messages, chatSearchText]);
+
+  // Compute live @mention candidates for Group Chat (every member + AI trong nhóm)
+  const mentionCandidates = useMemo(() => {
+    if (activeMode !== 'group' || !activeGroup || mentionQuery === null) return [];
+    const q = mentionQuery.toLowerCase().trim();
+    const list: Array<{ id: string; name: string; roleLabel: string; avatar?: string; isAi?: boolean }> = [
+      {
+        id: 'ai-max10-group',
+        name: 'Max10 AI',
+        roleLabel: 'AI trong nhóm · Hỗ trợ giải bài',
+        avatar: '/max10-avatar.jpg',
+        isAi: true,
+      },
+      ...(activeGroup.members || [])
+        .filter((m) => !isAiEntity(m))
+        .map((m) => ({
+          id: m.id,
+          name: m.name,
+          roleLabel:
+            m.role === 'teacher'
+              ? 'Giáo viên trong lớp'
+              : m.role === 'admin'
+              ? 'Trưởng nhóm'
+              : 'Học sinh thành viên',
+          avatar: m.avatar,
+          isAi: false,
+        })),
+    ];
+    if (!q) return list;
+    return list.filter((item) => item.name.toLowerCase().includes(q));
+  }, [activeMode, activeGroup, mentionQuery]);
+
+  const handleInsertMention = (candidateName: string) => {
+    const replaced = inputMessage.replace(/(^|\s)@([^\s@]*)$/, `$1@${candidateName} `);
+    setInputMessage(replaced);
+    setMentionQuery(null);
+    setMentionActiveIdx(0);
+  };
+
+  const handleAdminQuickBroadcast = async (publishUpdate: boolean) => {
+    const content = adminQuickBroadcastText.trim();
+    if (!content || !isRealAdmin || isSendingBroadcast) return;
+    setIsSendingBroadcast(true);
+    try {
+      const res = await fetch('/api/admin/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content,
+          publishUpdate,
+          senderId: ADMIN_ID,
+          senderName: `${ADMIN_NAME} (Quản trị viên)`,
+          senderAvatar: REAL_ADMIN_AVATAR,
+        }),
+      });
+      const data = await res.json();
+      if (data?.success && data.message) {
+        setAdminBroadcastMessages((prev) => [...prev, data.message]);
+        setDirectMessages((prev) => ({
+          ...prev,
+          all_broadcast: [...(prev['all_broadcast'] || []), data.message],
+        }));
+        setAdminQuickBroadcastText('');
+        setActiveMode('direct');
+        setActiveFriendId('all_broadcast');
+        setToastMessage(
+          publishUpdate
+            ? '🚀 Đã gửi tin nhắn & phát hành thông báo cập nhật từ Admin Thật!'
+            : '📢 Đã gửi tin nhắn Admin tới toàn hệ thống!'
+        );
+        setTimeout(() => setToastMessage(''), 3500);
+      }
+    } catch (e) {
+      setToastMessage('Lỗi gửi thông báo Admin.');
+      setTimeout(() => setToastMessage(''), 2500);
+    } finally {
+      setIsSendingBroadcast(false);
+    }
+  };
 
   const hasActiveChat = Boolean((activeMode === 'direct' && activeFriend) || (activeMode === 'group' && activeGroup));
 
@@ -2251,6 +2450,46 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
             );
           })}
         </div>
+
+        {/* REAL ADMIN COMPOSER CARD (ONLY FOR MẠC KHÁNH DUY ADMIN THẬT) */}
+        {isRealAdmin && (
+          <div className="p-2.5 border-b border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent space-y-2">
+            <div className="flex items-center justify-between gap-1.5">
+              <span className="text-[10px] font-black text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                <span>👑</span>
+                <span>Admin Thật: {ADMIN_NAME}</span>
+              </span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">
+                Gửi tin & Cập nhật
+              </span>
+            </div>
+            <textarea
+              rows={2}
+              value={adminQuickBroadcastText}
+              onChange={(e) => setAdminQuickBroadcastText(e.target.value)}
+              placeholder="Soạn tin nhắn hoặc thông báo cập nhật từ Admin gửi toàn hệ thống..."
+              className="w-full px-2.5 py-1.5 rounded-xl bg-zinc-900/90 border border-amber-500/30 text-[11px] text-white placeholder-zinc-500 outline-none focus:border-amber-400 resize-none"
+            />
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                disabled={!adminQuickBroadcastText.trim() || isSendingBroadcast}
+                onClick={() => handleAdminQuickBroadcast(false)}
+                className="py-1.5 px-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-bold text-[10px] transition-colors cursor-pointer"
+              >
+                📢 Gửi Tin Nhắn
+              </button>
+              <button
+                type="button"
+                disabled={!adminQuickBroadcastText.trim() || isSendingBroadcast}
+                onClick={() => handleAdminQuickBroadcast(true)}
+                className="py-1.5 px-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-black text-[10px] transition-colors cursor-pointer"
+              >
+                🚀 Gửi & Cập Nhật App
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Conversation List Rows */}
         <div className="flex-1 overflow-y-auto divide-y divide-slate-100/60 dark:divide-zinc-800/40">
@@ -3010,18 +3249,95 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           </div>
         )}
 
-        {/* CHAT INPUT BAR WITH DYNAMIC SEND / LIKE BUTTON */}
-        <div className="p-3 bg-white dark:bg-[#16181e] border-t border-slate-200 dark:border-[#22252d]">
+        {/* CHAT INPUT BAR WITH LIVE @MENTION DROPDOWN & DYNAMIC SEND / LIKE BUTTON */}
+        <div className="p-3 bg-white dark:bg-[#16181e] border-t border-slate-200 dark:border-[#22252d] relative">
+          {/* LIVE @MENTION POPOVER (Từng thành viên trong nhóm + Max10 AI) */}
+          {activeMode === 'group' && mentionQuery !== null && mentionCandidates.length > 0 && (
+            <div className="absolute bottom-full left-3 right-3 mb-2 max-h-60 overflow-y-auto rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-[#1c2029] shadow-2xl z-40 p-1.5 space-y-0.5">
+              <div className="px-2.5 py-1 flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-zinc-400 border-b border-slate-100 dark:border-zinc-800 mb-1">
+                <span>Tag thành viên hoặc AI trong nhóm (@)</span>
+                <span className="text-blue-500">↑↓ Enter để chọn</span>
+              </div>
+              {mentionCandidates.map((cand, idx) => {
+                const isSelected = idx === mentionActiveIdx;
+                return (
+                  <button
+                    key={cand.id}
+                    type="button"
+                    onClick={() => handleInsertMention(cand.name)}
+                    className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'bg-blue-600 text-white'
+                        : 'hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200'
+                    }`}
+                  >
+                    {cand.avatar ? (
+                      <img src={cand.avatar} alt={cand.name} className="w-7 h-7 rounded-full object-cover shrink-0 border border-white/20" />
+                    ) : (
+                      <div className="w-7 h-7 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-bold shrink-0">
+                        {cand.name.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-extrabold truncate">@{cand.name}</span>
+                        {cand.isAi && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 border border-amber-400/40 font-black">
+                            AI
+                          </span>
+                        )}
+                      </div>
+                      <p className={`text-[10px] truncate ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
+                        {cand.roleLabel}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <form onSubmit={handleSendMessage} className="flex items-center gap-2">
             <div className="relative flex-1">
               <input
                 type="text"
                 disabled={activeMode === 'direct' && isFriendBlocked}
                 value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setInputMessage(val);
+                  if (activeMode === 'group') {
+                    const m = val.match(/(?:^|\s)@([^\s@]*)$/);
+                    if (m) {
+                      setMentionQuery(m[1] || '');
+                      setMentionActiveIdx(0);
+                    } else {
+                      setMentionQuery(null);
+                    }
+                  } else {
+                    setMentionQuery(null);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (activeMode === 'group' && mentionQuery !== null && mentionCandidates.length > 0) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setMentionActiveIdx((prev) => (prev + 1) % mentionCandidates.length);
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setMentionActiveIdx((prev) => (prev - 1 + mentionCandidates.length) % mentionCandidates.length);
+                    } else if (e.key === 'Enter' || e.key === 'Tab') {
+                      e.preventDefault();
+                      const chosen = mentionCandidates[mentionActiveIdx] || mentionCandidates[0];
+                      if (chosen) handleInsertMention(chosen.name);
+                    } else if (e.key === 'Escape') {
+                      setMentionQuery(null);
+                    }
+                  }
+                }}
                 placeholder={
                   activeMode === 'group'
-                    ? 'Nhắn tin trò chuyện cùng nhóm (Chỉ người thật, không có AI)...'
+                    ? 'Nhắn tin cùng nhóm (Gõ @ để tag từng thành viên hoặc @Max10 AI)...'
                     : `Nhập tin nhắn tới ${activeConversationTitle}...`
                 }
                 className={`w-full py-2.5 pl-3.5 pr-10 rounded-2xl border text-xs sm:text-sm outline-hidden transition-all ${

@@ -26,12 +26,16 @@ import { soundEffects } from '../../utils/soundEffects';
 import {
   ALL_CLASSES_LIST,
   ClassCode,
-  HOMEROOM_TEACHERS,
   ClassStudent,
   HomeworkStatus,
+  getActiveClassCodes,
+  getClassHomeroomTeacher,
   loadClassStudents,
   kickStudentFromClass,
+  isAiOrFakeStudent,
+  loadCollectiveBadges,
 } from '../../data/classSystemData';
+import { STORAGE_KEY_AUTH_USER, UserAccount } from '../../types/auth';
 
 export interface ClassmateRanking {
   id: string;
@@ -39,8 +43,8 @@ export interface ClassmateRanking {
   avatar: string;
   gender: 'male' | 'female' | 'other';
   className: string;
-  score: number; // Điểm số thi đua
-  questionsSolved: number; // Số câu hỏi đã giải quyết
+  score: number; // Điểm số thi đua thực tế
+  questionsSolved: number; // Số câu hỏi / bài tập đã giải quyết
   streakDays: number; // Chuỗi ngày học
   badgesCount: number; // Số huy hiệu
   isCurrentUser?: boolean;
@@ -70,100 +74,131 @@ export const ClassroomLeaderboard: React.FC<ClassroomLeaderboardProps> = ({
   onNavigateToTab,
   onOpenDirectChat,
 }) => {
-  // 24 Classes selector
+  const [reloadKey, setReloadKey] = useState<number>(0);
+
+  useEffect(() => {
+    const refresh = () => setReloadKey((prev) => prev + 1);
+    window.addEventListener('max10_classes_updated', refresh);
+    window.addEventListener('max10_class_students_updated', refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener('max10_classes_updated', refresh);
+      window.removeEventListener('max10_class_students_updated', refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
+
+  const currentUser: UserAccount | null = useMemo(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_AUTH_USER);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  }, [reloadKey]);
+
+  // Chỉ hiển thị các lớp thực tế đã có Giáo viên thật đăng ký!
+  const activeClasses = useMemo(() => getActiveClassCodes(), [reloadKey]);
   const [selectedClass, setSelectedClass] = useState<ClassCode>('9D1');
+
+  useEffect(() => {
+    if (activeClasses.length > 0 && !activeClasses.includes(selectedClass)) {
+      if (currentUser?.studentClass && activeClasses.includes(currentUser.studentClass as ClassCode)) {
+        setSelectedClass(currentUser.studentClass as ClassCode);
+      } else {
+        setSelectedClass(activeClasses[0]);
+      }
+    }
+  }, [activeClasses, selectedClass, currentUser]);
+
   const [sortBy, setSortBy] = useState<'score' | 'questions' | 'streak'>('score');
   const [filterHomework, setFilterHomework] = useState<'all' | 'submitted' | 'unsubmitted' | 'practicing'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [cheeredIds, setCheeredIds] = useState<Record<string, number>>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  // Kick student modal state
   const [studentToKick, setStudentToKick] = useState<ClassStudent | null>(null);
 
-  // Reload trigger for local storage sync
-  const [reloadKey, setReloadKey] = useState<number>(0);
-
-  // Load students for currently selected class (100% human Vietnamese students, ZERO AI bots)
+  // Load 100% học sinh thật trong lớp đang chọn (loại bỏ tuyệt đối AI & học sinh giả)
   const classStudents = useMemo(() => {
-    return loadClassStudents(selectedClass);
-  }, [selectedClass, reloadKey]);
+    if (activeClasses.length === 0) return [];
+    return loadClassStudents(selectedClass).filter((s) => !isAiOrFakeStudent(s) && s.isVerifiedHuman);
+  }, [selectedClass, reloadKey, activeClasses]);
 
-  // Current Homeroom Teacher (100% real human teacher)
-  const teacher = HOMEROOM_TEACHERS[selectedClass] || HOMEROOM_TEACHERS['9D1'];
+  const teacher = useMemo(() => {
+    if (activeClasses.length === 0) return null;
+    return getClassHomeroomTeacher(selectedClass);
+  }, [selectedClass, reloadKey, activeClasses]);
 
-  // Calculate statistics
-  const submittedCount = useMemo(() => {
-    return classStudents.filter((s) => s.homeworkStatus === 'submitted').length;
-  }, [classStudents]);
+  const collectiveBadges = useMemo(() => {
+    if (activeClasses.length === 0) return [];
+    return loadCollectiveBadges(selectedClass);
+  }, [selectedClass, reloadKey, activeClasses]);
 
-  const notSubmittedCount = useMemo(() => {
-    return classStudents.filter((s) => s.homeworkStatus === 'unsubmitted').length;
-  }, [classStudents]);
+  const submittedCount = useMemo(() => classStudents.filter((s) => s.homeworkStatus === 'submitted').length, [classStudents]);
+  const notSubmittedCount = useMemo(() => classStudents.filter((s) => s.homeworkStatus === 'unsubmitted').length, [classStudents]);
+  const practicingCount = useMemo(() => classStudents.filter((s) => s.homeworkStatus === 'practicing').length, [classStudents]);
 
-  const practicingCount = useMemo(() => {
-    return classStudents.filter((s) => s.homeworkStatus === 'practicing').length;
-  }, [classStudents]);
-
-  // Compute current user's entry in this class
-  const currentUserEntry: ClassmateRanking = useMemo(() => {
-    const questionsCount = Math.max(
-      Math.round(currentStats.totalXp / 20),
-      currentStats.badges.reduce((acc, b) => acc + (b.category === 'mastery' ? b.current : 0), 0) + 45
-    );
-
-    return {
-      id: 'current-user-me',
-      name: `${userName} (Bạn)`,
-      avatar: userAvatar || '',
-      gender: 'other',
-      className: `Lớp ${selectedClass}`,
-      score: currentStats.totalXp + 1400,
-      questionsSolved: questionsCount,
-      streakDays: currentStats.streak.currentStreak || 10,
-      badgesCount: currentStats.badges.filter((b) => b.isUnlocked).length || 7,
-      isCurrentUser: true,
-      cheerCount: 68,
-      status: 'online',
-      title: currentStats.levelTitle || 'Thủ Khoa Săn Điểm 10',
-      dob: '2010-09-15',
-      homeworkStatus: 'submitted',
-      examPracticeCount: 14,
-      avgScore: 9.8,
-    };
-  }, [currentStats, userName, userAvatar, selectedClass]);
-
-  // Transform class students into rankings & append current user
+  // Chuyển đổi danh sách học sinh thật sang bảng xếp hạng (loại trừ hoàn toàn AI)
   const classmatesList: ClassmateRanking[] = useMemo(() => {
-    const list: ClassmateRanking[] = classStudents.map((s, index) => ({
-      id: s.id,
-      name: s.name,
-      avatar: s.avatar,
-      gender: s.gender,
-      className: `Lớp ${selectedClass}`,
-      score: 1800 + (classStudents.length - index) * 120 + s.examPracticeCount * 40,
-      questionsSolved: 65 + s.examPracticeCount * 8 + Math.round(s.avgScore * 5),
-      streakDays: 4 + (index % 12),
-      badgesCount: 3 + (index % 6),
-      cheerCount: 12 + (index * 3) % 25,
-      status: index % 3 === 0 ? 'studying' : index % 2 === 0 ? 'online' : 'offline',
-      title: s.avgScore >= 9.0 ? 'Thủ Khoa Săn Điểm 10' : s.avgScore >= 8.0 ? 'Chiến Binh Bứt Phá' : 'Học Sinh Chăm Chỉ',
-      dob: s.dob,
-      homeworkStatus: s.homeworkStatus,
-      examPracticeCount: s.examPracticeCount,
-      avgScore: s.avgScore,
-    }));
+    const list: ClassmateRanking[] = classStudents.map((s) => {
+      const isMe = Boolean(currentUser && (s.id === currentUser.id || (currentUser.role === 'student' && s.name === currentUser.name)));
+      const badgesCount = (s.badges?.length || 0) + (isMe ? currentStats.badges.filter((b) => b.isUnlocked).length : 0);
+      const xpScore = Math.max(s.xpScore || 0, isMe ? currentStats.totalXp : 0);
+      return {
+        id: s.id,
+        name: isMe ? `${s.name} (Bạn)` : s.name,
+        avatar: s.avatar,
+        gender: s.gender,
+        className: `Lớp ${selectedClass}`,
+        score: xpScore + badgesCount * 50,
+        questionsSolved: s.homeworkDoneCount * 10 + s.examPracticeCount * 15,
+        streakDays: isMe ? Math.max(s.streakDays || 0, currentStats.streak.currentStreak) : (s.streakDays || 0),
+        badgesCount,
+        isCurrentUser: isMe,
+        cheerCount: 0,
+        status: s.status || 'online',
+        title: s.avgScore >= 9.0 ? 'Thủ Khoa Săn Điểm 10' : s.avgScore >= 8.0 ? 'Chiến Binh Bứt Phá' : 'Học Sinh Đã Xác Thực',
+        dob: s.dob,
+        homeworkStatus: s.homeworkStatus,
+        examPracticeCount: s.examPracticeCount,
+        avgScore: s.avgScore,
+      };
+    });
 
-    // Add current user
-    list.push(currentUserEntry);
+    // Nếu người dùng hiện tại là học sinh thuộc lớp này nhưng chưa có trong roster
+    if (
+      currentUser?.role === 'student' &&
+      currentUser.studentClass === selectedClass &&
+      !list.some((item) => item.isCurrentUser) &&
+      !isAiOrFakeStudent({ id: currentUser.id, name: currentUser.name })
+    ) {
+      const myBadges = currentStats.badges.filter((b) => b.isUnlocked).length;
+      list.push({
+        id: currentUser.id,
+        name: `${currentUser.name || userName} (Bạn)`,
+        avatar: currentUser.avatar || userAvatar || '',
+        gender: currentUser.gender || 'other',
+        className: `Lớp ${selectedClass}`,
+        score: currentStats.totalXp + myBadges * 50,
+        questionsSolved: currentStats.completedAssignments ? currentStats.completedAssignments * 10 : Math.round(currentStats.totalXp / 20),
+        streakDays: currentStats.streak.currentStreak || 0,
+        badgesCount: myBadges,
+        isCurrentUser: true,
+        cheerCount: 0,
+        status: 'online',
+        title: currentStats.levelTitle || 'Học Sinh Đã Xác Thực',
+        dob: currentUser.dob || '2012-09-05',
+        homeworkStatus: 'practicing',
+        examPracticeCount: currentStats.completedExams || 0,
+        avgScore: 0,
+      });
+    }
 
-    // Apply homework filter
     let filtered = list;
     if (filterHomework !== 'all') {
       filtered = filtered.filter((c) => c.homeworkStatus === filterHomework);
     }
 
-    // Sort based on selected metric
     if (sortBy === 'score') {
       filtered.sort((a, b) => b.score - a.score);
     } else if (sortBy === 'questions') {
@@ -173,14 +208,13 @@ export const ClassroomLeaderboard: React.FC<ClassroomLeaderboardProps> = ({
     }
 
     return filtered;
-  }, [classStudents, currentUserEntry, filterHomework, sortBy, selectedClass]);
+  }, [classStudents, currentUser, currentStats, userName, userAvatar, filterHomework, sortBy, selectedClass]);
 
-  // Find user's rank
   const userRankIndex = classmatesList.findIndex((c) => c.isCurrentUser);
-  const userRank = userRankIndex >= 0 ? userRankIndex + 1 : 1;
+  const userRank = userRankIndex >= 0 ? userRankIndex + 1 : 0;
   const personAbove = userRankIndex > 0 ? classmatesList[userRankIndex - 1] : null;
+  const currentUserEntry = userRankIndex >= 0 ? classmatesList[userRankIndex] : null;
 
-  // Filtered by search
   const filteredList = useMemo(() => {
     if (!searchQuery.trim()) return classmatesList;
     const q = searchQuery.toLowerCase().trim();
@@ -192,7 +226,6 @@ export const ClassroomLeaderboard: React.FC<ClassroomLeaderboardProps> = ({
     );
   }, [classmatesList, searchQuery]);
 
-  // Handle cheer interaction
   const handleCheer = (classmate: ClassmateRanking, e: React.MouseEvent) => {
     e.stopPropagation();
     soundEffects.playCheckInReward();
@@ -205,7 +238,6 @@ export const ClassroomLeaderboard: React.FC<ClassroomLeaderboardProps> = ({
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Handle Kick Student Confirmation
   const handleConfirmKick = () => {
     if (!studentToKick) return;
     kickStudentFromClass(selectedClass, studentToKick.id);
@@ -217,6 +249,38 @@ export const ClassroomLeaderboard: React.FC<ClassroomLeaderboardProps> = ({
   };
 
   const top3 = classmatesList.slice(0, 3);
+
+  // Nếu chưa có Thầy/Cô nào đăng ký tạo lớp thực tế
+  if (activeClasses.length === 0) {
+    return (
+      <div
+        className={`p-8 sm:p-10 rounded-3xl border text-center space-y-4 ${
+          isDark
+            ? 'bg-[#101624] border-white/10 text-white'
+            : 'bg-white border-slate-200 text-slate-900 shadow-sm'
+        }`}
+      >
+        <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-500 flex items-center justify-center">
+          <GraduationCap className="w-8 h-8" />
+        </div>
+        <h3 className="text-lg sm:text-xl font-black">
+          Chưa Có Lớp Học Nào Được Kích Hoạt
+        </h3>
+        <p className="text-xs sm:text-sm text-slate-500 dark:text-zinc-400 max-w-lg mx-auto leading-relaxed">
+          Hệ thống Max10 AI đã xóa bỏ toàn bộ giáo viên giả và học sinh giả. Lớp học (6A1 - 9D6) chỉ được khởi tạo khi có <strong>Thầy/Cô giáo thật</strong> đăng ký tài khoản Giáo viên và chọn lớp phụ trách.
+        </p>
+        {onNavigateToTab && (
+          <button
+            type="button"
+            onClick={() => onNavigateToTab('chat')}
+            className="px-5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-md transition-all cursor-pointer"
+          >
+            Quay lại Hỏi bài &amp; Gia sư AI
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
@@ -242,27 +306,37 @@ export const ClassroomLeaderboard: React.FC<ClassroomLeaderboardProps> = ({
           <div className="space-y-2 flex-1 min-w-0">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30">
               <Trophy className="w-3.5 h-3.5 text-amber-500" />
-              <span>Bảng Xếp Hạng Lớp Học · 100% Người Thật (Không AI)</span>
+              <span>Bảng Xếp Hạng Thời Gian Thực · Chỉ Học Sinh Thật (Loại Trừ AI)</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-black tracking-tight flex items-center gap-2 flex-wrap">
               <span>Bảng Vàng Thi Đua Lớp {selectedClass}</span>
               <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-700 dark:text-emerald-300 font-extrabold">
-                {classStudents.length} học sinh chính thức
+                {classStudents.length} học sinh đã xác thực
               </span>
             </h2>
             <p className="text-xs text-slate-600 dark:text-zinc-300 max-w-2xl leading-relaxed">
-              Theo dõi điểm số, số câu hỏi đã giải quyết và tiến độ nộp bài của các bạn học trong lớp. Nếu phát hiện học sinh lạ không thuộc lớp {selectedClass}, bạn hoặc giáo viên có thể ấn <strong>Kích khỏi lớp</strong> ngay lập tức.
+              Xếp hạng theo thời gian thực dựa trên tổng điểm XP và huy hiệu đạt được của học sinh thật (tuyệt đối không có AI hay bot ảo).
             </p>
+            {collectiveBadges.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                {collectiveBadges.map((cb) => (
+                  <span
+                    key={cb.id}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-800 dark:text-amber-300 text-xs font-black"
+                  >
+                    <span>{cb.icon}</span>
+                    <span>{cb.title}</span>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* 24 Class Selection Quick Grid */}
+          {/* Active Registered Classes selector */}
           <div className="w-full lg:w-auto shrink-0 bg-black/5 dark:bg-white/5 p-3 rounded-2xl border border-slate-200/60 dark:border-white/10">
             <div className="flex items-center justify-between gap-2 mb-2">
               <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">
-                Chọn Lớp (24 Lớp Chuẩn THCS):
-              </span>
-              <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
-                Khối 6, 7, 8, 9
+                Chọn Lớp Đang Hoạt Động ({activeClasses.length}):
               </span>
             </div>
             <select
@@ -274,158 +348,154 @@ export const ClassroomLeaderboard: React.FC<ClassroomLeaderboardProps> = ({
                   : 'bg-white border-amber-300 text-slate-900 focus:border-amber-500'
               }`}
             >
-              <optgroup label="Khối 6 (6A1 - 6A6)">
-                {ALL_CLASSES_LIST.filter((c) => c.startsWith('6')).map((c) => (
+              {activeClasses.map((c) => {
+                const t = getClassHomeroomTeacher(c);
+                return (
                   <option key={c} value={c}>
-                    Lớp {c} - GVCN: {HOMEROOM_TEACHERS[c].name} ({HOMEROOM_TEACHERS[c].subject})
+                    Lớp {c} {t ? `- GV: ${t.name} (${t.subject})` : ''}
                   </option>
-                ))}
-              </optgroup>
-              <optgroup label="Khối 7 (7B1 - 7B6)">
-                {ALL_CLASSES_LIST.filter((c) => c.startsWith('7')).map((c) => (
-                  <option key={c} value={c}>
-                    Lớp {c} - GVCN: {HOMEROOM_TEACHERS[c].name} ({HOMEROOM_TEACHERS[c].subject})
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Khối 8 (8C1 - 8C6)">
-                {ALL_CLASSES_LIST.filter((c) => c.startsWith('8')).map((c) => (
-                  <option key={c} value={c}>
-                    Lớp {c} - GVCN: {HOMEROOM_TEACHERS[c].name} ({HOMEROOM_TEACHERS[c].subject})
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Khối 9 (9D1 - 9D6)">
-                {ALL_CLASSES_LIST.filter((c) => c.startsWith('9')).map((c) => (
-                  <option key={c} value={c}>
-                    Lớp {c} - GVCN: {HOMEROOM_TEACHERS[c].name} ({HOMEROOM_TEACHERS[c].subject})
-                  </option>
-                ))}
-              </optgroup>
+                );
+              })}
             </select>
           </div>
         </div>
 
         {/* Real Homeroom Teacher Highlight Card */}
-        <div className="mt-5 p-4 sm:p-5 rounded-2xl bg-white/70 dark:bg-zinc-900/70 border border-emerald-500/30 backdrop-blur-md">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3.5 min-w-0">
-              <div className="relative shrink-0">
-                <img
-                  src={teacher.avatar}
-                  alt={teacher.name}
-                  className="w-14 h-14 rounded-2xl object-cover border-2 border-emerald-500 shadow-md"
-                  referrerPolicy="no-referrer"
-                />
-                <span className="absolute -bottom-1 -right-1 p-0.5 rounded-full bg-emerald-500 text-white shadow-xs">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                </span>
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white truncate">
-                    {teacher.name}
-                  </h3>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-extrabold flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                    GVCN Người Thật (Không AI)
-                  </span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-700 dark:text-blue-300 font-bold">
-                    {teacher.subject}
+        {teacher && (
+          <div className="mt-5 p-4 sm:p-5 rounded-2xl bg-white/70 dark:bg-zinc-900/70 border border-emerald-500/30 backdrop-blur-md">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5 min-w-0">
+                <div className="relative shrink-0">
+                  <img
+                    src={teacher.avatar}
+                    alt={teacher.name}
+                    className="w-14 h-14 rounded-2xl object-cover border-2 border-emerald-500 shadow-md"
+                    referrerPolicy="no-referrer"
+                  />
+                  <span className="absolute -bottom-1 -right-1 p-0.5 rounded-full bg-emerald-500 text-white shadow-xs">
+                    <ShieldCheck className="w-3.5 h-3.5" />
                   </span>
                 </div>
-                <p className="text-xs text-slate-600 dark:text-zinc-300 italic mt-0.5">
-                  "{teacher.message}"
-                </p>
-                <div className="flex items-center gap-4 text-[11px] text-slate-500 dark:text-zinc-400 mt-1 flex-wrap">
-                  <span className="flex items-center gap-1">
-                    <Phone className="w-3 h-3 text-emerald-500" /> {teacher.phone}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Mail className="w-3 h-3 text-blue-500" /> {teacher.email}
-                  </span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white truncate">
+                      {teacher.name}
+                    </h3>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-extrabold flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                      Giáo viên Đã Xác Thực
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-700 dark:text-blue-300 font-bold">
+                      {teacher.subject}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 dark:text-zinc-300 italic mt-0.5">
+                    "{teacher.message}"
+                  </p>
+                  <div className="flex items-center gap-4 text-[11px] text-slate-500 dark:text-zinc-400 mt-1 flex-wrap">
+                    {teacher.phone && (
+                      <span className="flex items-center gap-1">
+                        <Phone className="w-3 h-3 text-emerald-500" /> {teacher.phone}
+                      </span>
+                    )}
+                    {teacher.email && (
+                      <span className="flex items-center gap-1">
+                        <Mail className="w-3 h-3 text-blue-500" /> {teacher.email}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Teacher Overview Progress Badges */}
-            <div className="flex items-center gap-2 w-full md:w-auto shrink-0 flex-wrap">
-              <div className="px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-center flex-1 sm:flex-none">
-                <p className="text-xs font-black text-emerald-600 dark:text-emerald-400">
-                  {submittedCount}/{classStudents.length}
-                </p>
-                <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-bold">Đã nộp bài</p>
+              <div className="flex items-center gap-2 w-full md:w-auto shrink-0 flex-wrap">
+                <div className="px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-center flex-1 sm:flex-none">
+                  <p className="text-xs font-black text-emerald-600 dark:text-emerald-400">
+                    {submittedCount}/{classStudents.length}
+                  </p>
+                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-bold">Đã nộp bài</p>
+                </div>
+
+                <div className="px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-center flex-1 sm:flex-none">
+                  <p className="text-xs font-black text-rose-600 dark:text-rose-400">
+                    {notSubmittedCount}
+                  </p>
+                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-bold">Chưa nộp</p>
+                </div>
+
+                <div className="px-3 py-2 rounded-xl bg-blue-500/10 border border-blue-500/30 text-center flex-1 sm:flex-none">
+                  <p className="text-xs font-black text-blue-600 dark:text-blue-400">
+                    {practicingCount}
+                  </p>
+                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-bold">Đang ôn</p>
+                </div>
+
+                {onNavigateToTab && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        localStorage.setItem(
+                          'max10_target_chat_open',
+                          JSON.stringify({
+                            type: 'group',
+                            targetId: `class-group-${selectedClass.toLowerCase()}`,
+                            timestamp: Date.now(),
+                          })
+                        );
+                      } catch {}
+                      onNavigateToTab('group');
+                    }}
+                    className="py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                    title="Nhắn tin trao đổi nhóm lớp"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>Nhóm Lớp {selectedClass}</span>
+                  </button>
+                )}
               </div>
-
-              <div className="px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-center flex-1 sm:flex-none">
-                <p className="text-xs font-black text-rose-600 dark:text-rose-400">
-                  {notSubmittedCount}
-                </p>
-                <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-bold">Chưa nộp</p>
-              </div>
-
-              <div className="px-3 py-2 rounded-xl bg-blue-500/10 border border-blue-500/30 text-center flex-1 sm:flex-none">
-                <p className="text-xs font-black text-blue-600 dark:text-blue-400">
-                  {practicingCount}
-                </p>
-                <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-bold">Đang ôn</p>
-              </div>
-
-              {onNavigateToTab && (
-                <button
-                  type="button"
-                  onClick={() => onNavigateToTab('group')}
-                  className="py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
-                  title="Nhắn tin trao đổi lớp"
-                >
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  <span>💬 Nhắn Tin Lớp {selectedClass}</span>
-                </button>
-              )}
             </div>
           </div>
-        </div>
+        )}
 
         {/* Current User Competitive Position */}
-        <div className="mt-4 p-4 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-base shadow-md shrink-0">
-              #{userRank}
+        {currentUserEntry && (
+          <div className="mt-4 p-4 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-base shadow-md shrink-0">
+                #{userRank}
+              </div>
+              <div>
+                <p className="font-black text-xs sm:text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                  <span>Vị trí của bạn: Hạng #{userRank} trên {classmatesList.length} bạn học lớp {selectedClass}</span>
+                </p>
+                <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                  {personAbove ? (
+                    <>
+                      🔥 Cần đạt thêm{' '}
+                      <strong>
+                        {Math.max(10, personAbove.score - currentUserEntry.score + 10)} XP
+                      </strong>{' '}
+                      nữa để vượt bạn <strong>{personAbove.name}</strong> lên Hạng #{userRank - 1}!
+                    </>
+                  ) : (
+                    <>🥇 Chúc mừng bạn! Bạn đang dẫn đầu vị trí #1 lớp {selectedClass}!</>
+                  )}
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="font-black text-xs sm:text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                <span>Vị trí của bạn: Hạng #{userRank} trên {classmatesList.length} bạn học lớp {selectedClass}</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-black">
-                  Đang bứt phá
-                </span>
-              </p>
-              <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
-                {personAbove ? (
-                  <>
-                    🔥 Cần giải thêm{' '}
-                    <strong>
-                      {Math.max(1, personAbove.questionsSolved - currentUserEntry.questionsSolved + 1)} câu hỏi
-                    </strong>{' '}
-                    nữa để vượt bạn <strong>{personAbove.name}</strong> lên Hạng #{userRank - 1}!
-                  </>
-                ) : (
-                  <>🥇 Chúc mừng bạn! Bạn đang dẫn đầu vị trí #1 lớp {selectedClass} với điểm số xuất sắc!</>
-                )}
-              </p>
-            </div>
-          </div>
 
-          {onNavigateToTab && (
-            <button
-              type="button"
-              onClick={() => onNavigateToTab('exam')}
-              className="py-2 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs shadow-md transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95"
-            >
-              <Zap className="w-3.5 h-3.5 fill-current" />
-              <span>Giải Thêm Bài Tập (+XP)</span>
-            </button>
-          )}
-        </div>
+            {onNavigateToTab && (
+              <button
+                type="button"
+                onClick={() => onNavigateToTab('exam')}
+                className="py-2 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs shadow-md transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95"
+              >
+                <Zap className="w-3.5 h-3.5 fill-current" />
+                <span>Giải Thêm Bài Tập (+XP)</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* TOP 3 PODIUM */}
@@ -619,7 +689,18 @@ export const ClassroomLeaderboard: React.FC<ClassroomLeaderboardProps> = ({
         }`}
       >
         <div className="divide-y divide-slate-100 dark:divide-white/5">
-          {filteredList.map((classmate, index) => {
+          {filteredList.length === 0 ? (
+            <div className="p-8 text-center space-y-2">
+              <Users className="w-10 h-10 mx-auto text-slate-400" />
+              <p className="text-sm font-black text-slate-700 dark:text-zinc-200">
+                Chưa có học sinh thật nào trong danh sách lớp {selectedClass}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-zinc-400">
+                Học sinh khi đăng ký tài khoản chọn Lớp {selectedClass} hoặc được Giáo viên thêm vào lớp sẽ xuất hiện tại đây theo thời gian thực (không có bot hay AI).
+              </p>
+            </div>
+          ) : (
+            filteredList.map((classmate, index) => {
             const rank = index + 1;
             const isCurrentUser = classmate.isCurrentUser;
             const extraCheers = cheeredIds[classmate.id] || 0;
@@ -787,7 +868,8 @@ export const ClassroomLeaderboard: React.FC<ClassroomLeaderboardProps> = ({
                 </div>
               </div>
             );
-          })}
+          })
+          )}
         </div>
       </div>
 
