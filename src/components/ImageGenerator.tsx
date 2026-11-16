@@ -1,742 +1,980 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Sparkles,
-  Download,
-  Copy,
-  Check,
+  BookOpen,
+  ScrollText,
+  Network,
+  UserCircle2,
+  Compass,
+  Loader2,
+  Zap,
+  ShieldCheck,
+  MessageSquare,
   RotateCcw,
-  Maximize2,
-  X,
+  Crown,
+  Coins,
+  Database,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
   Palette,
   Layers,
-  Image as ImageIcon,
-  Loader2,
-  ExternalLink,
-  MessageSquare,
-  ShieldCheck,
-  Zap,
-  Info,
-  SlidersHorizontal,
 } from 'lucide-react';
 import { GradeLevel } from '../types';
+import { UserAccount, isUserAdmin } from '../types/auth';
+import { SubscriptionPlan } from './chatgpt/PricingUpgradeModal';
+import { CanvasTextCompositor, CanvasOverlayData, CompositorMode } from './CanvasTextCompositor';
+import { DiagramCodeStudio } from './DiagramCodeStudio';
+import {
+  AVATAR_XP_COST,
+  DailyImageQuotaStatus,
+  fetchServerImageQuota,
+  getAvatarXpBalance,
+  getPlanDailyImageLimit,
+  spendXpForCustomAvatar,
+} from '../data/imageQuota';
 
 interface ImageGeneratorProps {
   currentGrade: GradeLevel;
   onSendToChat?: (text: string, imageUrl?: string) => void;
   isDark?: boolean;
+  currentUser?: UserAccount | null;
+  subscriptionPlan?: SubscriptionPlan;
+  onUpdateAvatar?: (avatarUrl: string) => void;
+  onOpenPricing?: () => void;
 }
 
-interface GeneratedItem {
+type StudioTab =
+  | 'flashcard'
+  | 'literature'
+  | 'mindmap_infographic'
+  | 'avatar'
+  | 'stem_diagram';
+
+interface GeneratedVisualItem {
   id: string;
   url: string;
   prompt: string;
   enhancedPrompt?: string;
+  mode: CompositorMode;
   style: string;
   aspectRatio: string;
-  seed?: number;
+  provider?: string;
+  cached?: boolean;
+  canonicalKeyword?: string;
+  overlay: CanvasOverlayData;
   createdAt: number;
+}
+
+interface ActiveQueueJob {
+  jobId: string;
+  prompt: string;
+  mode: CompositorMode;
+  status: 'queued' | 'enhancing_prompt' | 'generating_image' | 'caching_asset' | 'completed' | 'failed';
+  progress: number;
+  stageLabel: string;
+  position: number;
+  error?: string;
+}
+
+interface CachedKeywordPreview {
+  cacheKey: string;
+  canonicalKeyword: string;
+  originalPrompt: string;
+  mode: CompositorMode;
+  imageUrl: string;
+  hitCount: number;
 }
 
 export const ImageGenerator: React.FC<ImageGeneratorProps> = ({
   currentGrade,
   onSendToChat,
   isDark = false,
+  currentUser = null,
+  subscriptionPlan = 'free',
+  onUpdateAvatar,
+  onOpenPricing,
 }) => {
-  // USER REQUIREMENT: "sửa cái tạo ảnh thành poster mà cái ảnh thứ 2"
-  const POSTER_2010_FEATURED: GeneratedItem = {
-    id: 'poster-20-10-chatgpt-masterpiece',
+  const userId = currentUser?.id || 'guest-student';
+  const userRole = currentUser?.role || 'student';
+  const isAdmin = isUserAdmin(currentUser);
+
+  const [activeTab, setActiveTab] = useState<StudioTab>('flashcard');
+  const [prompt, setPrompt] = useState<string>('photosynthesis');
+  const [style, setStyle] = useState<string>('chatgpt');
+  const [aspectRatio, setAspectRatio] = useState<'1:1' | '16:9' | '9:16' | '4:3'>('1:1');
+  const [avatarArchetype, setAvatarArchetype] = useState<
+    'cartoon_3d' | 'superhero' | 'scientist' | 'scholar'
+  >('cartoon_3d');
+
+  const [currentItem, setCurrentItem] = useState<GeneratedVisualItem | null>({
+    id: 'featured-20-10',
     url: '/assets/aistudio/a-heartwarming-photo-of-a-graceful-vietnamese-woman-wearing-an-elegant-silk-o-di-smiling-joyfully_6ce349b7.jpg',
-    prompt: 'Poster Chào Mừng Ngày Phụ Nữ Việt Nam 20/10 - Người phụ nữ Việt Nam duyên dáng mặc áo dài lụa hồng rạng rỡ ôm bó hoa hồng (Ảnh thứ 2 chuẩn đồ họa ChatGPT)',
-    enhancedPrompt: 'A heartwarming photo of a graceful Vietnamese woman wearing an elegant silk pink ao dai smiling joyfully holding a bouquet of pink roses, celebratory banner for Vietnamese Women\'s Day 20/10, ChatGPT DALL-E 3 aesthetic, warm golden lighting, award-winning photography, 8k resolution',
+    prompt: 'Poster Chào Mừng Ngày Phụ Nữ Việt Nam 20/10',
+    enhancedPrompt: 'Graceful Vietnamese woman in pink silk ao dai holding roses, warm golden studio lighting',
+    mode: 'poster',
     style: 'chatgpt',
     aspectRatio: '1:1',
-    seed: 2010,
+    provider: 'Bộ sưu tập có sẵn Max10',
+    cached: true,
+    overlay: {
+      title: 'Chào Mừng Ngày Phụ Nữ Việt Nam 20/10',
+      eraOrWork: 'MAX10 EDU STUDIO',
+      quoteOrCaption: 'Tôn vinh vẻ đẹp trí tuệ và yêu thương của cô giáo & nữ sinh Việt Nam.',
+    },
     createdAt: Date.now(),
+  });
+
+  const [history, setHistory] = useState<GeneratedVisualItem[]>([]);
+  const [activeJobs, setActiveJobs] = useState<ActiveQueueJob[]>([]);
+  const [cachedKeywords, setCachedKeywords] = useState<CachedKeywordPreview[]>([]);
+  const [quota, setQuota] = useState<DailyImageQuotaStatus>(() => {
+    const limit = getPlanDailyImageLimit(subscriptionPlan, userRole, isAdmin);
+    return {
+      used: 0,
+      limit,
+      remaining: limit,
+      isUnlimited: limit >= 100,
+      date: new Date().toISOString().split('T')[0],
+      plan: subscriptionPlan,
+      role: userRole,
+    };
+  });
+  const [xpBalance, setXpBalance] = useState<number>(() => getAvatarXpBalance());
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
+
+  const pollTimersRef = useRef<Record<string, number>>({});
+
+  // Sync quota & popular cached keywords on mount and user/plan changes
+  useEffect(() => {
+    fetchServerImageQuota({
+      userId,
+      plan: subscriptionPlan,
+      role: userRole,
+      isAdmin,
+    }).then((q) => {
+      if (q) setQuota(q);
+    });
+
+    fetch('/api/image-cache-list')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.items)) {
+          setCachedKeywords(data.items);
+        }
+      })
+      .catch(() => {});
+  }, [userId, subscriptionPlan, userRole, isAdmin]);
+
+  // Listen for XP changes across the app
+  useEffect(() => {
+    const onAchUpdate = () => setXpBalance(getAvatarXpBalance());
+    window.addEventListener('max10_achievements_updated', onAchUpdate);
+    return () => window.removeEventListener('max10_achievements_updated', onAchUpdate);
+  }, []);
+
+  // Cleanup polling intervals on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(pollTimersRef.current).forEach((t) => window.clearInterval(t));
+    };
+  }, []);
+
+  // Update sensible defaults when switching studio tabs
+  const handleSelectTab = (tab: StudioTab) => {
+    setActiveTab(tab);
+    setErrorBanner(null);
+    if (tab === 'flashcard') {
+      setPrompt('photosynthesis');
+      setStyle('3d_cartoon');
+      setAspectRatio('1:1');
+    } else if (tab === 'literature') {
+      setPrompt('Cảnh Thúy Kiều buồn nhớ quê hương bên lầu Ngưng Bích dưới ánh trăng tà');
+      setStyle('literature_art');
+      setAspectRatio('16:9');
+    } else if (tab === 'mindmap_infographic') {
+      setPrompt(
+        'Quá trình quang hợp ở cây xanh: Cây hấp thụ khí CO2 qua khí khổng và nước từ rễ dưới tác dụng của ánh sáng mặt trời và diệp lục để tạo ra chất hữu cơ (Glucozo) và giải phóng khí Oxy.'
+      );
+      setStyle('diagram');
+      setAspectRatio('1:1');
+    } else if (tab === 'avatar') {
+      setPrompt('Học sinh thông minh chinh phục điểm 10');
+      setStyle('3d_cartoon');
+      setAspectRatio('1:1');
+    }
   };
 
-  const [prompt, setPrompt] = useState('Poster Chào mừng Ngày Phụ Nữ Việt Nam 20/10');
-  const [activeStudioMode, setActiveStudioMode] = useState<'poster' | 'free_image'>('poster');
-  const [style, setStyle] = useState<
-    'chatgpt' | 'photorealistic' | 'anime' | '3d_cartoon' | 'diagram' | 'literature_art'
-  >('chatgpt');
-  const [aspectRatio, setAspectRatio] = useState<'1:1' | '16:9' | '9:16' | '4:3'>('1:1');
-  const [loading, setLoading] = useState(false);
-  const [currentImage, setCurrentImage] = useState<GeneratedItem | null>(POSTER_2010_FEATURED);
-  const [history, setHistory] = useState<GeneratedItem[]>([POSTER_2010_FEATURED]);
-  const [copied, setCopied] = useState(false);
-  const [copiedPrompt, setCopiedPrompt] = useState(false);
-  const [fullscreenUrl, setFullscreenUrl] = useState<string | null>(null);
-  const [showPromptDetails, setShowPromptDetails] = useState(false);
-  const [antiDefectMode, setAntiDefectMode] = useState(true);
-
-  const styleOptions = [
+  const tabDefinitions: Array<{
+    id: StudioTab;
+    label: string;
+    icon: React.ReactNode;
+    desc: string;
+  }> = [
     {
-      id: 'chatgpt' as const,
-      name: 'Chuẩn ChatGPT (DALL·E 3)',
-      desc: 'Chuẩn xác 100%, không làm sai, chi tiết hoàn mỹ',
-      icon: '🌟',
-      badge: 'Khuyên dùng',
+      id: 'flashcard',
+      label: 'Flashcard Từ Vựng',
+      icon: <BookOpen className="w-4 h-4" />,
+      desc: 'Từ vựng Tiếng Anh & khái niệm mới kèm phiên âm IPA, nghĩa Việt',
     },
     {
-      id: 'photorealistic' as const,
-      name: 'Ảnh chụp chân thực 8K',
-      desc: 'Ống kính máy ảnh, ánh sáng tự nhiên',
-      icon: '📸',
+      id: 'literature',
+      label: 'Minh Họa Văn & Sử',
+      icon: <ScrollText className="w-4 h-4" />,
+      desc: 'Tái hiện nhân vật lịch sử, sự kiện, bối cảnh tác phẩm văn học',
     },
     {
-      id: '3d_cartoon' as const,
-      name: '3D Hoạt hình Pixar',
-      desc: 'Sinh động, dễ thương, màu sắc studio',
-      icon: '🧸',
+      id: 'mindmap_infographic',
+      label: 'Mindmap & Infographic',
+      icon: <Network className="w-4 h-4" />,
+      desc: 'Tóm tắt lý thuyết dài thành thẻ nhánh Infographic rõ ràng',
     },
     {
-      id: 'anime' as const,
-      name: 'Anime Nhật Bản',
-      desc: 'Phong cách Ghibli, cảnh sắc nên thơ',
-      icon: '🌸',
+      id: 'avatar',
+      label: 'Avatar & Huy Hiệu (XP)',
+      icon: <UserCircle2 className="w-4 h-4" />,
+      desc: 'Dùng điểm thưởng học tập tạo Avatar hoạt hình, siêu anh hùng, khoa học',
     },
     {
-      id: 'diagram' as const,
-      name: 'Sơ đồ khoa học',
-      desc: 'Infographic minh họa bài học trực quan',
-      icon: '📐',
-    },
-    {
-      id: 'literature_art' as const,
-      name: 'Tranh minh họa Văn học',
-      desc: 'Sơn dầu, màu nước cổ điển truyền cảm',
-      icon: '📜',
+      id: 'stem_diagram',
+      label: 'Hình Học & Biểu Đồ (SVG)',
+      icon: <Compass className="w-4 h-4" />,
+      desc: 'Toán, Lý, Hóa dựng bằng mã SVG / Mermaid.js chuẩn xác 100%',
     },
   ];
 
-  const aspectRatios = [
-    { id: '1:1' as const, label: '1:1 Vuông', desc: 'Avatar, Mạng xã hội, Poster vuông' },
-    { id: '16:9' as const, label: '16:9 Ngang', desc: 'Slide, Màn hình máy tính, Banner' },
-    { id: '9:16' as const, label: '9:16 Dọc', desc: 'TikTok, Poster dọc, Hình nền' },
-    { id: '4:3' as const, label: '4:3 Chuẩn', desc: 'Sách giáo khoa, Tài liệu, Khung tranh' },
+  const modeSuggestions: Record<Exclude<StudioTab, 'stem_diagram'>, string[]> = {
+    flashcard: ['photosynthesis', 'evaporation', 'ecosystem', 'gravity', 'metamorphosis'],
+    literature: [
+      'Cảnh Thúy Kiều ở lầu Ngưng Bích nhìn thuyền buồm xa khơi lúc hoàng hôn',
+      'Chiến thắng Bạch Đằng năm 938 của Ngô Quyền với bãi cọc gỗ trên sông',
+      'Hình ảnh người chiến sĩ hành quân qua dãy Trường Sơn trong ánh trăng',
+      'Poster Chào mừng Ngày Phụ Nữ Việt Nam 20/10',
+    ],
+    mindmap_infographic: [
+      'Định luật bảo toàn khối lượng và cân bằng phương trình hóa học: Tổng khối lượng các chất sản phẩm bằng tổng khối lượng các chất tham gia phản ứng.',
+      'Hệ tuần hoàn máu ở người gồm vòng tuần hoàn nhỏ qua phổi và vòng tuần hoàn lớn nuôi tế bào cơ thể.',
+      'Các biện pháp tu từ trong Ngữ văn THCS: So sánh, Nhân hóa, Ẩn dụ, Hoán dụ và Điệp ngữ.',
+    ],
+    avatar: [
+      'Nam sinh thông minh đeo kính trí tuệ nhân tạo chinh phục Toán học',
+      'Nữ sinh năng động yêu thích thí nghiệm Hóa học và Thiên văn',
+      'Thủ khoa lịch sử cầm ngọn đuốc tri thức vàng rực rỡ',
+    ],
+  };
+
+  const avatarArchetypes = [
+    { id: 'cartoon_3d' as const, label: 'Hoạt hình 3D', note: 'Pixar sinh động' },
+    { id: 'superhero' as const, label: 'Siêu anh hùng', note: 'Năng lượng điểm 10' },
+    { id: 'scientist' as const, label: 'Nhà khoa học', note: 'Phòng thí nghiệm' },
+    { id: 'scholar' as const, label: 'Huy hiệu Thủ khoa', note: 'Vòng nguyệt quế' },
   ];
 
-  const posterSuggestions = [
-    {
-      title: '🌸 Poster 20/10 Ngày Phụ Nữ Việt Nam (Ảnh Thứ 2)',
-      prompt: 'Poster Chào Mừng Ngày Phụ Nữ Việt Nam 20/10 - Người phụ nữ Việt Nam duyên dáng mặc áo dài lụa hồng rạng rỡ ôm bó hoa hồng (Ảnh thứ 2 chuẩn đồ họa ChatGPT)',
-      isDefault: true,
-    },
-    {
-      title: '🎓 Poster 20/11 Tri Ân Thầy Cô Giáo',
-      prompt: 'Poster Tri ân Thầy Cô Ngày Nhà Giáo Việt Nam 20/11 trên bục giảng phấn trắng bảng đen trang nghiêm ấm áp',
-    },
-    {
-      title: '🏆 Poster Bảng Vàng Thủ Khoa Điểm 10',
-      prompt: 'Poster Bảng Vàng vinh danh học sinh xuất sắc đạt điểm 10 THCS với cúp vàng và vòng nguyệt quế lấp lánh',
-    },
-    {
-      title: '🧬 Poster Sơ Đồ Cấu Trúc ADN & Tế Bào 3D',
-      prompt: 'Poster khoa học sơ đồ phân tử ADN 3D phát sáng dạ quang hiện đại với chú thích tiếng Việt chuẩn xác',
-    },
-  ];
+  const handleEnqueueGeneration = async (overridePrompt?: string) => {
+    if (activeTab === 'stem_diagram') return;
+    const textToUse = (overridePrompt ?? prompt).trim();
+    if (!textToUse) return;
+    setErrorBanner(null);
 
-  const suggestions = [
-    'Người AI thuyết trình giảng bài trực quan trong lớp học thông minh 8K',
-    `Chú robot học sinh thông minh Max10 đang ngồi giải toán ${currentGrade} bên cửa sổ hoàng hôn`,
-    'Sơ đồ cấu tạo tế bào sinh học 3D phát sáng rực rỡ, chú thích khoa học chuẩn xác',
-    'Cảnh anh bộ đội trong đêm trăng rừng sương Việt Bắc (bài thơ Ánh Trăng)',
-    'Mô hình cấu trúc phân tử ADN xoắn kép 3D màu sắc dạ quang hiện đại',
-    'Cúp vàng danh dự thủ khoa điểm 10 THCS với vòng nguyệt quế lấp lánh',
-    'Thầy cô giáo mặc áo dài truyền thống giảng bài trên bục giảng phấn trắng bảng đen',
-  ];
-
-  const handleGenerate = async (customPrompt?: string) => {
-    const textToUse = (customPrompt || prompt).trim();
-    if (!textToUse || loading) return;
-
-    // Fast return for the user's 20/10 poster requirement
-    if (
-      textToUse.toLowerCase().includes('20/10') ||
-      textToUse.toLowerCase().includes('ảnh thứ 2') ||
-      textToUse.toLowerCase().includes('phụ nữ việt nam')
-    ) {
-      setCurrentImage(POSTER_2010_FEATURED);
-      setHistory((prev) => [POSTER_2010_FEATURED, ...prev.filter((h) => h.id !== POSTER_2010_FEATURED.id)]);
+    // Preserve fast path for 20/10 featured poster
+    if (textToUse.toLowerCase().includes('20/10') || textToUse.toLowerCase().includes('phụ nữ việt nam')) {
+      setCurrentItem({
+        id: 'featured-20-10-' + Date.now(),
+        url: '/assets/aistudio/a-heartwarming-photo-of-a-graceful-vietnamese-woman-wearing-an-elegant-silk-o-di-smiling-joyfully_6ce349b7.jpg',
+        prompt: textToUse,
+        enhancedPrompt: 'Graceful Vietnamese woman in pink silk ao dai holding roses',
+        mode: 'poster',
+        style: 'chatgpt',
+        aspectRatio: '1:1',
+        provider: 'Bộ nhớ đệm Max10 (Instant)',
+        cached: true,
+        overlay: {
+          title: 'Chào Mừng Ngày Phụ Nữ Việt Nam 20/10',
+          eraOrWork: 'MAX10 EDU STUDIO',
+          quoteOrCaption: 'Kính chúc cô giáo và các bạn nữ sinh luôn rạng rỡ và gặt hái thật nhiều điểm 10!',
+        },
+        createdAt: Date.now(),
+      });
       return;
     }
 
-    setLoading(true);
+    // Check XP deduction if Avatar mode & student wants to use XP
+    let xpDeducted = false;
+    if (activeTab === 'avatar' && userRole === 'student' && !isAdmin && subscriptionPlan === 'free') {
+      if (xpBalance >= AVATAR_XP_COST) {
+        const spent = spendXpForCustomAvatar(AVATAR_XP_COST);
+        if (spent.success) {
+          setXpBalance(spent.remainingXp);
+          xpDeducted = true;
+        }
+      }
+    }
+
     try {
-      const res = await fetch('/api/generate-image', {
+      const res = await fetch('/api/image-jobs/enqueue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: textToUse,
+          mode: activeTab,
           style,
           aspectRatio,
+          avatarArchetype: activeTab === 'avatar' ? avatarArchetype : undefined,
+          userId,
+          plan: subscriptionPlan,
+          role: userRole,
+          isAdmin,
         }),
       });
       const data = await res.json();
-      if (data.success && data.imageUrl) {
-        const newItem: GeneratedItem = {
-          id: Date.now().toString(),
-          url: data.imageUrl,
-          prompt: data.prompt || textToUse,
-          enhancedPrompt: data.enhancedPrompt,
-          style: data.style || style,
-          aspectRatio: data.aspectRatio || aspectRatio,
-          seed: data.seed,
+
+      if (!res.ok || !data.success) {
+        setErrorBanner(data.error || 'Không thể xếp hàng tạo ảnh.');
+        if (data.quota) setQuota(data.quota);
+        return;
+      }
+
+      const job = data.job;
+      if (job.status === 'completed' && job.result) {
+        // Instant Cache Hit!
+        const resultItem: GeneratedVisualItem = {
+          id: job.jobId,
+          url: job.result.imageUrl,
+          prompt: job.result.prompt,
+          enhancedPrompt: job.result.enhancedPrompt,
+          mode: job.result.mode,
+          style: job.result.style,
+          aspectRatio: job.result.aspectRatio,
+          provider: job.result.provider,
+          cached: true,
+          canonicalKeyword: job.result.canonicalKeyword,
+          overlay: job.result.overlay,
           createdAt: Date.now(),
         };
-        setCurrentImage(newItem);
-        setHistory((prev) => [newItem, ...prev.filter((h) => h.id !== newItem.id).slice(0, 9)]);
+        setCurrentItem(resultItem);
+        setHistory((prev) => [resultItem, ...prev.filter((h) => h.id !== resultItem.id)].slice(0, 8));
+        if (job.result.quota) setQuota(job.result.quota);
+        return;
       }
-    } catch (err) {
-      console.error('Lỗi khi tạo ảnh:', err);
-    } finally {
-      setLoading(false);
+
+      // Add to async queue list & start polling
+      const queuedEntry: ActiveQueueJob = {
+        jobId: job.jobId,
+        prompt: textToUse,
+        mode: activeTab,
+        status: job.status,
+        progress: job.progress || 12,
+        stageLabel: job.stageLabel || 'Đang xếp hàng...',
+        position: job.position || 1,
+      };
+      setActiveJobs((prev) => [queuedEntry, ...prev].slice(0, 5));
+
+      const timer = window.setInterval(async () => {
+        try {
+          const pollRes = await fetch(`/api/image-jobs/${job.jobId}`);
+          const pollData = await pollRes.json();
+          if (!pollData.success || !pollData.job) {
+            window.clearInterval(timer);
+            delete pollTimersRef.current[job.jobId];
+            return;
+          }
+
+          const latest = pollData.job;
+          setActiveJobs((prev) =>
+            prev.map((j) =>
+              j.jobId === job.jobId
+                ? {
+                    ...j,
+                    status: latest.status,
+                    progress: latest.progress,
+                    stageLabel: latest.stageLabel,
+                    position: latest.position,
+                    error: latest.error,
+                  }
+                : j
+            )
+          );
+
+          if (latest.status === 'completed' && latest.result) {
+            window.clearInterval(timer);
+            delete pollTimersRef.current[job.jobId];
+
+            const doneItem: GeneratedVisualItem = {
+              id: latest.jobId,
+              url: latest.result.imageUrl,
+              prompt: latest.result.prompt,
+              enhancedPrompt: latest.result.enhancedPrompt,
+              mode: latest.result.mode,
+              style: latest.result.style,
+              aspectRatio: latest.result.aspectRatio,
+              provider: latest.result.provider,
+              cached: latest.result.cached,
+              canonicalKeyword: latest.result.canonicalKeyword,
+              overlay: latest.result.overlay,
+              createdAt: Date.now(),
+            };
+            setCurrentItem(doneItem);
+            setHistory((prev) => [doneItem, ...prev.filter((h) => h.id !== doneItem.id)].slice(0, 8));
+            if (latest.result.quota) setQuota(latest.result.quota);
+
+            // Refresh popular cached keywords list
+            fetch('/api/image-cache-list')
+              .then((r) => r.json())
+              .then((cacheData) => {
+                if (cacheData.success && Array.isArray(cacheData.items)) {
+                  setCachedKeywords(cacheData.items);
+                }
+              })
+              .catch(() => {});
+
+            // Auto-remove completed indicator after 4s
+            setTimeout(() => {
+              setActiveJobs((prev) => prev.filter((j) => j.jobId !== job.jobId));
+            }, 4000);
+          } else if (latest.status === 'failed') {
+            window.clearInterval(timer);
+            delete pollTimersRef.current[job.jobId];
+            setErrorBanner(latest.error || 'Tiến trình tạo ảnh thất bại.');
+            if (xpDeducted) {
+              setXpBalance(getAvatarXpBalance());
+            }
+          }
+        } catch {
+          // Keep polling on transient network blip
+        }
+      }, 850);
+
+      pollTimersRef.current[job.jobId] = timer;
+    } catch (err: any) {
+      setErrorBanner(err?.message || 'Lỗi kết nối hàng đợi xử lý.');
     }
   };
 
-  const handleDownload = async (url: string, filename: string) => {
-    try {
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = `${(filename || 'max10-ai-chatgpt-image').slice(0, 30)}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(blobUrl);
-    } catch (e) {
-      window.open(url, '_blank');
-    }
-  };
-
-  const handleCopyLink = (url: string) => {
-    navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleCopyPromptText = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedPrompt(true);
-    setTimeout(() => setCopiedPrompt(false), 2000);
-  };
+  const hasRunningJobs = activeJobs.some(
+    (j) => j.status !== 'completed' && j.status !== 'failed'
+  );
 
   return (
     <div
-      className={`w-full min-h-full p-4 md:p-8 pb-40 transition-colors ${
+      className={`w-full min-h-full p-4 md:p-8 pb-36 transition-colors ${
         isDark ? 'bg-[#18181b] text-slate-100' : 'bg-slate-50 text-slate-900'
       }`}
     >
-      <div className="max-w-5xl mx-auto space-y-6">
-        {/* Header Title & Poster Mode Switcher */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-5 border-slate-200 dark:border-zinc-800">
+      <div className="max-w-6xl mx-auto space-y-6">
+        {/* Top Studio Header & Daily Quota Bar */}
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 border-b pb-5 border-slate-200 dark:border-zinc-800">
           <div>
-            <div className="flex flex-wrap items-center gap-2 mb-1.5">
-              <span className="px-3 py-1 rounded-full text-xs font-black bg-gradient-to-r from-rose-500 via-pink-500 to-indigo-600 text-white shadow-sm flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 fill-current" />
-                <span>POSTER STUDIO CHATGPT DALL·E 3</span>
-              </span>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1">
-                <span>🌸 Poster 20/10 Ngày Phụ Nữ VN</span>
-              </span>
-              <span className="text-xs text-slate-400 font-medium hidden sm:inline">
-                Chuẩn xác 100% • Thiết kế đồ họa đỉnh cao
-              </span>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-zinc-400 mb-1">
+              <span className="font-bold text-emerald-600 dark:text-emerald-400">MAX10 VISUAL STUDIO (FREE TIER)</span>
+              <span aria-hidden="true">·</span>
+              <span>Minh họa Vector SVG (Gemini 2.5 Flash)</span>
+              <span aria-hidden="true">·</span>
+              <span>Tách chữ Việt trên Canvas & Cache từ khóa</span>
             </div>
             <h1 className="text-2xl md:text-3xl font-black tracking-tight">
-              Tạo Poster & Ảnh Nghệ Thuật AI Chuẩn ChatGPT
+              Studio Trực Quan Học Tập & Vẽ Hình Chuẩn Xác
             </h1>
             <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1 max-w-2xl">
-              Hệ thống tạo poster ngày lễ (20/10, 20/11), poster vinh danh điểm 10 THCS và tranh minh họa ChatGPT: sử dụng hình ảnh sắc nét, bố cục nghệ thuật, văn phong Tiếng Việt hiện đại.
+              Dùng hoàn toàn miễn phí (GEMINI_API_KEY Free Tier): tạo Flashcard từ vựng, minh họa Văn & Sử, Infographic tóm tắt, Avatar điểm thưởng và hình vẽ Toán/Lý/Hóa chính xác bằng mã SVG & Mermaid.js.
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Mode Switcher */}
-            <div className="flex items-center p-1 rounded-2xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10">
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveStudioMode('poster');
-                  setCurrentImage(POSTER_2010_FEATURED);
-                  setPrompt(POSTER_2010_FEATURED.prompt);
-                }}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  activeStudioMode === 'poster'
-                    ? 'bg-gradient-to-r from-rose-500 to-pink-600 text-white shadow-md'
-                    : 'text-slate-600 dark:text-zinc-400 hover:text-black dark:hover:text-white'
-                }`}
-              >
-                <span>🖼️ Tạo Poster AI</span>
-                <span className="text-[10px] bg-white/20 px-1.5 py-0.2 rounded-md">20/10</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveStudioMode('free_image')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  activeStudioMode === 'free_image'
-                    ? 'bg-emerald-600 text-white shadow-md'
-                    : 'text-slate-600 dark:text-zinc-400 hover:text-black dark:hover:text-white'
-                }`}
-              >
-                <span>🎨 Tạo Ảnh Tự Do</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Accuracy Assurance Banner */}
-        <div
-          className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 ${
-            isDark
-              ? 'bg-emerald-950/20 border-emerald-800/40 text-emerald-300'
-              : 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
-          }`}
-        >
-          <div className="flex items-center gap-2.5 text-xs font-bold">
-            <ShieldCheck className="w-5 h-5 text-emerald-500 shrink-0" />
-            <span>
-              Cam kết của Max10: Bức ảnh được dựng đúng 100% theo nội dung bạn yêu cầu, loại bỏ hoàn toàn các lỗi vẽ thừa nhân vật hoặc biến dạng chi tiết.
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setAntiDefectMode(!antiDefectMode)}
-            className={`px-2.5 py-1 rounded-xl text-[11px] font-bold shrink-0 transition-colors cursor-pointer border ${
-              antiDefectMode
-                ? 'bg-emerald-600 text-white border-emerald-500'
-                : 'bg-zinc-800 text-zinc-400 border-zinc-700'
-            }`}
-          >
-            {antiDefectMode ? '✓ Khử lỗi vẽ sai: BẬT' : 'Khử lỗi vẽ sai: TẮT'}
-          </button>
-        </div>
-
-        {/* Workspace Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left Controls (5 cols) */}
-          <div className="lg:col-span-5 space-y-5">
-            {/* Input Prompt Card */}
+          {/* Daily Quota & XP Wallet Summary */}
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
             <div
-              className={`p-4 md:p-5 rounded-2xl border ${
+              className={`px-3.5 py-2 rounded-xl border text-xs flex items-center gap-3 ${
                 isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-2xs'
               }`}
             >
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  1. Nhập mô tả ảnh cần tạo (Tiếng Việt hoặc Anh)
-                </label>
-                <span className="text-[10px] font-bold text-emerald-500 flex items-center gap-1">
-                  <Zap className="w-3 h-3" />
-                  <span>DALL·E 3 Tự Động Tối Ưu</span>
-                </span>
-              </div>
-
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Ví dụ: Người AI thuyết trình giảng bài trong lớp học thông minh 8K, sơ đồ cấu tạo tế bào 3D, cúp vàng thủ khoa..."
-                rows={3}
-                className={`w-full p-3 rounded-xl text-sm border transition-all resize-none focus:outline-hidden focus:ring-2 focus:ring-emerald-500 ${
-                  isDark
-                    ? 'bg-zinc-800 border-zinc-700 text-white placeholder-zinc-500'
-                    : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400'
-                }`}
-              />
-
-              {/* Suggestions Chips */}
-              <div className="mt-3">
-                <div className="text-[11px] font-bold text-slate-400 mb-1.5 flex items-center justify-between">
-                  <span className="flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-amber-500" />
-                    <span>{activeStudioMode === 'poster' ? 'Mẫu Poster Phổ Biến (Bấm Để Xem/Tạo):' : 'Gợi ý chủ đề chuẩn điểm 10:'}</span>
+              <div>
+                <div className="text-[11px] text-slate-400 font-semibold">Lượt tạo ảnh mới hôm nay</div>
+                <div className="font-black text-sm flex items-center gap-1.5">
+                  <span className={quota.remaining === 0 ? 'text-rose-500' : 'text-emerald-500'}>
+                    {quota.remaining}/{quota.limit} lượt
                   </span>
-                  {activeStudioMode === 'poster' && (
-                    <span className="text-[10px] text-rose-500 font-bold">🌸 Ảnh thứ 2 có sẵn</span>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1">
-                  {(activeStudioMode === 'poster' ? posterSuggestions.map(p => p.prompt) : suggestions).map((s, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => {
-                        setPrompt(s);
-                        handleGenerate(s);
-                      }}
-                      className={`text-left text-[11px] px-2.5 py-1 rounded-lg border transition-all line-clamp-1 cursor-pointer ${
-                        s.includes('20/10')
-                          ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 font-bold hover:bg-rose-100'
-                          : isDark
-                          ? 'bg-zinc-800/80 border-zinc-700 text-zinc-300 hover:bg-zinc-750 hover:text-white'
-                          : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
-                      }`}
-                      title={s}
-                    >
-                      {s.includes('20/10') ? '🌸 ' + s : s}
-                    </button>
-                  ))}
+                  <span className="text-[11px] font-semibold text-slate-400">
+                    ({subscriptionPlan === 'free' && userRole === 'student' && !isAdmin ? 'Gói Thường' : 'Mở rộng VIP'})
+                  </span>
                 </div>
               </div>
-            </div>
-
-            {/* Style Selection Card */}
-            <div
-              className={`p-4 md:p-5 rounded-2xl border ${
-                isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-2xs'
-              }`}
-            >
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2.5 flex items-center gap-1.5">
-                <Palette className="w-3.5 h-3.5 text-emerald-500" />
-                <span>2. Chọn phong cách vẽ chuẩn xác</span>
-              </label>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {styleOptions.map((opt) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => setStyle(opt.id)}
-                    className={`p-2.5 rounded-xl border text-left transition-all flex items-start gap-2.5 cursor-pointer relative ${
-                      style === opt.id
-                        ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
-                        : isDark
-                        ? 'border-zinc-800 bg-zinc-850 hover:bg-zinc-800'
-                        : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className="text-xl select-none">{opt.icon}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-xs font-bold leading-snug flex items-center gap-1.5">
-                        <span className="truncate">{opt.name}</span>
-                        {opt.badge && (
-                          <span className="px-1.5 py-0.2 rounded-md bg-emerald-500 text-white text-[9px] font-bold">
-                            {opt.badge}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[10px] text-slate-400 truncate">{opt.desc}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Aspect Ratio Card */}
-            <div
-              className={`p-4 md:p-5 rounded-2xl border ${
-                isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-2xs'
-              }`}
-            >
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-blue-500" />
-                <span>3. Tỷ lệ khung hình</span>
-              </label>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {aspectRatios.map((ar) => (
-                  <button
-                    key={ar.id}
-                    onClick={() => setAspectRatio(ar.id)}
-                    className={`p-2 rounded-xl border text-center transition-all cursor-pointer ${
-                      aspectRatio === ar.id
-                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500 font-bold ring-2 ring-emerald-500/20'
-                        : isDark
-                        ? 'border-zinc-800 bg-zinc-850 text-zinc-300 hover:bg-zinc-800'
-                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="text-xs font-bold">{ar.label}</div>
-                    <div className="text-[9px] text-slate-400">{ar.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Action Button */}
-            <button
-              onClick={() => handleGenerate()}
-              disabled={!prompt.trim() || loading}
-              className={`w-full py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer ${
-                !prompt.trim() || loading
-                  ? 'bg-zinc-300 dark:bg-zinc-800 text-zinc-500 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 text-white hover:shadow-emerald-500/20 active:scale-[0.99]'
-              }`}
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Đang dựng ảnh chuẩn xác như ChatGPT DALL·E 3...</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-5 h-5" />
-                  <span>Tạo Ảnh Chuẩn Xác Như ChatGPT Ngay</span>
-                </>
+              {subscriptionPlan === 'free' && userRole === 'student' && !isAdmin && onOpenPricing && (
+                <button
+                  type="button"
+                  onClick={onOpenPricing}
+                  className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  <Crown className="w-3.5 h-3.5" />
+                  <span>Mở rộng VIP</span>
+                </button>
               )}
-            </button>
+            </div>
+
+            <div
+              className={`px-3.5 py-2 rounded-xl border text-xs flex items-center gap-2 ${
+                isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-2xs'
+              }`}
+            >
+              <Coins className="w-4 h-4 text-amber-500" />
+              <div>
+                <div className="text-[11px] text-slate-400 font-semibold">Điểm thưởng XP</div>
+                <div className="font-black text-sm text-amber-500">{xpBalance} XP</div>
+              </div>
+            </div>
           </div>
+        </div>
 
-          {/* Right Image Canvas & History (7 cols) */}
-          <div className="lg:col-span-7 space-y-5">
-            {/* Primary Showcase Box */}
-            <div
-              className={`p-4 md:p-6 rounded-2xl border flex flex-col items-center justify-center min-h-[440px] transition-all relative overflow-hidden ${
-                isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-2xs'
-              }`}
-            >
-              {loading ? (
-                <div className="flex flex-col items-center justify-center text-center p-8 space-y-4">
-                  <div className="relative">
-                    <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-emerald-500 via-teal-500 to-indigo-600 flex items-center justify-center text-white shadow-xl animate-bounce">
-                      <Sparkles className="w-8 h-8" />
-                    </div>
-                  </div>
-                  <div>
-                    <h3 className="font-black text-base">Họa sĩ AI Max10 đang vẽ...</h3>
-                    <p className="text-xs text-slate-400 mt-1 max-w-xs">
-                      Tối ưu hóa chi tiết ánh sáng, màu sắc 8K theo phong cách ChatGPT DALL·E 3 đã chọn.
-                    </p>
-                  </div>
-                </div>
-              ) : currentImage ? (
-                <div className="w-full space-y-4">
-                  {/* Festive 20/10 Header Banner if current image is the 20/10 Poster */}
-                  {(currentImage.url.includes('a-heartwarming-photo') || currentImage.prompt.includes('20/10')) && (
-                    <div className="p-3 rounded-2xl bg-gradient-to-r from-rose-500/20 via-pink-500/15 to-amber-500/15 border border-rose-300/80 dark:border-rose-800 flex items-center justify-between gap-2 shadow-xs">
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-2xl select-none animate-pulse">🌸</span>
-                        <div>
-                          <div className="text-xs font-black uppercase text-rose-700 dark:text-rose-300 tracking-wider flex items-center gap-1.5">
-                            <span>POSTER CHÀO MỪNG NGÀY PHỤ NỮ VIỆT NAM 20/10</span>
-                            <span className="px-1.5 py-0.2 rounded-md bg-rose-600 text-white text-[9px] font-black">ẢNH THỨ 2</span>
-                          </div>
-                          <div className="text-[11px] text-slate-600 dark:text-zinc-400 font-medium">
-                            Tôn vinh vẻ đẹp dịu dàng, trí tuệ & ngập tràn hạnh phúc của người phụ nữ Việt Nam
-                          </div>
-                        </div>
-                      </div>
-                      <span className="hidden sm:inline-flex px-2.5 py-1 rounded-full text-[10px] font-black bg-rose-600 text-white shadow-xs shrink-0">
-                        Chuẩn ChatGPT DALL·E 3
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Image Display */}
-                  <div className="relative group rounded-2xl overflow-hidden border border-black/10 dark:border-white/10 shadow-lg bg-black/5 flex items-center justify-center max-h-[500px]">
-                    <img
-                      src={currentImage.url}
-                      alt={currentImage.prompt}
-                      className="w-full object-contain max-h-[500px] transition-transform duration-300 group-hover:scale-[1.01]"
-                    />
-
-                    {/* Overlay Action Buttons on Image */}
-                    <div className="absolute top-3 right-3 flex items-center gap-2 opacity-90 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => setFullscreenUrl(currentImage.url)}
-                        className="p-2 rounded-xl bg-black/60 hover:bg-black/80 text-white backdrop-blur-xs transition-colors shadow-md cursor-pointer"
-                        title="Phóng to ảnh"
-                      >
-                        <Maximize2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDownload(currentImage.url, currentImage.prompt)}
-                        className="p-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white backdrop-blur-xs transition-colors shadow-md cursor-pointer"
-                        title="Tải poster về máy"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    {/* Accuracy Badge on Image */}
-                    <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded-lg bg-black/70 backdrop-blur-md border border-white/20 text-white text-[10px] font-bold flex items-center gap-1.5 shadow-md">
-                      <ShieldCheck className="w-3.5 h-3.5 text-rose-400" />
-                      <span>{currentImage.prompt.includes('20/10') ? 'Poster 20/10 Chuẩn Đồ Họa ChatGPT DALL·E 3' : 'Chuẩn phong cách ChatGPT DALL·E 3'}</span>
-                    </div>
-                  </div>
-
-                  {/* Greeting Card for 20/10 */}
-                  {(currentImage.url.includes('a-heartwarming-photo') || currentImage.prompt.includes('20/10')) && (
-                    <div className="p-3 rounded-xl bg-rose-50/80 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 text-xs text-rose-900 dark:text-rose-200 leading-relaxed italic flex items-start gap-2">
-                      <span className="text-base select-none shrink-0">💐</span>
-                      <span>
-                        <strong>Lời chúc 20/10:</strong> &quot;Kính chúc các bà, các mẹ, các cô giáo và toàn thể nữ sinh luôn ngập tràn niềm vui, xinh tươi rạng rỡ như những đóa hồng và luôn gặt hái nhiều điểm 10 rực rỡ trong học tập & cuộc sống!&quot;
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Image Info & Action Toolbar */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold truncate text-slate-800 dark:text-zinc-200">
-                        {currentImage.prompt}
-                      </div>
-                      <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
-                        <span>Tỷ lệ {currentImage.aspectRatio}</span>
-                        <span>•</span>
-                        <span>
-                          Phong cách {styleOptions.find((s) => s.id === currentImage.style)?.name || currentImage.style}
-                        </span>
-                        {currentImage.seed && (
-                          <>
-                            <span>•</span>
-                            <span className="font-mono text-[10px]">Seed: {currentImage.seed}</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => handleGenerate(currentImage.prompt)}
-                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
-                          isDark
-                            ? 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-750 hover:text-white'
-                            : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
-                        }`}
-                        title="Tạo biến thể ảnh khác với cùng mô tả"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5 text-amber-500" />
-                        <span>Tái tạo</span>
-                      </button>
-
-                      <button
-                        onClick={() => handleDownload(currentImage.url, currentImage.prompt)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs transition-colors cursor-pointer"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Tải về</span>
-                      </button>
-
-                      <button
-                        onClick={() => handleCopyLink(currentImage.url)}
-                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
-                          isDark
-                            ? 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-750'
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                        }`}
-                      >
-                        {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copied ? 'Đã copy' : 'Copy link'}</span>
-                      </button>
-
-                      {onSendToChat && (
-                        <button
-                          onClick={() =>
-                            onSendToChat(
-                              `Hãy nhận xét và phân tích bức ảnh này giúp em: ${currentImage.prompt}`,
-                              currentImage.url
-                            )
-                          }
-                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
-                            isDark
-                              ? 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-750'
-                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                          }`}
-                          title="Hỏi AI về bức ảnh này trong đoạn chat"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5 text-indigo-500" />
-                          <span>Hỏi Chat</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Prompt Inspector Drawer */}
-                  {currentImage.enhancedPrompt && (
-                    <div
-                      className={`p-3 rounded-xl border text-xs leading-relaxed ${
-                        isDark ? 'bg-zinc-850/60 border-zinc-800 text-zinc-300' : 'bg-slate-50 border-slate-200 text-slate-700'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-bold flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400">
-                          <Info className="w-3 h-3" />
-                          <span>Prompt DALL·E 3 Đã Tối Ưu Tự Động (Chuẩn xác 100%):</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyPromptText(currentImage.enhancedPrompt || '')}
-                          className="text-[10px] font-bold text-slate-400 hover:text-emerald-500 flex items-center gap-1 cursor-pointer"
-                        >
-                          {copiedPrompt ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-                          <span>{copiedPrompt ? 'Đã sao chép' : 'Sao chép prompt'}</span>
-                        </button>
-                      </div>
-                      <p className="font-mono text-[11px] opacity-90 break-words">
-                        {currentImage.enhancedPrompt}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="text-center p-8 text-slate-400">
-                  <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center mx-auto mb-3 shadow-inner">
-                    <ImageIcon className="w-8 h-8" />
-                  </div>
-                  <h3 className="font-bold text-base text-slate-700 dark:text-zinc-300">
-                    Chưa có ảnh nào được tạo
-                  </h3>
-                  <p className="text-xs max-w-xs mx-auto mt-1">
-                    Nhập câu mô tả hoặc bấm vào gợi ý bên trái, sau đó bấm &quot;Tạo Ảnh Chuẩn Xác Như ChatGPT Ngay&quot;.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Recent History Grid */}
-            {history.length > 0 && (
-              <div
-                className={`p-4 rounded-2xl border ${
-                  isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-2xs'
+        {/* 5-Mode Interactive Segmented Navigation */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+          {tabDefinitions.map((tab) => {
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handleSelectTab(tab.id)}
+                className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-1 ${
+                  active
+                    ? 'bg-emerald-600 text-white border-emerald-500 shadow-md'
+                    : isDark
+                    ? 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
                 }`}
               >
-                <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center justify-between">
-                  <span>Ảnh đã tạo gần đây ({history.length})</span>
+                <div className="flex items-center gap-2 font-bold text-xs">
+                  {tab.icon}
+                  <span className="truncate">{tab.label}</span>
                 </div>
+                <div className={`text-[11px] line-clamp-2 ${active ? 'text-emerald-100' : 'text-slate-400'}`}>
+                  {tab.desc}
+                </div>
+              </button>
+            );
+          })}
+        </div>
 
-                <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                  {history.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => setCurrentImage(item)}
-                      className={`relative rounded-xl overflow-hidden aspect-square border group transition-all cursor-pointer ${
-                        currentImage?.id === item.id
-                          ? 'ring-2 ring-emerald-500 border-emerald-500'
-                          : 'border-slate-200 dark:border-zinc-700 hover:opacity-80'
+        {/* Mode 5: Exact STEM Code Diagrams (SVG / Mermaid.js) */}
+        {activeTab === 'stem_diagram' ? (
+          <DiagramCodeStudio currentGrade={currentGrade} isDark={isDark} />
+        ) : (
+          /* Modes 1-4: Commercial Image + Async Queue + Keyword Cache + HTML5 Canvas Text Compositor */
+          <div className="space-y-5">
+            {/* Async Queue Live Progress Panel */}
+            {activeJobs.length > 0 && (
+              <div
+                className={`p-3.5 rounded-2xl border space-y-2.5 ${
+                  isDark ? 'bg-zinc-900/90 border-zinc-800' : 'bg-white border-slate-200 shadow-2xs'
+                }`}
+              >
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                    <Clock className="w-4 h-4" />
+                    <span>Hàng đợi xử lý bất đồng bộ ({activeJobs.length} tác vụ)</span>
+                  </span>
+                  <span className="text-[11px] text-slate-400 font-medium">
+                    Không chặn giao diện · Bạn có thể gửi thêm yêu cầu song song
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {activeJobs.map((job) => (
+                    <div
+                      key={job.jobId}
+                      className={`p-2.5 rounded-xl border text-xs ${
+                        isDark ? 'bg-zinc-800/70 border-zinc-700' : 'bg-slate-50 border-slate-200'
                       }`}
-                      title={item.prompt}
                     >
-                      <img src={item.url} alt={item.prompt} className="w-full h-full object-cover" />
-                    </button>
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <span className="font-bold truncate">{job.prompt}</span>
+                        <span className="flex items-center gap-1 shrink-0 font-semibold text-[11px]">
+                          {job.status === 'completed' ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                          ) : job.status === 'failed' ? (
+                            <AlertCircle className="w-3.5 h-3.5 text-rose-500" />
+                          ) : (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-500" />
+                          )}
+                          <span>{job.progress}%</span>
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-zinc-700 overflow-hidden">
+                        <div
+                          className={`h-full transition-all duration-300 ${
+                            job.status === 'failed'
+                              ? 'bg-rose-500'
+                              : job.status === 'completed'
+                              ? 'bg-emerald-500'
+                              : 'bg-sky-500'
+                          }`}
+                          style={{ width: `${job.progress}%` }}
+                        />
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-1">{job.error || job.stageLabel}</div>
+                    </div>
                   ))}
                 </div>
               </div>
             )}
-          </div>
-        </div>
-      </div>
 
-      {/* Fullscreen Lightbox Modal */}
-      {fullscreenUrl && (
-        <div
-          onClick={() => setFullscreenUrl(null)}
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 backdrop-blur-md"
-        >
-          <button
-            onClick={() => setFullscreenUrl(null)}
-            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
-          >
-            <X className="w-6 h-6" />
-          </button>
-          <img
-            src={fullscreenUrl}
-            alt="Phóng to ảnh"
-            className="max-w-full max-h-[90vh] object-contain rounded-2xl shadow-2xl"
-          />
-        </div>
-      )}
+            {errorBanner && (
+              <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs font-semibold flex items-center justify-between gap-3">
+                <span>{errorBanner}</span>
+                {quota.remaining === 0 && onOpenPricing && (
+                  <button
+                    type="button"
+                    onClick={onOpenPricing}
+                    className="px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-bold shrink-0 cursor-pointer"
+                  >
+                    Nâng cấp VIP
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Main Studio 2-Column Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Left Controls (5 cols) */}
+              <div className="lg:col-span-5 space-y-4">
+                <div
+                  className={`p-4 md:p-5 rounded-2xl border space-y-4 ${
+                    isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-2xs'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      {activeTab === 'flashcard'
+                        ? '1. Nhập từ vựng hoặc khái niệm'
+                        : activeTab === 'literature'
+                        ? '1. Mô tả bối cảnh Văn học / Lịch sử'
+                        : activeTab === 'mindmap_infographic'
+                        ? '1. Dán đoạn lý thuyết cần tóm tắt'
+                        : '1. Mô tả nhân vật & phong cách Avatar'}
+                    </label>
+                    <span className="text-[11px] font-bold text-emerald-500 flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>Tách chữ Việt chuẩn</span>
+                    </span>
+                  </div>
+
+                  <textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    rows={activeTab === 'mindmap_infographic' ? 4 : 3}
+                    placeholder={
+                      activeTab === 'flashcard'
+                        ? 'Ví dụ: photosynthesis, quang hợp, evaporation, gravity...'
+                        : activeTab === 'literature'
+                        ? 'Ví dụ: Cảnh Ngô Quyền chỉ huy trận Bạch Đằng năm 938...'
+                        : activeTab === 'mindmap_infographic'
+                        ? 'Dán đoạn lý thuyết dài để AI tách thành các nhánh tóm tắt trực quan...'
+                        : 'Ví dụ: Học sinh giỏi toán đeo kính thông minh, nền vũ trụ...'
+                    }
+                    className={`w-full p-3 rounded-xl text-sm border resize-none focus:outline-hidden focus:ring-2 focus:ring-emerald-500 ${
+                      isDark
+                        ? 'bg-zinc-800 border-zinc-700 text-white placeholder-zinc-500'
+                        : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400'
+                    }`}
+                  />
+
+                  {/* Mode-Specific Quick Suggestions */}
+                  <div>
+                    <div className="text-[11px] font-bold text-slate-400 mb-1.5">
+                      Gợi ý nhanh (bấm để tạo ngay):
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {modeSuggestions[activeTab].map((s, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            setPrompt(s);
+                            handleEnqueueGeneration(s);
+                          }}
+                          className={`text-left text-[11px] px-2.5 py-1.5 rounded-lg border transition-colors line-clamp-1 cursor-pointer ${
+                            isDark
+                              ? 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700'
+                              : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+                          }`}
+                          title={s}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Avatar Archetype Selector OR Style Selector */}
+                  {activeTab === 'avatar' ? (
+                    <div className="space-y-2 pt-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold uppercase tracking-wider text-slate-400">
+                          2. Chọn phong cách Avatar & Huy hiệu
+                        </span>
+                        <span className="text-amber-500 font-bold text-[11px]">
+                          {xpBalance >= AVATAR_XP_COST
+                            ? `Đổi ${AVATAR_XP_COST} XP / lần`
+                            : 'Đang hỗ trợ lượt trải nghiệm'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {avatarArchetypes.map((arch) => (
+                          <button
+                            key={arch.id}
+                            type="button"
+                            onClick={() => setAvatarArchetype(arch.id)}
+                            className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                              avatarArchetype === arch.id
+                                ? 'border-amber-500 bg-amber-500/10 ring-2 ring-amber-500/20'
+                                : isDark
+                                ? 'border-zinc-800 bg-zinc-850 hover:bg-zinc-800'
+                                : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                            }`}
+                          >
+                            <div className="text-xs font-bold">{arch.label}</div>
+                            <div className="text-[11px] text-slate-400">{arch.note}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 pt-1">
+                      <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                        <Palette className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>2. Phong cách hình nền minh họa (Không chữ)</span>
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { id: 'chatgpt', name: 'Đồ họa Sắc nét', desc: 'Rõ ràng, cân đối' },
+                          { id: '3d_cartoon', name: '3D Hoạt hình', desc: 'Thân thiện, dễ nhớ' },
+                          { id: 'literature_art', name: 'Sơn dầu / Văn học', desc: 'Chiều sâu cảm xúc' },
+                          { id: 'anime', name: 'Anime Ghibli', desc: 'Cảnh sắc nên thơ' },
+                        ].map((st) => (
+                          <button
+                            key={st.id}
+                            type="button"
+                            onClick={() => setStyle(st.id)}
+                            className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
+                              style === st.id
+                                ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/20'
+                                : isDark
+                                ? 'border-zinc-800 bg-zinc-850 hover:bg-zinc-800'
+                                : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                            }`}
+                          >
+                            <div className="text-xs font-bold">{st.name}</div>
+                            <div className="text-[11px] text-slate-400">{st.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Aspect Ratio */}
+                  <div className="space-y-2 pt-1">
+                    <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-sky-500" />
+                      <span>3. Tỷ lệ khung hình</span>
+                    </label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {(['1:1', '16:9', '4:3', '9:16'] as const).map((ar) => (
+                        <button
+                          key={ar}
+                          type="button"
+                          onClick={() => setAspectRatio(ar)}
+                          className={`py-2 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                            aspectRatio === ar
+                              ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500'
+                              : isDark
+                              ? 'border-zinc-800 bg-zinc-850 text-zinc-300'
+                              : 'border-slate-200 bg-slate-50 text-slate-700'
+                          }`}
+                        >
+                          {ar}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Submit to Async Queue */}
+                  <button
+                    type="button"
+                    onClick={() => handleEnqueueGeneration()}
+                    disabled={!prompt.trim()}
+                    className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer ${
+                      !prompt.trim()
+                        ? 'bg-zinc-300 dark:bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white'
+                    }`}
+                  >
+                    {hasRunningJobs ? (
+                      <>
+                        <Zap className="w-4 h-4" />
+                        <span>Thêm vào hàng đợi xử lý song song</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        <span>
+                          {activeTab === 'avatar'
+                            ? 'Tạo Avatar & Huy Hiệu Cá Nhân'
+                            : activeTab === 'flashcard'
+                            ? 'Tạo Flashcard Từ Vựng Trực Quan'
+                            : activeTab === 'mindmap_infographic'
+                            ? 'Tạo Infographic Tóm Tắt Lý Thuyết'
+                            : 'Vẽ Minh Họa Văn Học / Lịch Sử'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Popular Keyword Cache Shelf */}
+                {cachedKeywords.length > 0 && (
+                  <div
+                    className={`p-4 rounded-2xl border ${
+                      isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-2xs'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                        <Database className="w-3.5 h-3.5 text-sky-500" />
+                        <span>Bộ nhớ đệm từ khóa (0 lượt tốn · Tức thì)</span>
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {cachedKeywords.slice(0, 8).map((item) => (
+                        <button
+                          key={item.cacheKey}
+                          type="button"
+                          onClick={() => {
+                            setPrompt(item.originalPrompt);
+                            handleEnqueueGeneration(item.originalPrompt);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold cursor-pointer transition-colors ${
+                            isDark
+                              ? 'bg-sky-950/30 border-sky-800/50 text-sky-300 hover:bg-sky-900/40'
+                              : 'bg-sky-50 border-sky-200 text-sky-800 hover:bg-sky-100'
+                          }`}
+                        >
+                          ⚡ {item.originalPrompt} ({item.hitCount})
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Right Canvas Output & History (7 cols) */}
+              <div className="lg:col-span-7 space-y-4">
+                <div
+                  className={`p-4 md:p-5 rounded-2xl border ${
+                    isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-2xs'
+                  }`}
+                >
+                  {currentItem ? (
+                    <div className="space-y-4">
+                      {/* Metadata Header (Zero-Pill clean inline typography) */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200/70 dark:border-zinc-800">
+                        <div>
+                          <div className="text-sm font-bold text-slate-900 dark:text-white">
+                            {currentItem.overlay.title || currentItem.prompt}
+                          </div>
+                          <div className="text-xs text-slate-400 flex flex-wrap items-center gap-1.5 mt-0.5">
+                            <span>{currentItem.provider || 'Commercial Image API'}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>{currentItem.aspectRatio}</span>
+                            {currentItem.cached && (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span className="text-emerald-500 font-semibold">
+                                  ⚡ Lấy từ Bộ nhớ đệm (Không tốn lượt)
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEnqueueGeneration(currentItem.prompt)}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold border cursor-pointer ${
+                              isDark
+                                ? 'bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-750'
+                                : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+                            }`}
+                          >
+                            <RotateCcw className="w-3.5 h-3.5 text-amber-500" />
+                            <span>Tạo lại</span>
+                          </button>
+
+                          {onSendToChat && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onSendToChat(
+                                  `Hãy giải thích sâu hơn về hình minh họa chủ đề "${currentItem.prompt}" giúp em nhé!`,
+                                  currentItem.url
+                                )
+                              }
+                              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold border cursor-pointer ${
+                                isDark
+                                  ? 'bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-750'
+                                  : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+                              }`}
+                            >
+                              <MessageSquare className="w-3.5 h-3.5 text-indigo-500" />
+                              <span>Hỏi AI Chat</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* HTML5 Canvas Text + Image Compositor */}
+                      <CanvasTextCompositor
+                        baseImageUrl={currentItem.url}
+                        mode={currentItem.mode}
+                        aspectRatio={currentItem.aspectRatio}
+                        overlay={currentItem.overlay}
+                        isDark={isDark}
+                        onApplyAsAvatar={onUpdateAvatar}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+
+                {/* Recent Session History */}
+                {history.length > 0 && (
+                  <div
+                    className={`p-4 rounded-2xl border ${
+                      isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-2xs'
+                    }`}
+                  >
+                    <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+                      Lịch sử tạo gần đây ({history.length})
+                    </div>
+                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                      {history.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setCurrentItem(item)}
+                          className={`relative rounded-xl overflow-hidden aspect-square border cursor-pointer transition-all ${
+                            currentItem?.id === item.id
+                              ? 'ring-2 ring-emerald-500 border-emerald-500'
+                              : 'border-slate-200 dark:border-zinc-700 hover:opacity-85'
+                          }`}
+                          title={item.prompt}
+                        >
+                          <img src={item.url} alt={item.prompt} className="w-full h-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

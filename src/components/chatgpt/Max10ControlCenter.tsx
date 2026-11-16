@@ -101,6 +101,9 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
   // User requested: "mã QR để chuyển tài khoản là cái QR mà bạn vừa làm thanh điều khiển để điều khiển Max10 và xem tất cả tài khoản là quyền của bạn mở duy gmail đómackhanhduy992012@gmail.comchỉ có bạn mới xem được tất cả và làm quản trị viên của Max10 với hướng dẫn tôi tìm thấy Max10 trên google"
   const [activeCenterTab, setActiveCenterTab] = useState<'control_qr' | 'accounts' | 'google_guide' | 'security'>('control_qr');
   const [bannedAccounts, setBannedAccounts] = useState<any[]>([]);
+  const [securityLogs, setSecurityLogs] = useState<any[]>([]);
+  const [banTargetInput, setBanTargetInput] = useState<string>('');
+  const [banReasonInput, setBanReasonInput] = useState<string>('');
   const [loadingSecurity, setLoadingSecurity] = useState<boolean>(false);
   const [selectedBankId, setSelectedBankId] = useState<string>('MB');
   const [transferAmount, setTransferAmount] = useState<number>(100000);
@@ -118,6 +121,9 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
       if (data.success && Array.isArray(data.bannedAccounts)) {
         setBannedAccounts(data.bannedAccounts);
       }
+      if (data.success && Array.isArray(data.securityLogs)) {
+        setSecurityLogs(data.securityLogs);
+      }
     } catch (e) {
       console.warn('Lỗi lấy danh sách ban:', e);
     } finally {
@@ -125,23 +131,38 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
     }
   };
 
-  const handleSimulateHack = async () => {
+  const handleRealBanTarget = async () => {
+    const target = banTargetInput.trim();
+    if (!target) {
+      showToast('Vui lòng nhập User ID, Email hoặc địa chỉ IP cần chặn thực tế.');
+      return;
+    }
     try {
-      const res = await fetch('/api/security/simulate-hack-test', {
+      const isEmail = target.includes('@');
+      const isIp = /^[\d.:a-f]+$/i.test(target) && (target.includes('.') || target.includes(':'));
+      const res = await fetch('/api/security/ban-target', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          studentName: 'Kẻ_Hack_Xâm_Nhập_' + Math.floor(100 + Math.random() * 900),
-          studentId: 'bad-actor-' + Date.now(),
+          securityCode: MASTER_SECURITY_CODE,
+          email: isEmail ? target : undefined,
+          ip: isIp ? target : undefined,
+          userId: !isEmail && !isIp ? target : undefined,
+          name: target,
+          reason: banReasonInput.trim() || 'Chặn trực tiếp bởi Quản trị viên qua Tường lửa Max10 AI',
         }),
       });
       const data = await res.json();
       if (data.success) {
-        showToast('🛡️ Đã phát hiện và TỰ ĐỘNG BAN & XÓA VĨNH VIỄN tài khoản kẻ hack!');
+        showToast('🛡️ Đã chặn vĩnh viễn và xóa dữ liệu đối tượng trên máy chủ!');
+        setBanTargetInput('');
+        setBanReasonInput('');
         fetchBannedAccounts();
+      } else {
+        showToast(data.error || 'Không thể thực hiện lệnh chặn.');
       }
     } catch {
-      showToast('Lỗi khi gửi yêu cầu thử nghiệm an ninh.');
+      showToast('Lỗi kết nối khi gửi lệnh chặn đến tường lửa.');
     }
   };
 
@@ -1821,16 +1842,6 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
-                  onClick={handleSimulateHack}
-                  className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
-                  title="Thử nghiệm tạo kẻ hack giả để kiểm tra tính năng tự động ban và xóa vĩnh viễn"
-                >
-                  <AlertTriangle className="w-4 h-4" />
-                  <span>Thử Nghiệm Tự Động Ban Kẻ Hack</span>
-                </button>
-
-                <button
-                  type="button"
                   onClick={handleUnbanAll}
                   className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer"
                   title="Gỡ ban bằng mã bảo mật 24122012@duy"
@@ -1843,11 +1854,37 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
                   type="button"
                   onClick={fetchBannedAccounts}
                   className="p-2 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 transition-colors cursor-pointer"
-                  title="Làm mới danh sách"
+                  title="Làm mới danh sách & nhật ký tường lửa"
                 >
                   <RefreshCw className={`w-4 h-4 ${loadingSecurity ? 'animate-spin' : ''}`} />
                 </button>
               </div>
+            </div>
+
+            {/* Real Manual Target Ban Form */}
+            <div className="p-4 rounded-2xl bg-black/35 border border-rose-500/30 grid grid-cols-1 md:grid-cols-12 gap-2.5 items-center text-xs">
+              <input
+                type="text"
+                value={banTargetInput}
+                onChange={(e) => setBanTargetInput(e.target.value)}
+                placeholder="Nhập User ID, Email hoặc IP cần chặn vĩnh viễn..."
+                className="md:col-span-4 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-400"
+              />
+              <input
+                type="text"
+                value={banReasonInput}
+                onChange={(e) => setBanReasonInput(e.target.value)}
+                placeholder="Lý do vi phạm (tùy chọn)..."
+                className="md:col-span-5 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-400"
+              />
+              <button
+                type="button"
+                onClick={handleRealBanTarget}
+                className="md:col-span-3 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <ShieldAlert className="w-4 h-4" />
+                <span>Chặn & Xóa Thật</span>
+              </button>
             </div>
 
             {/* Master Security Key Callout */}
@@ -1855,10 +1892,10 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
               <div className="space-y-1">
                 <span className="font-black text-rose-400 flex items-center gap-1.5">
                   <Lock className="w-4 h-4" />
-                  <span>MÃ BẢO MẬT KHÔNG BỊ HACK DUY NHẤT:</span>
+                  <span>MÃ BẢO MẬT CHỐNG HACK DUY NHẤT (TƯỜNG LỬA SERVER):</span>
                 </span>
                 <p className="text-slate-300 text-[11px] leading-relaxed">
-                  Chỉ Quản trị viên Mạc Khánh Duy sở hữu mã này. Bất kỳ ai không có mã này mà cố tình xâm nhập sẽ bị <strong>tự động ban tài khoản và xóa vĩnh viễn</strong>.
+                  Tường lửa Express tự động quét mọi gói tin XSS, SQL Injection, giả mạo quyền Admin và vượt giới hạn tần suất (Rate Limit). Mọi vi phạm đều bị trả HTTP 403, ban IP/thiết bị và xóa tài khoản thật.
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -1882,19 +1919,19 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
             <div className="flex items-center justify-between">
               <h4 className="font-black text-sm text-slate-900 dark:text-white flex items-center gap-2">
                 <ShieldAlert className="w-4 h-4 text-rose-500" />
-                <span>Danh Sách Tài Khoản Đã Bị Tự Động Ban &amp; Xóa Vĩnh Viễn ({bannedAccounts.length})</span>
+                <span>Danh Sách Tài Khoản &amp; IP Bị Chặn Thực Tế ({bannedAccounts.length}) · Nhật Ký Sự Kiện ({securityLogs.length})</span>
               </h4>
-              <span className="text-xs text-slate-500">Cập nhật tự động thời gian thực</span>
+              <span className="text-xs text-slate-500">Thực thi trực tiếp trên máy chủ</span>
             </div>
 
             {bannedAccounts.length === 0 ? (
               <div className="p-8 text-center rounded-2xl border border-dashed border-slate-300 dark:border-zinc-800 text-slate-500 text-xs space-y-2">
                 <div className="text-3xl">🛡️</div>
                 <p className="font-bold text-slate-700 dark:text-zinc-300">
-                  Hệ thống an ninh an toàn tuyệt đối 100%!
+                  Tường lửa bảo mật đang hoạt động thực tế — Chưa ghi nhận IP/tài khoản bị chặn!
                 </p>
                 <p className="text-[11px] text-slate-400">
-                  Chưa ghi nhận kẻ hack nào vượt qua được tường lửa Max10 AI. Hãy nhấn nút &quot;Thử Nghiệm Tự Động Ban Kẻ Hack&quot; ở trên để trải nghiệm cơ chế bảo vệ.
+                  Mọi hành vi gửi mã độc XSS, SQLi, giả mạo Admin hoặc flood request sẽ bị chặn HTTP 403 và ghi nhận tự động tại đây.
                 </p>
               </div>
             ) : (

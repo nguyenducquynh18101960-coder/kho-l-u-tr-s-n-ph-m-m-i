@@ -22,7 +22,7 @@ import { AIVoicePlayerBar } from './components/chatgpt/AIVoicePlayerBar';
 import { MessageNotificationBanner } from './components/chatgpt/MessageNotificationBanner';
 
 // Modals & Security Gate
-import { Max10SecurityVerification } from './components/chatgpt/Max10SecurityVerification';
+import { Max10SecurityVerification, getOrCreateDeviceId } from './components/chatgpt/Max10SecurityVerification';
 import { Max10IntroSplash } from './components/chatgpt/Max10IntroSplash';
 import { OfferModal } from './components/chatgpt/OfferModal';
 import { ThemeBackgroundModal } from './components/chatgpt/ThemeBackgroundModal';
@@ -581,6 +581,86 @@ export function App() {
     }
   });
 
+  // Real Server-Side Security Firewall Enforcement & Fetch Interceptor
+  useEffect(() => {
+    const deviceId = getOrCreateDeviceId();
+
+    const triggerRealBan = (reasonText: string) => {
+      try {
+        localStorage.setItem('max10_permanently_banned', 'true');
+        localStorage.setItem('max10_ban_reason', reasonText);
+        localStorage.removeItem(STORAGE_KEY_AUTH_USER);
+      } catch {}
+      setBanReason(reasonText);
+      setIsPermanentlyBanned(true);
+    };
+
+    // Check real server ban list on boot (cannot bypass by clearing localStorage)
+    const q = new URLSearchParams({
+      deviceId,
+      userId: currentUser?.id || '',
+      email: currentUser?.email || '',
+    });
+    fetch(`/api/security/status?${q.toString()}`, {
+      headers: { 'x-max10-device-id': deviceId },
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.isClientBanned) {
+          triggerRealBan(data.banReason || 'Thiết bị hoặc tài khoản đã bị tường lửa Max10 AI chặn vĩnh viễn.');
+        }
+      })
+      .catch(() => {});
+
+    // Attach device/user headers and intercept real 403 firewall bans across all /api/* requests
+    const w = window as any;
+    if (!w.__max10SecurityFetchPatched) {
+      w.__max10SecurityFetchPatched = true;
+      const origFetch = window.fetch.bind(window);
+      window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        let nextInit = init;
+        if (urlStr.startsWith('/api')) {
+          const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
+          headers.set('x-max10-device-id', getOrCreateDeviceId());
+          try {
+            const authRaw = localStorage.getItem(STORAGE_KEY_AUTH_USER);
+            if (authRaw) {
+              const parsed = JSON.parse(authRaw);
+              if (parsed?.id) headers.set('x-max10-user-id', parsed.id);
+            }
+            if (sessionStorage.getItem('max10_master_security_verified') === 'true') {
+              headers.set('x-max10-master-code', '24122012@duy');
+            }
+          } catch {}
+          nextInit = { ...init, headers };
+        }
+        const response = await origFetch(input, nextInit);
+        if (urlStr.startsWith('/api') && response.status === 403) {
+          try {
+            const cloned = response.clone();
+            const body = await cloned.json();
+            if (body?.banned) {
+              window.dispatchEvent(
+                new CustomEvent('max10_server_banned', {
+                  detail: { reason: body.reason || body.error || 'Tường lửa phát hiện hành vi tấn công và đã chặn vĩnh viễn.' },
+                })
+              );
+            }
+          } catch {}
+        }
+        return response;
+      };
+    }
+
+    const onServerBanned = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail;
+      triggerRealBan(detail?.reason || 'Tường lửa Max10 AI đã chặn vĩnh viễn!');
+    };
+    window.addEventListener('max10_server_banned', onServerBanned);
+    return () => window.removeEventListener('max10_server_banned', onServerBanned);
+  }, [currentUser?.id, currentUser?.email]);
+
   // Check anti-hack permanent ban
   if (isPermanentlyBanned) {
     return (
@@ -855,6 +935,10 @@ export function App() {
               <ImageGenerator
                 currentGrade={grade}
                 isDark={isDark}
+                currentUser={currentUser}
+                subscriptionPlan={subscriptionPlan}
+                onUpdateAvatar={handleSaveAvatar}
+                onOpenPricing={() => setShowPricingModal(true)}
                 onSendToChat={(text) => {
                   setActiveTab('chat');
                   handleSendMessage(text);
@@ -996,14 +1080,25 @@ export function App() {
       </div>
 
       {/* Modals & Dialogs */}
-      {/* 0. Max10 Cloudflare-style Security Verification ("Thực hiện bảo mật - max10.ai") */}
+      {/* 0. Max10 Real Cryptographic Security Verification ("Thực hiện bảo mật - max10.ai") */}
       {!isSecurityVerified && (
-        <Max10SecurityVerification onVerified={() => setIsSecurityVerified(true)} />
+        <Max10SecurityVerification
+          userId={currentUser?.id}
+          onVerified={() => setIsSecurityVerified(true)}
+          onBanned={(reason) => {
+            try {
+              localStorage.setItem('max10_permanently_banned', 'true');
+              localStorage.setItem('max10_ban_reason', reason);
+            } catch {}
+            setBanReason(reason);
+            setIsPermanentlyBanned(true);
+          }}
+        />
       )}
 
-      {/* 1. Max10 Intro Splash (Introduction to Max10 AI, How to use, Founder Mạc Khánh Duy) */}
+      {/* 1. Max10 Intro Splash (ONLY opens AFTER security verification completes) */}
       <Max10IntroSplash
-        isOpen={showIntroSplash}
+        isOpen={isSecurityVerified && showIntroSplash}
         onClose={() => setShowIntroSplash(false)}
         isDark={isDark}
         userName={userName}

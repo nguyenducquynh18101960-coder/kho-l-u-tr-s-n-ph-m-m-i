@@ -1,0 +1,37 @@
+[
+  {
+    "event": "ADMIN_UNBAN_EXECUTED",
+    "timestamp": 1794833152099,
+    "dateFormatted": "12:45:52 16/11/2026",
+    "details": {
+      "deviceId": "verify-dev-1794833151301"
+    }
+  },
+  {
+    "event": "BLOCKED_BANNED_CLIENT_REQUEST",
+    "timestamp": 1794833152090,
+    "dateFormatted": "12:45:52 16/11/2026",
+    "details": {
+      "ip": "127.0.0.1",
+      "deviceId": "verify-dev-1794833151301",
+      "userId": "test",
+      "path": "/image-quota",
+      "banId": "ban-1794833152053-uuef"
+    }
+  },
+  {
+    "event": "REAL_FIREWALL_BAN_AND_DELETE",
+    "timestamp": 1794833152080,
+    "dateFormatted": "12:45:52 16/11/2026",
+    "details": {
+      "id": "ban-1794833152053-uuef",
+      "name": "Đối tượng xâm nhập trái phép",
+      "ip": "127.0.0.1",
+      "deviceId": "verify-dev-1794833151301",
+      "reason": "Tường lửa chặn tấn công thực tế (XSS_SCRIPT_TAG) tại /chat: <script>alert(1)</script>",
+      "bannedAt": 1794833152053,
+      "bannedAtFormatted": "12:45:52 16/11/2026",
+      "permanentlyDeleted": true
+    }
+  }
+]

@@ -3,6 +3,8 @@ import path from "path";
 import fs from "fs";
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import dotenv from "dotenv";
+import { registerVisualStudioRoutes } from "./server/visualStudio";
+import { registerSecurityRoutesAndMiddleware } from "./server/securityFirewall";
 
 dotenv.config();
 
@@ -44,18 +46,14 @@ function getGenAIClient() {
   });
 }
 
-// Standard available Gemini models in priority order (Fast & reliable)
+// Free Tier Gemini models in priority order (GEMINI_API_KEY Free Tier - Zero Paid Billing)
 const FALLBACK_MODELS = [
-  "gemini-3.5-flash",
-  "gemini-3.5-flash-lite",
-  "gemini-3.6-flash",
-  "gemini-3.7-flash",
+  "gemini-2.5-flash",
   "gemini-flash-latest",
   "gemini-flash-lite-latest",
-  "gemini-3.8-flash",
-  "gemini-3.1-flash-lite",
+  "gemini-4-hydrogen",
 ];
-const MODEL_NAME = "gemini-3.5-flash";
+const MODEL_NAME = "gemini-2.5-flash";
 
 async function generateContentWithRetry(params: {
   systemInstruction?: string;
@@ -93,10 +91,19 @@ async function startServer() {
   app.use(express.json({ limit: "25mb" }));
   app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
+  // Real Anti-Hack Firewall Middleware & Cryptographic Verification (mounted BEFORE all API routes)
+  let purgeAccountDataImpl: (params: { userId?: string; email?: string; name?: string }) => void = () => {};
+  registerSecurityRoutesAndMiddleware(app, {
+    purgeAccountData: (params) => purgeAccountDataImpl(params),
+  });
+
   // API Health
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
+
+  // Visual Studio Routes: Async Job Queue, Keyword Cache, Daily Quota, Exact STEM SVG/Mermaid
+  registerVisualStudioRoutes(app);
 
   // Serve PWA Manifest & Service Worker with CORS for PWABuilder & App Stores
   app.get(["/manifest.json", "/manifest.webmanifest"], (_req, res) => {
@@ -5086,76 +5093,8 @@ Yêu cầu kịch bản video gồm:
     }
   });
 
-  // ==========================================
-  // 🛡️ HỆ THỐNG AN NINH CHỐNG HACK & TỰ ĐỘNG BAN - XÓA TÀI KHOẢN VĨNH VIỄN
-  // Mã bảo mật tối cao không bị hack: 24122012@duy
-  // ==========================================
-  const MASTER_SECURITY_CODE = "24122012@duy";
-  const BANNED_ACCOUNTS_PATH = path.resolve(process.cwd(), "banned_accounts_db.json");
-  const SECURITY_LOGS_PATH = path.resolve(process.cwd(), "security_system_db.json");
-
-  interface BannedAccountRecord {
-    id: string;
-    userId?: string;
-    email?: string;
-    name?: string;
-    ip?: string;
-    reason: string;
-    bannedAt: number;
-    bannedAtFormatted: string;
-    permanentlyDeleted: boolean;
-  }
-
-  function loadBannedAccounts(): BannedAccountRecord[] {
-    try {
-      if (fs.existsSync(BANNED_ACCOUNTS_PATH)) {
-        return JSON.parse(fs.readFileSync(BANNED_ACCOUNTS_PATH, "utf-8"));
-      }
-    } catch {}
-    return [];
-  }
-
-  function saveBannedAccounts(list: BannedAccountRecord[]) {
-    try {
-      fs.writeFileSync(BANNED_ACCOUNTS_PATH, JSON.stringify(list, null, 2), "utf-8");
-    } catch (e) {
-      console.warn("Could not save banned accounts", e);
-    }
-  }
-
-  function autoBanAndPermanentlyDeleteAccount(params: {
-    userId?: string;
-    email?: string;
-    name?: string;
-    ip?: string;
-    reason: string;
-  }): BannedAccountRecord {
-    const list = loadBannedAccounts();
-    const now = Date.now();
-    const record: BannedAccountRecord = {
-      id: "ban-" + now + "-" + Math.random().toString(36).substring(2, 6),
-      userId: params.userId,
-      email: params.email,
-      name: params.name || "Kẻ tấn công / can thiệp trái phép",
-      ip: params.ip,
-      reason: params.reason,
-      bannedAt: now,
-      bannedAtFormatted: new Date().toLocaleTimeString("vi-VN") + " " + new Date().toLocaleDateString("vi-VN"),
-      permanentlyDeleted: true,
-    };
-
-    // Filter duplicate entries
-    const filtered = list.filter(
-      (b) =>
-        !(
-          (params.userId && b.userId === params.userId) ||
-          (params.email && b.email && b.email.toLowerCase() === params.email.toLowerCase()) ||
-          (params.ip && b.ip === params.ip)
-        )
-    );
-    filtered.unshift(record);
-    saveBannedAccounts(filtered);
-
+  // Bind real account deletion handler for Real Anti-Hack Firewall
+  purgeAccountDataImpl = (params: { userId?: string; email?: string; name?: string }) => {
     // 1. PERMANENTLY DELETE from social_system_db.json
     try {
       const socialDb = loadSocialDb();
@@ -5197,114 +5136,7 @@ Yêu cầu kịch bản video gồm:
     if (params.userId) {
       accountOverrides.delete(params.userId);
     }
-
-    // 4. Save Security Audit Log
-    try {
-      let logs: any[] = [];
-      if (fs.existsSync(SECURITY_LOGS_PATH)) {
-        logs = JSON.parse(fs.readFileSync(SECURITY_LOGS_PATH, "utf-8"));
-      }
-      logs.unshift({
-        event: "ACCOUNT_AUTO_BANNED_AND_PERMANENTLY_DELETED",
-        timestamp: now,
-        dateFormatted: record.bannedAtFormatted,
-        details: record,
-      });
-      if (logs.length > 200) logs.splice(200);
-      fs.writeFileSync(SECURITY_LOGS_PATH, JSON.stringify(logs, null, 2), "utf-8");
-    } catch {}
-
-    console.warn(`[ANTI-HACK SECURITY] BANNED & PERMANENTLY DELETED:`, record);
-    return record;
-  }
-
-  // Security Status Endpoint
-  app.get("/api/security/status", (req, res) => {
-    const list = loadBannedAccounts();
-    const clientIp = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "";
-    const isClientBanned = list.some((b) => b.ip && clientIp.includes(b.ip));
-    res.json({
-      success: true,
-      antiHackActive: true,
-      masterCode: "24122012@duy",
-      totalBannedAccounts: list.length,
-      isClientBanned,
-    });
-  });
-
-  // Security Report Hack Endpoint (invoked by client or security tripwires)
-  app.post("/api/security/report-hack", (req, res) => {
-    try {
-      const { action, payload, targetUser, targetEmail, targetName } = req.body;
-      const clientIp = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "";
-      const reason = `Phát hiện hành vi hack: ${action || "Can thiệp trái phép"}. Payload: ${String(payload || "").slice(0, 100)}`;
-      const banRecord = autoBanAndPermanentlyDeleteAccount({
-        userId: targetUser,
-        email: targetEmail,
-        name: targetName,
-        ip: clientIp,
-        reason,
-      });
-      res.json({ success: true, banned: true, deleted: true, record: banRecord });
-    } catch (e: any) {
-      res.status(500).json({ success: false, error: e.message });
-    }
-  });
-
-  // Master Unban Endpoint (Requires MASTER_SECURITY_CODE: 24122012@duy)
-  app.post("/api/security/unban", (req, res) => {
-    try {
-      const { securityCode, userId, ip } = req.body;
-      if (securityCode !== MASTER_SECURITY_CODE) {
-        return res.status(403).json({
-          success: false,
-          error: "Mã bảo mật chống hack không chính xác! Hành vi tiếp tục bị ngăn chặn.",
-        });
-      }
-      let list = loadBannedAccounts();
-      if (userId || ip) {
-        list = list.filter((b) => !(b.userId === userId || (ip && b.ip === ip)));
-      } else {
-        // Clear all bans if no target specified
-        list = [];
-      }
-      saveBannedAccounts(list);
-      res.json({ success: true, message: "Đã gỡ ban thành công với mã bảo mật 24122012@duy!" });
-    } catch (e: any) {
-      res.status(500).json({ success: false, error: e.message });
-    }
-  });
-
-  // Get Banned Accounts List (Admin only)
-  app.get("/api/security/banned-accounts", (req, res) => {
-    try {
-      const list = loadBannedAccounts();
-      res.json({ success: true, bannedAccounts: list });
-    } catch (e: any) {
-      res.status(500).json({ success: false, error: e.message });
-    }
-  });
-
-  // Simulate Hack Test (for demonstration and testing of auto-ban)
-  app.post("/api/security/simulate-hack-test", (req, res) => {
-    try {
-      const clientIp = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "";
-      const { studentName = "Hacker_Test", studentId = "test-hacker-" + Date.now() } = req.body;
-      const banRecord = autoBanAndPermanentlyDeleteAccount({
-        userId: studentId,
-        name: studentName,
-        ip: clientIp,
-        reason: "Kiểm tra hệ thống an ninh: Cố tình chèn mã độc XSS / Hack vào máy chủ Max10 AI",
-      });
-      res.json({
-        success: true,
-        message: "Hệ thống đã tự động phát hiện, ban và xóa tài khoản vĩnh viễn thành công!",
-        banRecord,
-      });
-    } catch (e: any) {
-      res.status(500).json({ success: false, error: e.message });
-    }
-  });
+  };
 
   // Determine production mode reliably
   const isProduction =

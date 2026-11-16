@@ -3,5 +3,8 @@
   "friendRequests": [],
   "friendships": [],
   "directMessages": [],
-  "blockedUsers": []
+  "blockedUsers": [],
+  "groups": [],
+  "groupMessages": {},
+  "registeredClasses": []
 }
