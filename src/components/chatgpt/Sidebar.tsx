@@ -39,6 +39,7 @@ import { getUserInitials } from './UserNameModal';
 import { UserAccount } from '../../types/auth';
 import { PWAInstallButton } from './PWAInstallButton';
 import { DailyLoginStreakWidget } from './DailyLoginStreakWidget';
+import { getVisibleHolidays } from './HolidayGiftAnimationModal';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -532,16 +533,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <p className="text-[11px] font-bold truncate text-slate-900 dark:text-zinc-100">
                     {currentUser ? currentUser.name : 'Đăng nhập Max10'}
                   </p>
-                  <p className="text-[9px] text-slate-500 dark:text-zinc-400 truncate">
+                  <p className="text-[9px] font-mono text-slate-500 dark:text-zinc-400 truncate">
                     {currentUser
-                      ? `${currentUser.role === 'teacher' ? 'Thầy cô' : currentUser.role === 'admin' ? 'Quản trị' : 'Học sinh'} · ${currentUser.email || 'Max10'}`
+                      ? `TK: ${currentUser.email || currentUser.id}`
                       : 'Học sinh · Thầy cô giáo'}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
-                  {isAdmin ? 'Quản trị' : currentUser ? (currentUser.role === 'teacher' ? 'Thầy cô' : 'Học sinh') : 'Đăng nhập'}
+                <span className={`text-[10px] font-extrabold ${
+                  currentUser?.role === 'teacher'
+                    ? 'text-indigo-600 dark:text-indigo-400'
+                    : 'text-emerald-600 dark:text-emerald-400'
+                }`}>
+                  {isAdmin ? 'Quản trị' : currentUser ? (currentUser.role === 'teacher' ? 'Thầy/Cô' : 'Học sinh') : 'Đăng nhập'}
                 </span>
                 {currentUser && onLogout && (
                   <button
@@ -560,23 +565,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
 
-          {/* Holiday Flower & Gift Celebration Quick Trigger (8/3 · 20/10 · 20/11) */}
-          <button
-            type="button"
-            onClick={() => window.dispatchEvent(new CustomEvent('max10_open_holiday_gift'))}
-            className={`w-full mb-2 p-2 rounded-xl border flex items-center justify-between text-xs font-bold transition-all cursor-pointer ${
-              isDark
-                ? 'bg-rose-950/20 border-rose-500/30 text-rose-300 hover:bg-rose-950/35'
-                : 'bg-rose-50/70 border-rose-200 text-rose-700 hover:bg-rose-100/70'
-            }`}
-            title="Hiệu ứng tặng hoa & quà ngẫu nhiên ngày 8/3, 20/10 và 20/11"
-          >
-            <span className="flex items-center gap-1.5 truncate">
-              <Flower2 className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-              <span className="truncate">Quà Lễ 8/3 · 20/10 · 20/11</span>
-            </span>
-            <span className="text-[10px] font-extrabold shrink-0">Mở quà</span>
-          </button>
+          {/* Seasonal Holiday Gift Trigger: Automatically visible only during active holiday months and hidden after holiday passes */}
+          {(() => {
+            const visibleHolidays = getVisibleHolidays();
+            if (visibleHolidays.length === 0) return null;
+            const holidayLabels = visibleHolidays.map((h) => h.badgeText).join(' · ');
+            return (
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('max10_open_holiday_gift'))}
+                className={`w-full mb-2 p-2 rounded-xl border flex items-center justify-between text-xs font-bold transition-all cursor-pointer ${
+                  isDark
+                    ? 'bg-rose-950/20 border-rose-500/30 text-rose-300 hover:bg-rose-950/35'
+                    : 'bg-rose-50/70 border-rose-200 text-rose-700 hover:bg-rose-100/70'
+                }`}
+                title={`Hiệu ứng quay quà lễ: ${holidayLabels}`}
+              >
+                <span className="flex items-center gap-1.5 truncate">
+                  <Flower2 className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                  <span className="truncate">Quà Lễ: {holidayLabels}</span>
+                </span>
+                <span className="text-[10px] font-extrabold shrink-0">Mở quà</span>
+              </button>
+            );
+          })()}
 
           {/* Upgrade Plan Button (User requirement: Gói Plus 100k, Gói Premium 500k) */}
           {onOpenPricingModal && (
@@ -610,7 +622,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           )}
 
-          {/* Student Profile Card */}
+          {/* User Profile Card (Student / Teacher / Admin) */}
           <div
             className={`p-2 rounded-2xl border transition-all ${
               isDark ? 'bg-zinc-900/60 border-white/5 hover:border-amber-500/30' : 'bg-white border-slate-200/90 shadow-2xs hover:border-amber-400'
@@ -619,7 +631,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div
               onClick={onOpenAvatarModal || onOpenNameModal || onOpenOfferModal}
               className="flex items-center justify-between cursor-pointer"
-              title={`Học sinh: ${userName} (Bấm để thay ảnh đại diện & đổi tên gọi)`}
+              title={
+                currentUser
+                  ? `${currentUser.role === 'teacher' ? 'Thầy/Cô' : currentUser.role === 'admin' ? 'Quản trị viên' : 'Học sinh'}: ${userName} · TK: ${currentUser.email || currentUser.id}`
+                  : `Khách: ${userName} (Bấm để thay ảnh đại diện & đổi tên gọi)`
+              }
             >
               <div className="flex items-center gap-2 min-w-0">
                 {userAvatar ? (
@@ -636,12 +652,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
                 <div className="text-left min-w-0">
                   <p className="font-bold leading-tight text-[11px] text-slate-900 dark:text-white flex items-center gap-1 truncate">
-                    <span className="truncate">{userName}</span>
+                    <span className="truncate">{currentUser?.name || userName}</span>
                     <Award className="w-3 h-3 text-amber-500 shrink-0" />
                   </p>
                   <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-none mt-0.5 truncate">
-                    Học sinh {selectedGrade} · Săn điểm 10
+                    {currentUser?.role === 'teacher'
+                      ? `Thầy/Cô · ${currentUser.teachingSubject || 'Giáo viên'}${currentUser.homeroomClass ? ` (${currentUser.homeroomClass})` : ''}`
+                      : currentUser?.role === 'admin'
+                      ? 'Quản trị viên Max10 AI'
+                      : `Học sinh ${currentUser?.studentClass ? `Lớp ${currentUser.studentClass}` : selectedGrade} · Săn điểm 10`}
                   </p>
+                  {currentUser?.email && (
+                    <p className="text-[9px] font-mono text-emerald-600 dark:text-emerald-400 leading-tight mt-0.5 truncate">
+                      {currentUser.email}
+                    </p>
+                  )}
                 </div>
               </div>
 

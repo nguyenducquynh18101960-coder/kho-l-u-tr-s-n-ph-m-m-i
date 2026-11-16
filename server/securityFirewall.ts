@@ -3,7 +3,7 @@ import path from "path";
 import crypto from "crypto";
 import { Express, Request, Response, NextFunction } from "express";
 
-export const MASTER_SECURITY_CODE = "24122012@duy";
+export const MASTER_SECURITY_CODE = "duykobell123";
 const BANNED_ACCOUNTS_PATH = path.resolve(process.cwd(), "banned_accounts_db.json");
 const SECURITY_LOGS_PATH = path.resolve(process.cwd(), "security_system_db.json");
 const SERVER_HMAC_SECRET = process.env.SESSION_SECRET || crypto.createHash("sha256").update(MASTER_SECURITY_CODE + "_max10_hmac").digest("hex");
@@ -496,7 +496,7 @@ export function registerSecurityRoutesAndMiddleware(app: Express, deps: Security
     }
   });
 
-  // 6. Master Unban Endpoint (Requires MASTER_SECURITY_CODE: 24122012@duy)
+  // 6. Master Unban Endpoint (Requires MASTER_SECURITY_CODE: duykobell123)
   app.post("/api/security/unban", (req, res) => {
     try {
       const { securityCode, userId, ip, deviceId, banId } = req.body || {};
@@ -518,7 +518,7 @@ export function registerSecurityRoutesAndMiddleware(app: Express, deps: Security
       }
       saveBannedAccounts(list);
       appendSecurityLog("ADMIN_UNBAN_EXECUTED", { banId, userId, ip, deviceId });
-      res.json({ success: true, message: "Đã gỡ chặn thành công với mã bảo mật 24122012@duy!" });
+      res.json({ success: true, message: "Đã gỡ chặn thành công với mã bảo mật duykobell123!" });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
     }

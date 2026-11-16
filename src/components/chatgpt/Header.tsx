@@ -371,8 +371,14 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={onOpenAuthModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all neu-btn text-slate-800 dark:text-zinc-100"
-            title={currentUser ? `Tài khoản: ${currentUser.name}` : 'Đăng nhập tài khoản'}
+            className="flex items-center gap-2 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-bold transition-all neu-btn text-slate-800 dark:text-zinc-100"
+            title={
+              currentUser
+                ? `Họ tên: ${currentUser.name}\nTài khoản: ${currentUser.email || currentUser.id}\nVai trò: ${
+                    currentUser.role === 'teacher' ? 'Thầy/Cô giáo' : currentUser.role === 'admin' ? 'Quản trị viên' : 'Học sinh'
+                  }`
+                : 'Đăng nhập tài khoản Học sinh hoặc Thầy/Cô'
+            }
           >
             {currentUser ? (
               <>
@@ -381,14 +387,14 @@ export const Header: React.FC<HeaderProps> = ({
                     <img
                       src={currentUser.avatar}
                       alt={currentUser.name}
-                      className="w-4 h-4 rounded-full object-cover shrink-0"
+                      className="w-6 h-6 rounded-full object-cover shrink-0 border border-emerald-500/40"
                       referrerPolicy="no-referrer"
                     />
                   ) : (
-                    <User className="w-3.5 h-3.5 shrink-0" />
+                    <User className="w-4 h-4 shrink-0" />
                   )}
                   <span
-                    className={`absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full border border-white dark:border-zinc-900 ${
+                    className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white dark:border-zinc-900 ${
                       currentUser.presenceStatus === 'dnd'
                         ? 'bg-rose-500'
                         : currentUser.presenceStatus === 'gaming'
@@ -399,7 +405,31 @@ export const Header: React.FC<HeaderProps> = ({
                     }`}
                   />
                 </div>
-                <span className="max-w-[70px] sm:max-w-[100px] truncate font-bold">{currentUser.name}</span>
+                <div className="flex flex-col items-start text-left leading-tight min-w-0">
+                  <div className="flex items-center gap-1">
+                    <span className="max-w-[80px] sm:max-w-[120px] truncate font-extrabold text-[11px]">
+                      {currentUser.name}
+                    </span>
+                    <span
+                      className={`hidden sm:inline-block text-[9px] px-1.5 py-0.2 rounded-full font-black shrink-0 ${
+                        currentUser.role === 'teacher'
+                          ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
+                          : currentUser.role === 'admin'
+                          ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                          : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                      }`}
+                    >
+                      {currentUser.role === 'teacher'
+                        ? 'Thầy/Cô'
+                        : currentUser.role === 'admin'
+                        ? 'Admin'
+                        : 'Học sinh'}
+                    </span>
+                  </div>
+                  <span className="hidden sm:block max-w-[140px] truncate text-[9px] font-mono text-slate-500 dark:text-zinc-400">
+                    {currentUser.email || currentUser.id}
+                  </span>
+                </div>
               </>
             ) : (
               <>

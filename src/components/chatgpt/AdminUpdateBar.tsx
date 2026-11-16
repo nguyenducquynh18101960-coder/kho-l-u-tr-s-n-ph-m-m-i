@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   Sliders,
 } from 'lucide-react';
+import { formatAccurateTime } from '../../utils/timeFormat';
 
 interface AdminUpdateBarProps {
   isDark?: boolean;
@@ -51,15 +52,20 @@ export const AdminUpdateBar: React.FC<AdminUpdateBarProps> = ({
       });
       const data = await res.json();
       if (data.success) {
+        const publishedAt = data?.status?.lastPublishedAt || data?.publishedAt || Date.now();
+        const exactTime = formatAccurateTime(publishedAt, formatAccurateTime(Date.now()));
         setSuccessToast(true);
-        setStatusMsg('🚀 ĐÃ CẬP NHẬT RỒI! Thông báo cập nhật đã hiện lên trong tin nhắn của tất cả bạn học và thầy cô cùng âm thanh thông báo!');
+        setStatusMsg(
+          `🚀 ĐÃ CẬP NHẬT LÚC ${exactTime}! Thông báo cập nhật đã hiện lên trong tin nhắn của tất cả bạn học và thầy cô cùng âm thanh thông báo!`
+        );
         setTimeout(() => setSuccessToast(false), 5000);
         if (onRefreshSystem) onRefreshSystem();
       }
     } catch (e) {
       // Local fallback simulation
+      const exactTime = formatAccurateTime(Date.now());
       setSuccessToast(true);
-      setStatusMsg('🚀 Đã cập nhật xong! Thông báo cập nhật đã gửi vào tin nhắn!');
+      setStatusMsg(`🚀 Đã cập nhật xong lúc ${exactTime}! Thông báo cập nhật đã gửi vào tin nhắn!`);
       setTimeout(() => setSuccessToast(false), 5000);
     } finally {
       setUpdating(false);

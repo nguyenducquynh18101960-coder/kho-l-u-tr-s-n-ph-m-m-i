@@ -56,6 +56,7 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { UserAccount } from '../../types/auth';
+import { getVisibleHolidays } from './HolidayGiftAnimationModal';
 import {
   ALL_CLASSES_LIST,
   ClassCode,
@@ -1087,15 +1088,22 @@ export const ClassManagement: React.FC<ClassManagementProps> = ({
               <span>Thêm Học Sinh</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('max10_open_holiday_gift'))}
-              className="px-3 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-300 border border-rose-500/30 font-extrabold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
-              title="Mở hộp quà hoa & quà tặng ngẫu nhiên ngày 8/3, 20/10, 20/11"
-            >
-              <Flower2 className="w-3.5 h-3.5" />
-              <span>Quà Lễ 8/3·20/10·20/11</span>
-            </button>
+            {(() => {
+              const visibleHolidays = getVisibleHolidays();
+              if (visibleHolidays.length === 0) return null;
+              const holidayLabels = visibleHolidays.map((h) => h.badgeText).join(' · ');
+              return (
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('max10_open_holiday_gift'))}
+                  className="px-3 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-300 border border-rose-500/30 font-extrabold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                  title={`Mở hộp quà lễ: ${holidayLabels}`}
+                >
+                  <Flower2 className="w-3.5 h-3.5" />
+                  <span>Quà {holidayLabels}</span>
+                </button>
+              );
+            })()}
 
             {onLogout && (
               <button

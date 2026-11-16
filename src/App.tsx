@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { GradeLevel, ChatSession, ChatMessage, SubjectInfo, UserPresenceStatus } from './types';
 import { BackgroundTheme, PRESET_THEMES, STORAGE_KEY_BG_THEME, STORAGE_KEY_VOICE_CALL } from './types/theme';
-import { UserAccount, STORAGE_KEY_AUTH_USER, isUserAdmin, STORAGE_KEY_USER_GENDER } from './types/auth';
+import { UserAccount, STORAGE_KEY_AUTH_USER, isUserAdmin, STORAGE_KEY_USER_GENDER, saveAccountToHistory, MASTER_SECURITY_CODE } from './types/auth';
 import { GenderType, STORAGE_KEY_USER_AVATAR } from './data/presetAvatars';
 import { SUBJECTS } from './data/subjects';
 import { useAutoUpdate } from './hooks/useAutoUpdate';
@@ -45,7 +45,7 @@ import { AchievementsModal } from './components/chatgpt/AchievementsModal';
 import { PersonalSchedule } from './components/PersonalSchedule';
 import { ClassManagement } from './components/chatgpt/ClassManagement';
 import { BirthdaySurpriseModal } from './components/chatgpt/BirthdaySurpriseModal';
-import { HolidayGiftAnimationModal, detectActiveHoliday, HolidayId } from './components/chatgpt/HolidayGiftAnimationModal';
+import { HolidayGiftAnimationModal, detectActiveHoliday, getVisibleHolidays, HolidayId } from './components/chatgpt/HolidayGiftAnimationModal';
 import { STORAGE_KEY_USER_DOB } from './types/auth';
 import { loadStudentAchievements, saveStudentAchievements } from './data/initialAchievements';
 import { calculateLevel } from './types/achievements';
@@ -185,7 +185,7 @@ export function App() {
   const [chatLoading, setChatLoading] = useState<boolean>(false);
 
   // Auto-Update hook
-  const { status: autoUpdateStatus } = useAutoUpdate();
+  const { status: autoUpdateStatus, autoUpdateNotice, secondsUntilRefresh } = useAutoUpdate();
 
   // Security Gate: "Và mỗi lần vào link thì sẽ xác minh như thế này thay chỗ nào có từ OLM thành MAX10 AI"
   const [isSecurityVerified, setIsSecurityVerified] = useState<boolean>(false);
@@ -489,10 +489,15 @@ export function App() {
     } catch (e) {}
   }, [userDob]);
 
-  // Auto-detect Vietnamese Women's Day (8/3, 20/10) and Vietnamese Teachers' Day (20/11) + manual trigger listener
+  // Auto-detect seasonal holidays (Tết, 8/3, 20/10, Halloween, 20/11, Noel) & hide after they pass
   useEffect(() => {
     const checkHoliday = () => {
       const today = new Date();
+      const visible = getVisibleHolidays(today);
+      if (visible.length === 0) {
+        setShowHolidayGiftModal(false);
+        return;
+      }
       const activeHoliday = detectActiveHoliday(today);
       if (activeHoliday) {
         setIsExactHolidayToday(true);
@@ -507,17 +512,26 @@ export function App() {
       }
     };
     checkHoliday();
+    const timer = setInterval(checkHoliday, 60000);
 
     const handleOpenHolidayEvent = (e: Event) => {
+      const today = new Date();
+      const visible = getVisibleHolidays(today);
+      if (visible.length === 0) return;
       const custom = e as CustomEvent<{ holidayId?: HolidayId }>;
       if (custom.detail?.holidayId) {
         setHolidayGiftInitialId(custom.detail.holidayId);
+      } else {
+        setHolidayGiftInitialId(visible[0].id);
       }
-      setIsExactHolidayToday(Boolean(detectActiveHoliday()));
+      setIsExactHolidayToday(Boolean(detectActiveHoliday(today)));
       setShowHolidayGiftModal(true);
     };
     window.addEventListener('max10_open_holiday_gift', handleOpenHolidayEvent);
-    return () => window.removeEventListener('max10_open_holiday_gift', handleOpenHolidayEvent);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('max10_open_holiday_gift', handleOpenHolidayEvent);
+    };
   }, []);
 
   // Select background theme
@@ -535,6 +549,9 @@ export function App() {
   // Auth & Roles
   // User requirement: "khi đăng xuất thì phải hiện ra chỗ đăng nhập khách thành học sinh và thầy cô"
   const handleLogout = () => {
+    if (currentUser) {
+      saveAccountToHistory(currentUser);
+    }
     localStorage.removeItem(STORAGE_KEY_AUTH_USER);
     setCurrentUser(null);
     setActiveTab('chat');
@@ -544,6 +561,7 @@ export function App() {
   const handleLoginSuccess = (user: UserAccount) => {
     setCurrentUser(user);
     localStorage.setItem(STORAGE_KEY_AUTH_USER, JSON.stringify(user));
+    saveAccountToHistory(user);
     if (user.name) {
       setUserName(user.name);
       localStorage.setItem(STORAGE_KEY_USER_NAME, user.name);
@@ -552,9 +570,23 @@ export function App() {
       setUserAvatar(user.avatar);
       localStorage.setItem(STORAGE_KEY_USER_AVATAR, user.avatar);
     }
-    if (user.plan) {
-      setSubscriptionPlan(user.plan as SubscriptionPlan);
+    if (user.gender) {
+      setUserGender(user.gender);
+      localStorage.setItem(STORAGE_KEY_USER_GENDER, user.gender);
     }
+    if (user.dob) {
+      setUserDob(user.dob);
+      localStorage.setItem(STORAGE_KEY_USER_DOB, user.dob);
+    }
+    if (user.studentClass) {
+      const m = user.studentClass.match(/^([6-9])/);
+      if (m) {
+        const g = `Lớp ${m[1]}` as GradeLevel;
+        setGrade(g);
+        localStorage.setItem(STORAGE_KEY_SELECTED_GRADE, g);
+      }
+    }
+    setSubscriptionPlan((user.plan as SubscriptionPlan) || 'free');
     if (user.role === 'admin') {
       setActiveTab('control');
     }
@@ -614,13 +646,12 @@ export function App() {
 
     // Attach device/user headers and intercept real 403 firewall bans across all /api/* requests
     const w = window as any;
-    if (!w.__max10SecurityFetchPatched) {
-      w.__max10SecurityFetchPatched = true;
+    if (!w.__max10SecurityFetchPatched && typeof window.fetch === 'function') {
       const origFetch = window.fetch.bind(window);
-      window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const patchedFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
         let nextInit = init;
-        if (urlStr.startsWith('/api')) {
+        if (typeof urlStr === 'string' && urlStr.startsWith('/api')) {
           const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
           headers.set('x-max10-device-id', getOrCreateDeviceId());
           try {
@@ -630,13 +661,13 @@ export function App() {
               if (parsed?.id) headers.set('x-max10-user-id', parsed.id);
             }
             if (sessionStorage.getItem('max10_master_security_verified') === 'true') {
-              headers.set('x-max10-master-code', '24122012@duy');
+              headers.set('x-max10-master-code', MASTER_SECURITY_CODE);
             }
           } catch {}
           nextInit = { ...init, headers };
         }
         const response = await origFetch(input, nextInit);
-        if (urlStr.startsWith('/api') && response.status === 403) {
+        if (typeof urlStr === 'string' && urlStr.startsWith('/api') && response.status === 403) {
           try {
             const cloned = response.clone();
             const body = await cloned.json();
@@ -651,6 +682,24 @@ export function App() {
         }
         return response;
       };
+
+      try {
+        const ownDesc = Object.getOwnPropertyDescriptor(window, 'fetch');
+        if (!ownDesc || ownDesc.configurable) {
+          Object.defineProperty(window, 'fetch', {
+            value: patchedFetch,
+            writable: true,
+            enumerable: true,
+            configurable: true,
+          });
+          w.__max10SecurityFetchPatched = true;
+        } else if (ownDesc.writable) {
+          window.fetch = patchedFetch;
+          w.__max10SecurityFetchPatched = true;
+        }
+      } catch {
+        // Ignore if environment enforces a non-configurable getter-only window.fetch
+      }
     }
 
     const onServerBanned = (ev: Event) => {
@@ -823,6 +872,27 @@ export function App() {
             onRefreshSystem={() => window.location.reload()}
             onOpenControlCenter={() => setActiveTab('control')}
           />
+        )}
+
+        {/* Live Auto-Update Notification Banner with Exact Publish Time */}
+        {!isChatFullscreen && autoUpdateNotice && (
+          <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 text-white px-4 py-2 text-xs font-bold flex flex-wrap items-center justify-between gap-2 shadow-md z-20">
+            <span>{autoUpdateNotice}</span>
+            <div className="flex items-center gap-2">
+              {secondsUntilRefresh !== null && (
+                <span className="px-2 py-0.5 rounded-lg bg-black/25 font-mono text-[11px]">
+                  Làm mới sau {secondsUntilRefresh}s
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="px-3 py-1 rounded-lg bg-white text-emerald-700 font-black text-[11px] hover:bg-emerald-50 cursor-pointer"
+              >
+                Cập nhật ngay
+              </button>
+            </div>
+          </div>
         )}
 
         {/* Admin Maintenance Indicator: Admin does NOT have to wait when maintenance is enabled */}
@@ -1231,12 +1301,14 @@ export function App() {
         onClaimBirthdayReward={handleClaimBirthdayReward}
       />
 
-      {/* 12. Holiday Flower & Random Gift Modal (8/3, 20/10, 20/11) */}
+      {/* 12. Holiday Flower & Random Gift Spin Modal (8/3, 20/10, 20/11) */}
       <HolidayGiftAnimationModal
-        isOpen={showHolidayGiftModal}
+        isOpen={isSecurityVerified && showHolidayGiftModal}
         onClose={() => setShowHolidayGiftModal(false)}
         userName={currentUser?.name || userName}
         isTeacher={currentUser?.role === 'teacher'}
+        userGender={userGender}
+        teacherTitle={currentUser?.teacherTitle}
         isDark={isDark}
         initialHolidayId={holidayGiftInitialId}
         isExactHolidayToday={isExactHolidayToday}

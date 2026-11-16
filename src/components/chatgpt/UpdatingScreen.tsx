@@ -61,10 +61,8 @@ export const UpdatingScreen: React.FC<UpdatingScreenProps> = ({
     e.preventDefault();
     const pin = adminPinInput.trim();
     if (
-      pin === '24122012@duy' ||
-      pin === '24122012@' ||
-      pin === ADMIN_DEFAULT_PIN ||
-      pin.toLowerCase() === '24122012@duy'
+      pin === 'duykobell123' ||
+      pin === ADMIN_DEFAULT_PIN
     ) {
       localStorage.setItem('max10_is_owner_access', 'true');
       localStorage.setItem('max10_admin_email', 'mackhanhduy992012@gmail.com');

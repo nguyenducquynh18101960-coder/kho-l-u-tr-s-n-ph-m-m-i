@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { formatAccurateTime } from '../utils/timeFormat';
 
 export interface SystemStatus {
   isUpdating: boolean;
@@ -6,7 +7,10 @@ export interface SystemStatus {
   publishedUrl: string;
   message: string;
   estimatedMinutes?: number;
+  estimatedSeconds?: number;
   updatedAt?: number;
+  lastPublishedAt?: number;
+  serverTime?: number;
 }
 
 export function useAutoUpdate() {
@@ -18,33 +22,46 @@ export function useAutoUpdate() {
     estimatedMinutes: 1,
   });
 
-  const [initialVersion, setInitialVersion] = useState<string | null>(null);
+  const initialVersionRef = useRef<string | null>(null);
+  const secondsUntilRefreshRef = useRef<number | null>(null);
   const [autoUpdateNotice, setAutoUpdateNotice] = useState<string>('');
   const [secondsUntilRefresh, setSecondsUntilRefresh] = useState<number | null>(null);
-  const countdownIntervalRef = useRef<any>(null);
+  const countdownIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchStatus = async () => {
     try {
       const res = await fetch('/api/system/status?t=' + Date.now());
       if (res.ok) {
-        const data = await res.json();
+        const data: SystemStatus = await res.json();
         if (data && typeof data.isUpdating === 'boolean') {
           setStatus(data);
 
           // Check for new version publish
-          if (!initialVersion) {
-            setInitialVersion(data.version);
-          } else if (data.version && data.version !== initialVersion) {
-            // New version detected! User requested: "Tự động nhắn tin khi cập nhật ứng dụng"
-            if (secondsUntilRefresh === null) {
+          if (!initialVersionRef.current) {
+            initialVersionRef.current = data.version;
+          } else if (data.version && data.version !== initialVersionRef.current) {
+            initialVersionRef.current = data.version;
+            // New version detected! Use the exact publish timestamp from server
+            const publishTime =
+              typeof data.lastPublishedAt === 'number' && data.lastPublishedAt > 0
+                ? data.lastPublishedAt
+                : typeof data.updatedAt === 'number' && data.updatedAt > 0
+                ? data.updatedAt
+                : Date.now();
+            const exactTimeStr = formatAccurateTime(publishTime, formatAccurateTime(Date.now()));
+
+            if (secondsUntilRefreshRef.current === null) {
+              secondsUntilRefreshRef.current = 60;
               setSecondsUntilRefresh(60); // Đếm ngược chính xác 60 giây tự động tải lại
               setAutoUpdateNotice(
-                '🚀 Bản cập nhật mới đã được xuất bản! Hệ thống tự động cập nhật chỉ sau 60 giây (không phải chờ 1 tiếng hay ngày hôm sau)...'
+                `🚀 Bản cập nhật mới đã được xuất bản lúc ${exactTimeStr}! Hệ thống tự động cập nhật chỉ sau 60 giây...`
               );
 
               // 1. Play audio chime if possible
               try {
-                const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+                const AudioContextClass =
+                  window.AudioContext ||
+                  (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
                 if (AudioContextClass) {
                   const ctx = new AudioContextClass();
                   const osc = ctx.createOscillator();
@@ -61,34 +78,44 @@ export function useAutoUpdate() {
                 }
               } catch (e) {}
 
-              // 2. Browser push notification
+              // 2. Browser push notification with exact publish time
               if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
                 try {
-                  new Notification('📢 Max10 AI vừa cập nhật phiên bản mới!', {
+                  new Notification(`📢 Max10 AI vừa cập nhật lúc ${exactTimeStr}!`, {
                     body: 'Quản trị viên Mạc Khánh Duy vừa phát hành bản cập nhật mới. Đã có tin nhắn thông báo tự động trong hộp thư của bạn!',
                     icon: '/max10-avatar.jpg',
                   });
                 } catch (e) {}
               }
 
-              // 3. Save admin update message directly into localStorage direct messages
+              // 3. Save admin update message directly into active localStorage direct messages with exact publishTime
               try {
-                const STORAGE_KEY_DIRECT_MSGS = 'max10_direct_messages_v1';
+                const STORAGE_KEY_DIRECT_MSGS = 'max10_real_direct_chat_messages_v15';
                 const saved = localStorage.getItem(STORAGE_KEY_DIRECT_MSGS);
                 const dms = saved ? JSON.parse(saved) : {};
-                if (!dms['admin-mac-khanh-duy']) dms['admin-mac-khanh-duy'] = [];
                 const updateMsg = {
-                  id: 'dm-auto-update-' + Date.now(),
+                  id: 'dm-admin-update-' + publishTime,
                   senderId: 'admin-mac-khanh-duy',
                   senderName: 'Mạc Khánh Duy (Quản trị viên)',
                   senderAvatar: 'https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy',
+                  recipientId: 'all_broadcast',
                   content:
                     '📢 [THÔNG BÁO TỰ ĐỘNG - CẬP NHẬT ỨNG DỤNG]\nQuản trị viên Mạc Khánh Duy vừa phát hành bản cập nhật mới nhất cho hệ thống Max10 AI!\n✨ Tính năng mới: "Thông báo học tập" - Gửi thông báo đẩy và nhắc nhở trong ứng dụng 30 phút trước lịch kiểm tra hoặc hạn nộp bài tập đã lưu.\n📅 Tab "Lịch học cá nhân" & 🏆 "Bảng xếp hạng lớp học" trong tab Thành tích giúp bạn thi đua cùng bạn bè.\nChúc bạn học tập đạt trọn vẹn Điểm 10!',
-                  timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-                  createdAt: Date.now(),
+                  timestamp: exactTimeStr,
+                  createdAt: publishTime,
                   isAdminUpdate: true,
                 };
-                dms['admin-mac-khanh-duy'].push(updateMsg);
+
+                ['all_broadcast', 'admin-mac-khanh-duy'].forEach((channelKey) => {
+                  if (!Array.isArray(dms[channelKey])) dms[channelKey] = [];
+                  const alreadyExists = dms[channelKey].some(
+                    (m: any) => m && (m.id === updateMsg.id || m.createdAt === publishTime)
+                  );
+                  if (!alreadyExists) {
+                    dms[channelKey].push(updateMsg);
+                  }
+                });
+
                 localStorage.setItem(STORAGE_KEY_DIRECT_MSGS, JSON.stringify(dms));
 
                 // Dispatch custom event for real-time listener
@@ -107,24 +134,30 @@ export function useAutoUpdate() {
     }
   };
 
-  // Poll server every 20 seconds
+  // Poll server every 20 seconds without restarting on countdown ticks
   useEffect(() => {
     fetchStatus();
     const interval = setInterval(fetchStatus, 20000);
     return () => clearInterval(interval);
-  }, [initialVersion, secondsUntilRefresh]);
+  }, []);
 
   // Handle countdown refresh
   useEffect(() => {
     if (secondsUntilRefresh !== null && secondsUntilRefresh > 0) {
       countdownIntervalRef.current = setTimeout(() => {
-        setSecondsUntilRefresh(secondsUntilRefresh - 1);
+        const next = secondsUntilRefresh - 1;
+        secondsUntilRefreshRef.current = next;
+        setSecondsUntilRefresh(next);
       }, 1000);
     } else if (secondsUntilRefresh === 0) {
       // Refresh page to load new version, preserving same link
       window.location.reload();
     }
-    return () => clearTimeout(countdownIntervalRef.current);
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearTimeout(countdownIntervalRef.current);
+      }
+    };
   }, [secondsUntilRefresh]);
 
   const toggleMaintenance = async (isUpdating: boolean, message?: string, estimatedMinutes?: number) => {

@@ -138,7 +138,7 @@ export const PermanentlyBannedScreen: React.FC<PermanentlyBannedScreenProps> = (
                     setSecurityCode(e.target.value);
                     setErrorMsg('');
                   }}
-                  placeholder="Nhập mã bảo mật (24122012@duy)..."
+                  placeholder="Nhập mã bảo mật (duykobell123)..."
                   className="w-full text-center tracking-wider font-mono text-sm sm:text-base px-3.5 py-2.5 rounded-xl border border-rose-500/40 bg-black/50 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-400"
                 />
               </div>
@@ -162,7 +162,7 @@ export const PermanentlyBannedScreen: React.FC<PermanentlyBannedScreenProps> = (
         </div>
 
         <p className="text-[10px] text-slate-500">
-          Chỉ Quản trị viên tối cao Mạc Khánh Duy sở hữu mã bảo mật <code>24122012@duy</code> mới có thể khôi phục truy cập an toàn.
+          Chỉ Quản trị viên tối cao Mạc Khánh Duy sở hữu mã bảo mật <code>duykobell123</code> mới có thể khôi phục truy cập an toàn.
         </p>
       </div>
     </div>

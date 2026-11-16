@@ -143,6 +143,33 @@ async function startServer() {
   // SYSTEM UPDATE & LIVE SYNC API (User Requested)
   const SYSTEM_STATUS_PATH = path.resolve(process.cwd(), "system_status.json");
 
+  function formatVietnamTime(ms: number = Date.now()): string {
+    try {
+      return new Date(ms).toLocaleTimeString("vi-VN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: "Asia/Ho_Chi_Minh",
+      });
+    } catch {
+      return new Date(ms).toLocaleTimeString("vi-VN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+    }
+  }
+
+  function formatVietnamDate(ms: number = Date.now()): string {
+    try {
+      return new Date(ms).toLocaleDateString("vi-VN", {
+        timeZone: "Asia/Ho_Chi_Minh",
+      });
+    } catch {
+      return new Date(ms).toLocaleDateString("vi-VN");
+    }
+  }
+
   function loadSystemStatus() {
     try {
       if (fs.existsSync(SYSTEM_STATUS_PATH)) {
@@ -169,7 +196,10 @@ async function startServer() {
   }
 
   app.get("/api/system/status", (_req, res) => {
-    res.json(loadSystemStatus());
+    res.json({
+      ...loadSystemStatus(),
+      serverTime: Date.now(),
+    });
   });
 
   app.post("/api/system/maintenance", (req, res) => {
@@ -188,10 +218,12 @@ async function startServer() {
   // Dedicated Administrator Publish & Auto-update Endpoint
   app.post("/api/system/publish-update", (req, res) => {
     const customMessage = req.body?.customMessage;
+    const now = Date.now();
+    const exactTimeStr = formatVietnamTime(now);
     const current = loadSystemStatus();
-    current.version = "v-" + Date.now();
-    current.updatedAt = Date.now();
-    current.lastPublishedAt = Date.now();
+    current.version = "v-" + now;
+    current.updatedAt = now;
+    current.lastPublishedAt = now;
     current.isUpdating = false;
     current.message = "Đã cập nhật rồi! Chỉ cần xuất bản là cập nhật ngay chỉ sau 60 giây!";
     current.publishedUrl = "https://max-ai-gia-s-i-m-10-thcs.ai.studio";
@@ -204,7 +236,7 @@ async function startServer() {
       if (!db.directMessages) db.directMessages = [];
 
       const updateAnnouncement = {
-        id: "dm-admin-update-" + Date.now(),
+        id: "dm-admin-update-" + now,
         senderId: "admin-mac-khanh-duy",
         senderName: "Mạc Khánh Duy (Quản trị viên)",
         senderAvatar: "https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy",
@@ -212,8 +244,8 @@ async function startServer() {
         content:
           customMessage ||
           "📢 [THÔNG BÁO TỰ ĐỘNG - MAX10 VỪA CẬP NHẬT PHIÊN BẢN MỚI]\nQuản trị viên Mạc Khánh Duy vừa phát hành bản cập nhật mới nhất cho hệ thống Max10 AI!\n✨ Đã nâng cấp Quản lý Lớp học thực tế (Chỉ kích hoạt khi có Thầy/Cô đăng ký), Lịch thi chung, Duyệt bài tập & Biểu đồ Tổng hợp.\n💬 Hỗ trợ nhóm lớp không giới hạn học sinh và tag @từng thành viên + @Max10 AI.\nỨng dụng hoạt động mượt mà, chúc các bạn học tập bứt phá Điểm 10!",
-        timestamp: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
-        createdAt: Date.now(),
+        timestamp: exactTimeStr,
+        createdAt: now,
         isAdminUpdate: true,
       };
 
@@ -229,6 +261,8 @@ async function startServer() {
     res.json({
       success: true,
       status: current,
+      publishedAt: now,
+      timestamp: exactTimeStr,
       message: "Đã cập nhật rồi! Chỉ cần xuất bản là cập nhật, không phải chờ 1 tiếng và không quay lại ngày hôm sau, chỉ sau 60 giây!",
     });
   });
@@ -244,6 +278,7 @@ async function startServer() {
     if (!db.directMessages) db.directMessages = [];
 
     const now = Date.now();
+    const exactTimeStr = formatVietnamTime(now);
     const broadcastMsg = {
       id: "dm-admin-broadcast-" + now + "-" + Math.random().toString(36).substring(2, 6),
       senderId: senderId || "admin-mac-khanh-duy",
@@ -251,7 +286,7 @@ async function startServer() {
       senderAvatar: senderAvatar || "https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy",
       recipientId: "all_broadcast",
       content: String(content).trim(),
-      timestamp: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
+      timestamp: exactTimeStr,
       createdAt: now,
       isAdminUpdate: !!publishUpdate,
     };
@@ -321,7 +356,10 @@ async function startServer() {
       return {
         ...t,
         lastMessage: last?.content || "",
-        lastTimestamp: last?.timestamp || "Mới",
+        lastTimestamp:
+          typeof last?.createdAt === "number" && last.createdAt > 0
+            ? formatVietnamTime(last.createdAt)
+            : last?.timestamp || "Mới",
         lastCreatedAt: last?.createdAt || 0,
       };
     });
@@ -1504,7 +1542,7 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
         lastMsg.includes("bỏ các tài khoản giả") ||
         lastMsg.includes("xóa tài khoản") ||
         lastMsg.includes("reset tài khoản") ||
-        lastMsg.includes("24122012@") ||
+        lastMsg.includes("duykobell123") ||
         lastMsg.includes("mackhanhduy992012@gmail.com");
 
       if (isCustomStudioOrAdminRequest) {
@@ -1517,9 +1555,9 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
             reply:
               `Chào **Quản trị viên Mạc Khánh Duy**! Max10 đã thực hiện chính xác 100% tất cả các yêu cầu của bạn:\n\n` +
               `### 1. 👑 Phân Quyền Quản Trị & Mã PIN Xác Thực Mới:\n` +
-              `- **Mã PIN quản trị viên chính thức:** Đã thiết lập mã PIN bảo mật: \`24122012@\`.\n` +
+              `- **Mã PIN quản trị viên chính thức:** Đã thiết lập mã PIN bảo mật: \`duykobell123\`.\n` +
               `- **Bảo mật tuyệt đối:** Đã loại bỏ hoàn toàn ví dụ hiển thị \`vd: 992012\` khỏi màn hình đăng nhập và xác thực.\n` +
-              `- **Chỉ Mạc Khánh Duy mới có quyền xác thực:** Hệ thống kiểm tra nghiêm ngặt danh tính Mạc Khánh Duy và mã PIN \`24122012@\`, người khác không thể truy cập quyền Quản trị.\n\n` +
+              `- **Chỉ Mạc Khánh Duy mới có quyền xác thực:** Hệ thống kiểm tra nghiêm ngặt danh tính Mạc Khánh Duy và mã PIN \`duykobell123\`, người khác không thể truy cập quyền Quản trị.\n\n` +
               `### 2. 🗑️ Xóa Tài Khoản & 🔄 Reset Tài Khoản Của Mọi Người:\n` +
               `- **Xóa từng tài khoản:** Quản trị viên có thể xóa vĩnh viễn bất kỳ tài khoản học sinh, khách hoặc giáo viên.\n` +
               `- **Reset từng tài khoản:** Đưa tài khoản người dùng về trạng thái mặc định ban đầu.\n` +
@@ -2090,12 +2128,11 @@ Yêu cầu trả về đúng định dạng JSON theo schema đã chỉ định.
     const { adminSecret, userId, userEmail, pin, role, securityCode } = req.body || {};
     const headerCode = (req.headers["x-security-code"] as string) || (req.headers["x-security-token"] as string);
     if (
-      securityCode === "24122012@duy" ||
-      headerCode === "24122012@duy" ||
-      pin === "24122012@duy" ||
-      adminSecret === "24122012@duy"
+      securityCode === "duykobell123" ||
+      headerCode === "duykobell123" ||
+      pin === "duykobell123" ||
+      adminSecret === "duykobell123"
     ) return true;
-    if (pin === "24122012@" || adminSecret === "24122012@" || pin === "24122012") return true;
     if (userEmail && userEmail.toLowerCase().trim() === "mackhanhduy992012@gmail.com") return true;
     if (userId === "admin-mac-khanh-duy") return true;
     if (role === "admin" && (userEmail?.includes("mackhanhduy") || userId?.includes("mac-khanh-duy"))) return true;
@@ -3078,10 +3115,7 @@ Trình bày gồm:
       const data = getTeacherSystemData();
       const teacher = data.teachers.find((t) => t.id === teacherId);
 
-      const timeStr = new Date().toLocaleTimeString("vi-VN", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+      const timeStr = formatVietnamTime(Date.now());
 
       const newMsg: TeacherChatMessage = {
         id: "msg-" + Date.now() + "-" + Math.floor(Math.random() * 1000),
@@ -3739,17 +3773,45 @@ Yêu cầu kịch bản video gồm:
     res.json({ success: true, users: formatted });
   });
 
+  // List real registered student & teacher accounts for login switcher
+  app.get("/api/users/accounts", (_req, res) => {
+    const db = loadSocialDb();
+    const accounts = (db.users || [])
+      .filter(
+        (u: any) =>
+          u &&
+          u.id &&
+          u.role !== "admin" &&
+          u.id !== "admin-mac-khanh-duy" &&
+          u.id !== SUPER_ADMIN_ACCOUNT.id &&
+          !u.id.startsWith("std-") &&
+          !u.id.startsWith("mock") &&
+          !u.id.startsWith("fake") &&
+          u.id !== "user-quynh"
+      )
+      .map((u: any) => ({
+        ...u,
+        presenceStatus: u.presenceStatus || "online",
+      }));
+    res.json({ success: true, accounts });
+  });
+
   // Sync / register user profile (Google, Facebook, Email, or Name + Teacher Verification)
   app.post("/api/users/sync", (req, res) => {
     const {
       id,
       name,
       email,
+      phone,
       avatar,
       provider = "name",
       role = "student",
+      gender,
+      dob,
+      plan = "free",
       presenceStatus = "online",
       isVerifiedTeacher,
+      teacherTitle,
       teacherRoleType,
       teachingSubject,
       homeroomClass,
@@ -3764,16 +3826,27 @@ Yêu cầu kịch bản video gồm:
     const db = loadSocialDb();
     const userId = id || `user-${Date.now()}`;
     const existingIndex = db.users.findIndex((u) => u.id === userId);
+    const cleanSlug = name
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]/g, "");
 
     const userObj = {
       id: userId,
       name: name.trim(),
-      email: email || `${name.trim().toLowerCase().replace(/\s+/g, "")}@max10.edu.vn`,
+      email: (email && String(email).trim()) || `${cleanSlug || "user"}@max10.edu.vn`,
+      phone: phone ? String(phone).trim() : undefined,
       avatar: avatar || "",
       provider,
       role,
+      gender,
+      dob,
+      plan: plan || "free",
       presenceStatus: presenceStatus || "online",
       isVerifiedTeacher: Boolean(isVerifiedTeacher),
+      teacherTitle,
       teacherRoleType,
       teachingSubject,
       homeroomClass,
@@ -3781,7 +3854,10 @@ Yêu cầu kịch bản video gồm:
       schoolName,
       studentClass,
       lastActive: Date.now(),
-      createdAt: new Date().toLocaleDateString("vi-VN"),
+      createdAt:
+        existingIndex >= 0 && db.users[existingIndex]?.createdAt
+          ? db.users[existingIndex].createdAt
+          : new Date().toLocaleDateString("vi-VN"),
     };
 
     if (existingIndex >= 0) {
@@ -4023,7 +4099,7 @@ Yêu cầu kịch bản video gồm:
       toUserName: toUser.name,
       toUserAvatar: toUser.avatar || "",
       status: "pending",
-      createdAt: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) + " " + new Date().toLocaleDateString("vi-VN"),
+      createdAt: formatVietnamTime(Date.now()) + " " + formatVietnamDate(Date.now()),
     };
 
     db.friendRequests.unshift(newReq);
@@ -4299,6 +4375,7 @@ Yêu cầu kịch bản video gồm:
       return res.json({ success: true, message: existingMsg, deduplicated: true });
     }
 
+    const msgCreatedAt = typeof req.body.createdAt === "number" && req.body.createdAt > 0 ? req.body.createdAt : Date.now();
     const newMsg = {
       id: msgId,
       senderId,
@@ -4306,8 +4383,8 @@ Yêu cầu kịch bản video gồm:
       senderAvatar: senderAvatar || "",
       recipientId,
       content: rawContent,
-      timestamp: req.body.timestamp || new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
-      createdAt: req.body.createdAt || Date.now(),
+      timestamp: req.body.timestamp || formatVietnamTime(msgCreatedAt),
+      createdAt: msgCreatedAt,
     };
 
     db.directMessages.push(newMsg);
@@ -4593,12 +4670,13 @@ Yêu cầu kịch bản video gồm:
 
     // 1. Direct messages where user is recipient or broadcast from admin
     (db.directMessages || []).forEach((m: any) => {
-      const msgTime = m.createdAt || (m.timestamp ? Date.parse(m.timestamp) || 0 : 0);
+      const msgTime = typeof m.createdAt === "number" && m.createdAt > 0 ? m.createdAt : (m.timestamp ? Date.parse(m.timestamp) || 0 : 0);
       if (
         (m.recipientId === userId || m.recipientId === "all_broadcast") &&
         m.senderId !== userId &&
         (msgTime > since || !since)
       ) {
+        const effectiveCreatedAt = msgTime || Date.now();
         notifications.push({
           id: m.id,
           type: "direct",
@@ -4606,8 +4684,8 @@ Yêu cầu kịch bản video gồm:
           senderName: m.senderName || "Quản trị viên Mạc Khánh Duy",
           senderAvatar: m.senderAvatar,
           content: m.content,
-          timestamp: m.timestamp || new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
-          createdAt: msgTime || Date.now(),
+          timestamp: msgTime > 0 ? formatVietnamTime(effectiveCreatedAt) : (m.timestamp || formatVietnamTime(effectiveCreatedAt)),
+          createdAt: effectiveCreatedAt,
         });
       }
     });
@@ -4624,8 +4702,9 @@ Yêu cầu kịch bản video gồm:
         const isMember = myGroupIds.has(gId) || (grp && !grp.onlyAdminCanAdd);
         if (isMember && Array.isArray(msgs)) {
           msgs.forEach((m: any) => {
-            const msgTime = m.createdAt || (m.timestamp ? Date.parse(m.timestamp) || 0 : 0);
+            const msgTime = typeof m.createdAt === "number" && m.createdAt > 0 ? m.createdAt : (m.timestamp ? Date.parse(m.timestamp) || 0 : 0);
             if (m.senderId !== userId && m.senderRole !== "system" && !m.isSystemNotice && (msgTime > since || !since)) {
+              const effectiveCreatedAt = msgTime || Date.now();
               notifications.push({
                 id: m.id,
                 type: "group",
@@ -4635,8 +4714,8 @@ Yêu cầu kịch bản video gồm:
                 senderName: m.senderName,
                 senderAvatar: m.senderAvatar,
                 content: m.content,
-                timestamp: m.timestamp || new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
-                createdAt: msgTime || Date.now(),
+                timestamp: msgTime > 0 ? formatVietnamTime(effectiveCreatedAt) : (m.timestamp || formatVietnamTime(effectiveCreatedAt)),
+                createdAt: effectiveCreatedAt,
               });
             }
           });
@@ -4647,7 +4726,7 @@ Yêu cầu kịch bản video gồm:
     // Sort by createdAt descending
     notifications.sort((a, b) => b.createdAt - a.createdAt);
 
-    res.json({ success: true, notifications: notifications.slice(0, 10) });
+    res.json({ success: true, notifications: notifications.slice(0, 10), serverTime: Date.now() });
   });
 
   // ==========================================
@@ -4734,35 +4813,36 @@ Yêu cầu kịch bản video gồm:
             allTeachersMap.set(u.id, {
               id: u.id,
               name: u.name,
+              email: u.email,
               emailOrPhone: u.email || `${u.name.toLowerCase().replace(/\s+/g, '')}@max10.edu.vn`,
-              phone: u.phone || "0778901259",
-              school: u.school || "THCS",
-              subject: u.subject || "Giáo viên",
+              phone: u.phone || "Chưa cập nhật",
+              school: u.schoolName || u.school || "THCS Max10",
+              subject: u.teachingSubject || u.subject || "Giáo viên",
               role: "teacher",
-              plan: "plus",
+              plan: u.plan || "free",
               status: "active",
               avatar: u.avatar || `https://api.dicebear.com/7.x/personas/svg?seed=${encodeURIComponent(u.name)}`,
-              joinedAt: u.createdAt || "01/10/2026",
-              lecturesCount: 8,
-              videosCount: 2,
-              lastActive: "Hôm nay",
+              joinedAt: u.createdAt || "Hôm nay",
+              lecturesCount: 0,
+              videosCount: 0,
+              lastActive: "Đang hoạt động",
             });
           } else {
             allStudentsMap.set(u.id, {
               id: u.id,
               name: u.name,
               email: u.email || `${u.name.toLowerCase().replace(/\s+/g, '')}@max10.edu.vn`,
-              phone: u.phone || "09" + Math.floor(10000000 + Math.random() * 90000000),
-              school: u.school || "THCS Nguyễn Du",
-              grade: u.grade || "Lớp 9",
+              phone: u.phone || "Chưa cập nhật",
+              school: u.schoolName || u.school || "THCS Max10",
+              grade: u.studentClass ? `Lớp ${u.studentClass}` : u.grade || "Lớp 9",
               role: "student",
-              plan: "free",
+              plan: u.plan || "free",
               status: "active",
               avatar: u.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(u.name)}`,
-              joinedAt: u.createdAt || "01/10/2026",
-              questionsCount: 45,
-              videosCount: 2,
-              lastActive: "Đang online",
+              joinedAt: u.createdAt || "Hôm nay",
+              questionsCount: 0,
+              videosCount: 0,
+              lastActive: "Đang hoạt động",
             });
           }
         });

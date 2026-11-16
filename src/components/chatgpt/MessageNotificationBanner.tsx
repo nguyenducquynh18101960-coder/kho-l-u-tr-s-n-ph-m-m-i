@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, Users, X, ArrowRight, Bell } from 'lucide-react';
+import { formatAccurateTime } from '../../utils/timeFormat';
 
 export interface RecentNotification {
   id: string;
@@ -111,8 +112,9 @@ export const MessageNotificationBanner: React.FC<MessageNotificationBannerProps>
       const notif = customEvent.detail;
       if (!notif) return;
 
+      const now = Date.now();
       const formatted: RecentNotification = {
-        id: notif.id || `broadcast-${Date.now()}`,
+        id: notif.id || `broadcast-${now}`,
         type: 'group',
         groupId: `class-group-${(notif.classCode || '9d1').toLowerCase()}`,
         groupName: `Lớp ${notif.classCode || '9D1'} · ${notif.title}`,
@@ -120,8 +122,8 @@ export const MessageNotificationBanner: React.FC<MessageNotificationBannerProps>
         senderName: `${notif.senderTeacherName} (GVCN Lớp ${notif.classCode})`,
         senderAvatar: notif.senderAvatar,
         content: `${notif.body} ${notif.dueTime ? '⏰ Hạn: ' + notif.dueTime : ''}`,
-        timestamp: 'Vừa xong',
-        createdAt: Date.now(),
+        timestamp: formatAccurateTime(now, 'Vừa xong'),
+        createdAt: now,
       };
 
       playChime();
@@ -141,7 +143,8 @@ export const MessageNotificationBanner: React.FC<MessageNotificationBannerProps>
 
     const checkNewMessages = async () => {
       try {
-        const sinceParam = lastCheckTime.current;
+        // Subtract 15s buffer so slight client/server clock skew never skips a notification; seenMessageIds deduplicates
+        const sinceParam = Math.max(0, lastCheckTime.current - 15000);
         const res = await fetch(
           `/api/messages/recent-notifications?userId=${encodeURIComponent(currentUserId)}&since=${sinceParam}`
         );
@@ -158,12 +161,16 @@ export const MessageNotificationBanner: React.FC<MessageNotificationBannerProps>
             if (item.senderId === currentUserId) return;
 
             seenMessageIds.current.add(item.id);
-            freshNotifications.push(item);
+            freshNotifications.push({
+              ...item,
+              timestamp: formatAccurateTime(item.createdAt, item.timestamp || 'Vừa xong'),
+            });
           });
 
           if (freshNotifications.length > 0) {
-            // Update last check time
-            lastCheckTime.current = Date.now();
+            // Update last check time using serverTime when provided
+            lastCheckTime.current =
+              typeof data.serverTime === 'number' && data.serverTime > 0 ? data.serverTime : Date.now();
 
             // Play notification sound
             playChime();
@@ -277,7 +284,7 @@ export const MessageNotificationBanner: React.FC<MessageNotificationBannerProps>
                 {notif.type === 'group' ? `Nhóm: ${notif.groupName || 'Học tập'}` : 'Tin nhắn bạn bè'}
               </span>
               <span className="text-[10px] text-slate-400 dark:text-zinc-500 shrink-0">
-                {notif.timestamp || 'Vừa xong'}
+                {formatAccurateTime(notif.createdAt, notif.timestamp || 'Vừa xong')}
               </span>
             </div>
 

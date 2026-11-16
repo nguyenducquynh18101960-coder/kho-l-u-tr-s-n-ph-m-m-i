@@ -29,17 +29,68 @@ export interface UserAccount {
 }
 
 export const STORAGE_KEY_AUTH_USER = 'max10_logged_in_user_v1';
+export const STORAGE_KEY_SAVED_ACCOUNTS = 'max10_saved_accounts_v1';
 export const STORAGE_KEY_USER_PRESENCE = 'max10_user_presence_status';
 export const STORAGE_KEY_USER_GENDER = 'max10_user_gender_v1';
 export const STORAGE_KEY_USER_DOB = 'max10_user_dob_v1';
+
+export function loadSavedAccounts(): UserAccount[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SAVED_ACCOUNTS);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (u: any) =>
+        u &&
+        u.id &&
+        u.name &&
+        u.role !== 'admin' &&
+        u.id !== 'admin-mac-khanh-duy' &&
+        !String(u.id).startsWith('std-') &&
+        !String(u.id).startsWith('mock') &&
+        !String(u.id).startsWith('fake')
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function saveAccountToHistory(user: UserAccount): UserAccount[] {
+  if (!user || !user.id || user.role === 'admin' || user.id === 'admin-mac-khanh-duy') {
+    return loadSavedAccounts();
+  }
+  try {
+    const existing = loadSavedAccounts();
+    const filtered = existing.filter(
+      (u) => u.id !== user.id && !(user.email && u.email && u.email === user.email && u.role === user.role)
+    );
+    const updated = [user, ...filtered].slice(0, 20);
+    localStorage.setItem(STORAGE_KEY_SAVED_ACCOUNTS, JSON.stringify(updated));
+    return updated;
+  } catch {
+    return [];
+  }
+}
+
+export function removeSavedAccount(accountId: string): UserAccount[] {
+  try {
+    const existing = loadSavedAccounts();
+    const updated = existing.filter((u) => u.id !== accountId);
+    localStorage.setItem(STORAGE_KEY_SAVED_ACCOUNTS, JSON.stringify(updated));
+    return updated;
+  } catch {
+    return [];
+  }
+}
 
 // Hằng số nhận diện duy nhất Quản trị viên Max10 AI: Mạc Khánh Duy
 export const ADMIN_NAME = 'Mạc Khánh Duy';
 export const ADMIN_EMAIL = 'mackhanhduy992012@gmail.com';
 export const ADMIN_ID = 'admin-mac-khanh-duy';
-export const ADMIN_DEFAULT_PIN = '24122012@';
-// Mã bảo mật tối cao chống hack theo yêu cầu của Quản trị viên Mạc Khánh Duy: 24122012@duy
-export const MASTER_SECURITY_CODE = '24122012@duy';
+export const ADMIN_DEFAULT_PIN = 'duykobell123';
+// Mã bảo mật tối cao chống hack theo yêu cầu của Quản trị viên Mạc Khánh Duy: duykobell123
+export const MASTER_SECURITY_CODE = 'duykobell123';
 
 // User Requirement: "còn ảnh thứ 3 thì reset lại không cho làm quản trị viên cho làm khách"
 // Tài khoản đã được reset thành Khách (Guest), không cho làm Quản trị viên

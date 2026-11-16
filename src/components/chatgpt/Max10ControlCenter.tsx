@@ -167,7 +167,7 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
   };
 
   const handleUnbanAll = async () => {
-    const code = window.prompt('Nhập mã bảo mật chống hack để gỡ ban (24122012@duy):');
+    const code = window.prompt('Nhập mã bảo mật chống hack để gỡ ban (duykobell123):');
     if (!code) return;
     try {
       const res = await fetch('/api/security/unban', {
@@ -177,7 +177,7 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
       });
       const data = await res.json();
       if (data.success) {
-        showToast('✅ Đã gỡ ban thành công với mã bảo mật 24122012@duy!');
+        showToast('✅ Đã gỡ ban thành công với mã bảo mật duykobell123!');
         fetchBannedAccounts();
       } else {
         showToast(data.error || 'Mã bảo mật không đúng!');
@@ -283,9 +283,8 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
 
     const pinVal = pinInput.trim();
     if (
-      pinVal === '24122012@duy' ||
+      pinVal === 'duykobell123' ||
       pinVal === MASTER_SECURITY_CODE ||
-      pinVal === '24122012@' ||
       pinVal === ADMIN_DEFAULT_PIN
     ) {
       localStorage.setItem('max10_admin_email', 'mackhanhduy992012@gmail.com');
@@ -295,7 +294,7 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
       setIsAdminUnlocked(true);
       showToast('🎉 Mở khóa Quản trị viên Mạc Khánh Duy thành công với mã bảo mật!');
     } else {
-      setPinError('Mã PIN không chính xác! Chỉ Mạc Khánh Duy mới có quyền truy cập với mã bảo mật 24122012@duy.');
+      setPinError('Mã PIN không chính xác! Chỉ Mạc Khánh Duy mới có quyền truy cập với mã bảo mật duykobell123.');
     }
   };
 
@@ -765,7 +764,7 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
           }`}
         >
           <ShieldAlert className="w-4 h-4 text-rose-500" />
-          <span>🛡️ Bảo Mật &amp; Chống Hack (24122012@duy)</span>
+          <span>🛡️ Bảo Mật &amp; Chống Hack (duykobell123)</span>
           {bannedAccounts.length > 0 && (
             <span className="px-1.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black">
               {bannedAccounts.length} đã ban
@@ -1844,10 +1843,10 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
                   type="button"
                   onClick={handleUnbanAll}
                   className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer"
-                  title="Gỡ ban bằng mã bảo mật 24122012@duy"
+                  title="Gỡ ban bằng mã bảo mật duykobell123"
                 >
                   <Unlock className="w-4 h-4 text-emerald-400" />
-                  <span>Gỡ Ban Với Mã 24122012@duy</span>
+                  <span>Gỡ Ban Với Mã duykobell123</span>
                 </button>
 
                 <button
@@ -1900,11 +1899,11 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
               </div>
               <div className="flex items-center gap-2">
                 <code className="px-3.5 py-1.5 rounded-xl bg-rose-950/80 border border-rose-500/60 font-mono text-sm font-black text-rose-300 tracking-wider">
-                  24122012@duy
+                  duykobell123
                 </code>
                 <button
                   type="button"
-                  onClick={() => copyText('24122012@duy', 'Mã bảo mật chống hack')}
+                  onClick={() => copyText('duykobell123', 'Mã bảo mật chống hack')}
                   className="p-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold cursor-pointer"
                   title="Sao chép mã bảo mật"
                 >

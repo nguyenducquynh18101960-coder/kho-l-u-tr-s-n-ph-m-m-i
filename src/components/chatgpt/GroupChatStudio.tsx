@@ -92,6 +92,7 @@ import {
   createOrUpdateCustomClassGroup,
   deleteClassSeatingPlan,
 } from '../../data/classSystemData';
+import { formatAccurateTime } from '../../utils/timeFormat';
 
 /** Helper to strictly detect and exclude AI bots and assistants from friend search and peer discovery */
 export const isAiEntity = (member: { id?: string; name?: string; isAi?: boolean; role?: string }) => {
@@ -720,14 +721,18 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
               if (m.id && seenIds.has(m.id)) continue;
 
               const cleanContent = (m.content || '').trim();
-              const signature = `${m.senderId}_${m.recipientId}_${cleanContent}`;
+              const bucket = typeof m.createdAt === 'number' && m.createdAt > 0 ? Math.floor(m.createdAt / 10000) : 'legacy';
+              const signature = `${m.senderId}_${m.recipientId}_${cleanContent}_${bucket}`;
               if (seenSignatures.has(signature)) {
                 continue;
               }
 
               if (m.id) seenIds.add(m.id);
               seenSignatures.add(signature);
-              result.push(m);
+              result.push({
+                ...m,
+                timestamp: formatAccurateTime(m.createdAt, m.timestamp),
+              });
             }
 
             return {
@@ -811,6 +816,33 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     checkTargetOpen();
     const interval = setInterval(checkTargetOpen, 1000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Real-time listener for auto-update admin messages with exact publish timestamp
+  useEffect(() => {
+    const handleAdminUpdateMsg = (e: Event) => {
+      const detail = (e as CustomEvent<DirectChatMessage>).detail;
+      if (!detail || !detail.id) return;
+      const formattedMsg: DirectChatMessage = {
+        ...detail,
+        timestamp: formatAccurateTime(detail.createdAt, detail.timestamp),
+      };
+      setAdminBroadcastMessages((prev) =>
+        prev.some((m) => m.id === formattedMsg.id) ? prev : [...prev, formattedMsg]
+      );
+      setDirectMessages((prev) => {
+        const next = { ...prev };
+        ['all_broadcast', 'admin-mac-khanh-duy'].forEach((key) => {
+          const list = next[key] || [];
+          if (!list.some((m) => m.id === formattedMsg.id)) {
+            next[key] = [...list, formattedMsg];
+          }
+        });
+        return next;
+      });
+    };
+    window.addEventListener('max10:admin-message', handleAdminUpdateMsg);
+    return () => window.removeEventListener('max10:admin-message', handleAdminUpdateMsg);
   }, []);
 
   // Sync on mount and periodically every 2.5 seconds for real-time friend requests, direct messages, and groups
@@ -1330,10 +1362,8 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     const text = inputMessage.trim();
     if (!text) return;
 
-    const timeStr = new Date().toLocaleTimeString('vi-VN', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    const nowMs = Date.now();
+    const timeStr = formatAccurateTime(nowMs);
 
     // MODE 1: DIRECT 1-ON-1 CHAT WITH FRIEND
     if (activeMode === 'direct') {
@@ -1394,6 +1424,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         recipientId: activeFriend.id,
         content: text,
         timestamp: timeStr,
+        createdAt: nowMs,
         status: 'delivered',
         replyTo: replyingTo || undefined,
       };
@@ -1427,7 +1458,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           recipientId: activeFriend.id,
           content: text,
           timestamp: timeStr,
-          createdAt: Date.now(),
+          createdAt: nowMs,
         }),
       })
         .catch(() => {})
@@ -1530,6 +1561,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       senderRole: currentUser?.role === 'teacher' ? 'teacher' : currentUser?.role === 'admin' ? 'admin' : 'member',
       content: text,
       timestamp: timeStr,
+      createdAt: nowMs,
       status: 'delivered',
       replyTo: replyingTo || undefined,
     };
@@ -1581,7 +1613,8 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           senderRole: 'ai_tutor',
           isAi: true,
           content: aiText,
-          timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+          createdAt: Date.now(),
+          timestamp: formatAccurateTime(Date.now()),
         };
 
         setGroupMessages((prev) => ({
@@ -1924,17 +1957,19 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
   // Quick Like sender
   const handleSendQuickLike = () => {
-    const timeStr = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    const nowMs = Date.now();
+    const timeStr = formatAccurateTime(nowMs);
     if (activeMode === 'direct') {
       if (!activeFriend || isFriendBlocked) return;
       const dmMsg: DirectChatMessage = {
-        id: 'dm-' + Date.now(),
+        id: 'dm-' + nowMs,
         senderId: activeUserId,
         senderName: activeUserName,
         senderAvatar: activeUserAvatar,
         recipientId: activeFriend.id,
         content: '👍',
         timestamp: timeStr,
+        createdAt: nowMs,
         status: 'delivered',
         replyTo: replyingTo || undefined,
       };
@@ -1946,7 +1981,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     } else {
       if (!activeGroup || isCurrentlyMuted) return;
       const userMsg: GroupChatMessage = {
-        id: 'msg-' + Date.now(),
+        id: 'msg-' + nowMs,
         groupId: activeGroupId,
         senderId: activeUserId,
         senderName: activeUserName,
@@ -1954,6 +1989,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         senderRole: 'member',
         content: '👍',
         timestamp: timeStr,
+        createdAt: nowMs,
         status: 'delivered',
         replyTo: replyingTo || undefined,
       };
@@ -1988,7 +2024,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       let time = f.addedAt || 'Mới';
       if (lastMsg) {
         snippet = lastMsg.content;
-        time = lastMsg.timestamp;
+        time = formatAccurateTime(lastMsg.createdAt, lastMsg.timestamp);
       }
       list.push({
         id: f.id,
@@ -2015,7 +2051,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         avatar: REAL_ADMIN_AVATAR,
         presenceStatus: 'online',
         lastMessage: lastBc ? lastBc.content : 'Gửi tin nhắn & thông báo cập nhật tới toàn bộ học sinh và thầy cô',
-        lastTimestamp: lastBc ? lastBc.timestamp : 'Sẵn sàng',
+        lastTimestamp: lastBc ? formatAccurateTime(lastBc.createdAt, lastBc.timestamp) : 'Sẵn sàng',
         unreadCount: 0,
         data: { id: 'all_broadcast', role: 'admin' },
       });
@@ -2029,7 +2065,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           avatar: t.partnerAvatar,
           presenceStatus: t.presenceStatus || 'online',
           lastMessage: t.lastMessage,
-          lastTimestamp: t.lastTimestamp,
+          lastTimestamp: formatAccurateTime(t.lastCreatedAt, t.lastTimestamp),
           unreadCount: 0,
           data: { id: t.partnerId, role: t.partnerRole || 'student' },
         });
@@ -2044,7 +2080,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         avatar: REAL_ADMIN_AVATAR,
         presenceStatus: 'online',
         lastMessage: lastMsg ? lastMsg.content : `📩 Nhắn tin trực tiếp tới Quản trị viên (${ADMIN_EMAIL})`,
-        lastTimestamp: lastMsg ? lastMsg.timestamp : 'Trực tuyến',
+        lastTimestamp: lastMsg ? formatAccurateTime(lastMsg.createdAt, lastMsg.timestamp) : 'Trực tuyến',
         unreadCount: 0,
         data: {
           id: ADMIN_ID,
@@ -2066,7 +2102,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       let time = 'Hôm nay';
       if (lastMsg) {
         snippet = (lastMsg.senderId === activeUserId ? 'Bạn: ' : `${lastMsg.senderName}: `) + lastMsg.content;
-        time = lastMsg.timestamp;
+        time = formatAccurateTime(lastMsg.createdAt, lastMsg.timestamp);
       }
       list.push({
         id: g.id,
@@ -2979,7 +3015,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                           isMe ? 'text-blue-100/80' : 'text-slate-400 dark:text-zinc-500'
                         }`}
                       >
-                        <span>{msg.timestamp}</span>
+                        <span>{formatAccurateTime(msg.createdAt, msg.timestamp)}</span>
                         {isMe && (
                           <span className="flex items-center gap-0.5 font-medium ml-1">
                             <CheckCheck className="w-3 h-3 text-sky-300" />
@@ -3062,7 +3098,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                     className="p-3 rounded-2xl max-w-lg mx-auto bg-blue-50/80 dark:bg-zinc-900 border border-blue-200 dark:border-zinc-800 text-xs text-center text-slate-700 dark:text-zinc-300"
                   >
                     <p className="font-semibold">{msg.content}</p>
-                    <span className="text-[10px] text-slate-400 mt-1 block">{msg.timestamp}</span>
+                    <span className="text-[10px] text-slate-400 mt-1 block">{formatAccurateTime(msg.createdAt, msg.timestamp)}</span>
                   </div>
                 );
               }
@@ -3137,7 +3173,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                           isMe ? 'text-blue-100/80' : 'text-slate-400 dark:text-zinc-500'
                         }`}
                       >
-                        <span>{msg.timestamp}</span>
+                        <span>{formatAccurateTime(msg.createdAt, msg.timestamp)}</span>
                         {isMe && (
                           <span className="flex items-center gap-0.5 font-medium ml-1">
                             <CheckCheck className="w-3 h-3 text-sky-300" />

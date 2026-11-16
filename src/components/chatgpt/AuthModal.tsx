@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   User,
@@ -10,6 +10,9 @@ import {
   Camera,
   Crown,
   Lock,
+  Mail,
+  Trash2,
+  Users,
 } from 'lucide-react';
 import {
   UserAccount,
@@ -21,6 +24,9 @@ import {
   ADMIN_DEFAULT_PIN,
   ADMIN_ID,
   MASTER_SECURITY_CODE,
+  loadSavedAccounts,
+  saveAccountToHistory,
+  removeSavedAccount,
 } from '../../types/auth';
 import { UserPresenceStatus } from '../../types';
 import { PRESENCE_STATUS_CONFIG } from './UserAvatarWithStatus';
@@ -62,6 +68,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // Form states
   const [role, setRole] = useState<'student' | 'teacher'>('student');
   const [name, setName] = useState<string>('');
+  const [studentAccount, setStudentAccount] = useState<string>('');
   const [teacherTitle, setTeacherTitle] = useState<'Cô' | 'Thầy'>('Cô');
   const [teacherPhone, setTeacherPhone] = useState<string>('');
   const [teacherEmail, setTeacherEmail] = useState<string>('');
@@ -88,6 +95,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [currentPresence, setCurrentPresence] = useState<UserPresenceStatus>(() => {
     return (currentUser?.presenceStatus as UserPresenceStatus) || 'online';
   });
+  const [savedAccounts, setSavedAccounts] = useState<UserAccount[]>(() => loadSavedAccounts());
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (currentUser?.presenceStatus) {
+      setCurrentPresence(currentUser.presenceStatus as UserPresenceStatus);
+    }
+    const localList = loadSavedAccounts();
+    setSavedAccounts(localList);
+
+    fetch('/api/users/accounts')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.success && Array.isArray(data.accounts)) {
+          const mergedMap = new Map<string, UserAccount>();
+          localList.forEach((acc) => mergedMap.set(acc.id, acc));
+          data.accounts.forEach((srvAcc: UserAccount) => {
+            if (srvAcc?.id && srvAcc?.name && srvAcc.role !== 'admin') {
+              mergedMap.set(srvAcc.id, { ...mergedMap.get(srvAcc.id), ...srvAcc });
+            }
+          });
+          setSavedAccounts(Array.from(mergedMap.values()));
+        }
+      })
+      .catch(() => {});
+  }, [isOpen, currentUser?.id]);
 
   if (!isOpen) return null;
 
@@ -138,9 +171,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     if (
-      pinVal === '24122012@duy' ||
+      pinVal === 'duykobell123' ||
       pinVal === MASTER_SECURITY_CODE ||
-      pinVal === '24122012@' ||
       pinVal === ADMIN_DEFAULT_PIN
     ) {
       const adminUser: UserAccount = {
@@ -242,10 +274,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           ? `${teacherTitle} ${finalName}`
           : finalName;
 
+      const rawAccountInput = (role === 'teacher' ? teacherEmail : studentAccount).trim();
+      const resolvedAccountEmail = rawAccountInput
+        ? rawAccountInput.includes('@')
+          ? rawAccountInput.toLowerCase()
+          : `${rawAccountInput.toLowerCase().replace(/[^a-z0-9._-]/g, '') || cleanSlug || 'user'}@max10.edu.vn`
+        : `${cleanSlug || 'user'}@max10.edu.vn`;
+
       const user: UserAccount = {
         id: 'real-' + (role === 'teacher' ? 'gv-' : 'hs-') + (cleanSlug || 'user') + '-' + Date.now().toString(36),
         name: resolvedTeacherName,
-        email: role === 'teacher' && teacherEmail.trim() ? teacherEmail.trim() : `${cleanSlug || 'user'}@max10.edu.vn`,
+        email: resolvedAccountEmail,
         phone: role === 'teacher' && teacherPhone.trim() ? teacherPhone.trim() : undefined,
         avatar:
           role === 'teacher'
@@ -274,6 +313,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         localStorage.setItem('max10_user_dob_v1', authDob);
       }
       localStorage.setItem(STORAGE_KEY_AUTH_USER, JSON.stringify(user));
+      const updatedHistory = saveAccountToHistory(user);
+      setSavedAccounts(updatedHistory);
 
       if (role === 'teacher') {
         registerTeacherForClasses(user);
@@ -286,6 +327,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setLoadingProvider(null);
       onClose();
     }, 200);
+  };
+
+  const handleQuickLoginAccount = (account: UserAccount) => {
+    const normalized: UserAccount = {
+      ...account,
+      presenceStatus: account.presenceStatus || 'online',
+    };
+    localStorage.setItem(STORAGE_KEY_AUTH_USER, JSON.stringify(normalized));
+    if (normalized.dob) {
+      localStorage.setItem('max10_user_dob_v1', normalized.dob);
+    }
+    const updatedHistory = saveAccountToHistory(normalized);
+    setSavedAccounts(updatedHistory);
+
+    if (normalized.role === 'teacher') {
+      registerTeacherForClasses(normalized);
+    } else if (normalized.role === 'student' && normalized.studentClass) {
+      enrollRealStudentInClass(normalized);
+    }
+
+    syncUserToServer(normalized);
+    onLoginSuccess(normalized);
+    onClose();
+  };
+
+  const handleRemoveSavedAccount = (accountId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = removeSavedAccount(accountId);
+    setSavedAccounts((prev) => prev.filter((a) => a.id !== accountId || updated.some((u) => u.id === a.id)));
   };
 
   const handleSelectStatus = async (status: UserPresenceStatus) => {
@@ -310,10 +380,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   const handleLogoutClick = () => {
+    if (currentUser) {
+      setSavedAccounts(saveAccountToHistory(currentUser));
+    }
     onLogout();
     setActiveTab('guest');
     setName('');
-    setNotification('✓ Bạn đã đăng xuất thành công. Vui lòng đăng ký hoặc chọn vai trò để tiếp tục.');
+    setStudentAccount('');
+    setNotification('✓ Bạn đã đăng xuất thành công. Chọn tài khoản bên dưới hoặc đăng ký mới.');
   };
 
   return (
@@ -381,7 +455,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h4 className="font-black text-base">{currentUser.name}</h4>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-extrabold">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${
+                        currentUser.role === 'teacher'
+                          ? 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'
+                          : currentUser.role === 'admin'
+                          ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
+                          : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                      }`}>
                         {currentUser.role === 'teacher'
                           ? currentUser.teacherRoleType === 'both'
                             ? 'GV Bộ môn & Chủ nhiệm'
@@ -393,8 +473,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           : 'Học sinh'}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-500 dark:text-zinc-400 font-mono mt-0.5 truncate">
-                      {currentUser.email || `${currentUser.name} @ Max10`}
+                    <p className="text-xs text-slate-600 dark:text-zinc-300 font-mono mt-0.5 truncate">
+                      Tài khoản: {currentUser.email || `${currentUser.name.toLowerCase().replace(/\s+/g, '')}@max10.edu.vn`}
                     </p>
                     {currentUser.role === 'teacher' && (
                       <p className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 mt-1">
@@ -410,7 +490,93 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     )}
                   </div>
                 </div>
+
+                {/* Detailed Account Information Box */}
+                <div className={`grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2.5 border-t text-[11px] ${isDark ? 'border-zinc-700/80' : 'border-slate-200'}`}>
+                  <div className={`px-2.5 py-1.5 rounded-xl ${isDark ? 'bg-zinc-900/70' : 'bg-white border border-slate-200/80'}`}>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block">Email / Tài khoản</span>
+                    <span className="font-mono font-bold text-slate-800 dark:text-zinc-200 break-all">
+                      {currentUser.email || `${currentUser.id}@max10.edu.vn`}
+                    </span>
+                  </div>
+                  <div className={`px-2.5 py-1.5 rounded-xl ${isDark ? 'bg-zinc-900/70' : 'bg-white border border-slate-200/80'}`}>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block">Mã ID Tài khoản</span>
+                    <span className="font-mono font-semibold text-slate-700 dark:text-zinc-300 break-all">
+                      {currentUser.id}
+                    </span>
+                  </div>
+                  {(currentUser.schoolName || currentUser.phone) && (
+                    <div className={`px-2.5 py-1.5 rounded-xl sm:col-span-2 flex items-center justify-between gap-2 ${isDark ? 'bg-zinc-900/70' : 'bg-white border border-slate-200/80'}`}>
+                      <span className="font-semibold text-slate-700 dark:text-zinc-300">
+                        🏫 {currentUser.schoolName || 'THCS Max10'}
+                      </span>
+                      {currentUser.phone && (
+                        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          📞 {currentUser.phone}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
+
+              {savedAccounts.filter((a) => a.id !== currentUser.id).length > 0 && (
+                <div className={`p-3.5 rounded-2xl border text-xs ${isDark ? 'bg-zinc-800/50 border-zinc-700' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-extrabold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>Chuyển nhanh tài khoản Học sinh / Thầy Cô</span>
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-400">
+                      {savedAccounts.filter((a) => a.id !== currentUser.id).length} tài khoản
+                    </span>
+                  </div>
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                    {savedAccounts
+                      .filter((a) => a.id !== currentUser.id)
+                      .map((acc) => (
+                        <div
+                          key={acc.id}
+                          onClick={() => handleQuickLoginAccount(acc)}
+                          className={`p-2 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-all ${
+                            isDark
+                              ? 'bg-zinc-900/80 border-zinc-700 hover:border-emerald-500/60'
+                              : 'bg-white border-slate-200 hover:border-emerald-500'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <img
+                              src={
+                                acc.avatar ||
+                                `https://api.dicebear.com/7.x/${acc.role === 'teacher' ? 'personas' : 'avataaars'}/svg?seed=${encodeURIComponent(acc.name)}`
+                              }
+                              alt={acc.name}
+                              className="w-7 h-7 rounded-lg object-cover shrink-0 border"
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-bold truncate text-slate-900 dark:text-white">{acc.name}</span>
+                                <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-extrabold shrink-0 ${
+                                  acc.role === 'teacher'
+                                    ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
+                                    : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                }`}>
+                                  {acc.role === 'teacher' ? 'Thầy/Cô' : 'Học sinh'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] font-mono text-slate-500 dark:text-zinc-400 truncate">
+                                {acc.email || acc.id}
+                              </p>
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 shrink-0">
+                            Đăng nhập →
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
 
               {/* Presence Status Selector */}
               <div className={`p-3.5 rounded-2xl border text-xs ${isDark ? 'bg-zinc-800/60 border-zinc-700' : 'bg-slate-50 border-slate-200'}`}>
@@ -531,6 +697,86 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               {activeTab === 'guest' && (
+                <div className="space-y-4">
+                  {/* Saved & Registered Student / Teacher Accounts List */}
+                  {savedAccounts.length > 0 && (
+                    <div className={`p-3.5 rounded-2xl border space-y-2.5 ${isDark ? 'bg-zinc-850/80 border-zinc-700' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-slate-800 dark:text-zinc-100 flex items-center gap-1.5">
+                          <Users className="w-4 h-4 text-emerald-500" />
+                          <span>Tài khoản Học sinh & Thầy Cô đã có ({savedAccounts.length})</span>
+                        </span>
+                        <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                          Bấm để đăng nhập ngay
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 max-h-44 overflow-y-auto pr-1">
+                        {savedAccounts.map((acc) => (
+                          <div
+                            key={acc.id}
+                            onClick={() => handleQuickLoginAccount(acc)}
+                            className={`p-2.5 rounded-xl border flex items-center justify-between gap-2.5 cursor-pointer transition-all ${
+                              isDark
+                                ? 'bg-zinc-900 border-zinc-700 hover:border-emerald-500/70 hover:bg-zinc-800'
+                                : 'bg-white border-slate-200 hover:border-emerald-500 hover:shadow-xs'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <img
+                                src={
+                                  acc.avatar ||
+                                  `https://api.dicebear.com/7.x/${acc.role === 'teacher' ? 'personas' : 'avataaars'}/svg?seed=${encodeURIComponent(acc.name)}`
+                                }
+                                alt={acc.name}
+                                className="w-9 h-9 rounded-xl object-cover border shrink-0"
+                              />
+                              <div className="min-w-0 text-left">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+                                    {acc.name}
+                                  </span>
+                                  <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-extrabold shrink-0 ${
+                                    acc.role === 'teacher'
+                                      ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
+                                      : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                  }`}>
+                                    {acc.role === 'teacher' ? 'Thầy/Cô' : 'Học sinh'}
+                                  </span>
+                                  {acc.role === 'student' && acc.studentClass && (
+                                    <span className="text-[9px] font-bold text-slate-500 dark:text-zinc-400">
+                                      Lớp {acc.studentClass}
+                                    </span>
+                                  )}
+                                  {acc.role === 'teacher' && acc.teachingSubject && (
+                                    <span className="text-[9px] font-bold text-indigo-500 dark:text-indigo-400">
+                                      Môn {acc.teachingSubject}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[10px] font-mono text-slate-500 dark:text-zinc-400 truncate mt-0.5">
+                                  TK: {acc.email || acc.id}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400">
+                                Vào →
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => handleRemoveSavedAccount(acc.id, e)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                                title="Xóa khỏi danh sách gợi ý"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -600,9 +846,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <div className={`p-4 rounded-2xl border space-y-4 text-left ${isDark ? 'bg-emerald-950/15 border-emerald-500/25' : 'bg-emerald-50/40 border-emerald-200'}`}>
                       <div className="flex items-center justify-between pb-2 border-b border-emerald-500/15">
                         <span className="text-xs font-black text-emerald-700 dark:text-emerald-300">
-                          Hồ Sơ Nhanh Học Sinh THCS
+                          Hồ Sơ Tài Khoản Học Sinh THCS
                         </span>
-                        <span className="text-[11px] text-slate-500 dark:text-zinc-400">Bước 1 / Học tập</span>
+                        <span className="text-[11px] text-slate-500 dark:text-zinc-400">Tạo & Hiện Tài Khoản</span>
                       </div>
 
                       <div>
@@ -619,6 +865,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             onChange={(e) => setName(e.target.value)}
                             placeholder="VD: Nguyễn Minh Anh"
                             className={`w-full pl-10 pr-3 py-2.5 rounded-xl text-sm font-semibold border outline-hidden transition-all ${
+                              isDark
+                                ? 'bg-zinc-800 border-zinc-700 text-white placeholder-zinc-500 focus:border-emerald-500'
+                                : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-emerald-600'
+                            }`}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold mb-1.5 text-slate-700 dark:text-zinc-300">
+                          Tài khoản Học sinh (Tên đăng nhập / Email):
+                        </label>
+                        <div className="relative">
+                          <Mail className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+                          <input
+                            type="text"
+                            value={studentAccount}
+                            onChange={(e) => setStudentAccount(e.target.value)}
+                            placeholder={`VD: ${
+                              name.trim()
+                                ? name
+                                    .trim()
+                                    .toLowerCase()
+                                    .normalize('NFD')
+                                    .replace(/[\u0300-\u036f]/g, '')
+                                    .replace(/[^a-z0-9]/g, '') || 'hocsinh'
+                                : 'nguyenminhanh'
+                            }@max10.edu.vn`}
+                            className={`w-full pl-10 pr-3 py-2.5 rounded-xl text-xs font-mono font-semibold border outline-hidden transition-all ${
                               isDark
                                 ? 'bg-zinc-800 border-zinc-700 text-white placeholder-zinc-500 focus:border-emerald-500'
                                 : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-emerald-600'
@@ -800,14 +1075,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         </div>
                         <div>
                           <label className="block text-xs font-bold mb-1 text-slate-700 dark:text-zinc-300">
-                            Email công tác:
+                            Tài khoản Email Giáo viên:
                           </label>
                           <input
-                            type="email"
+                            type="text"
                             value={teacherEmail}
                             onChange={(e) => setTeacherEmail(e.target.value)}
-                            placeholder="giaovien@truong.edu.vn"
-                            className={`w-full px-3 py-2 rounded-xl text-xs font-semibold border outline-none ${
+                            placeholder="giaovien@max10.edu.vn"
+                            className={`w-full px-3 py-2 rounded-xl text-xs font-mono font-semibold border outline-none ${
                               isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
                             }`}
                           />
@@ -958,6 +1233,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </span>
                   </button>
                 </form>
+                </div>
               )}
 
             {/* TAB 2: QUẢN TRỊ VIÊN MẠC KHÁNH DUY */}

@@ -36,6 +36,7 @@ import { celebrationEngine } from '../utils/confettiFireworks';
 import { soundEffects } from '../utils/soundEffects';
 import { loadSharedClassExams, SharedClassExamEvent } from '../data/classSystemData';
 import { STORAGE_KEY_AUTH_USER, UserAccount } from '../types/auth';
+import { formatAccurateTime, formatLocalYYYYMMDD } from '../utils/timeFormat';
 
 export type ScheduleCategory = 'exam' | 'homework' | 'event';
 export type SchedulePriority = 'urgent' | 'high' | 'normal' | 'low';
@@ -75,7 +76,7 @@ const INITIAL_SCHEDULE_EVENTS: ScheduleEvent[] = [
     title: 'Kiểm tra giữa học kỳ I môn Toán',
     category: 'exam',
     subject: 'Toán học',
-    date: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    date: formatLocalYYYYMMDD(new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)),
     time: '08:00',
     priority: 'urgent',
     syllabus: 'Căn bậc hai, hàm số bậc nhất y = ax + b, hệ thức lượng trong tam giác vuông',
@@ -88,7 +89,7 @@ const INITIAL_SCHEDULE_EVENTS: ScheduleEvent[] = [
     title: 'Hạn nộp bài viết Tập làm văn số 2',
     category: 'homework',
     subject: 'Ngữ văn',
-    date: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    date: formatLocalYYYYMMDD(new Date(Date.now() + 1 * 24 * 60 * 60 * 1000)),
     time: '23:59',
     priority: 'high',
     syllabus: 'Nghị luận về một hiện tượng đời sống hoặc vấn đề tư tưởng đạo lý',
@@ -101,7 +102,7 @@ const INITIAL_SCHEDULE_EVENTS: ScheduleEvent[] = [
     title: 'Kiểm tra 15 phút Tiếng Anh (Unit 4 - Learning a foreign language)',
     category: 'exam',
     subject: 'Tiếng Anh',
-    date: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    date: formatLocalYYYYMMDD(new Date(Date.now() + 4 * 24 * 60 * 60 * 1000)),
     time: '14:30',
     priority: 'normal',
     syllabus: 'Modal verbs with IF, reported speech, từ vựng chủ đề giáo dục và ngôn ngữ',
@@ -114,7 +115,7 @@ const INITIAL_SCHEDULE_EVENTS: ScheduleEvent[] = [
     title: 'Hạn nộp báo cáo thí nghiệm Vật lý: Định luật Ôm',
     category: 'homework',
     subject: 'Vật lý / KHTN',
-    date: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    date: formatLocalYYYYMMDD(new Date(Date.now() + 6 * 24 * 60 * 60 * 1000)),
     time: '17:00',
     priority: 'normal',
     syllabus: 'Đo cường độ dòng điện và hiệu điện thế trong đoạn mạch nối tiếp và song song',
@@ -127,7 +128,7 @@ const INITIAL_SCHEDULE_EVENTS: ScheduleEvent[] = [
     title: 'Họp Phụ Huynh & Sơ Kết Giữa Học Kỳ',
     category: 'event',
     subject: 'Chung',
-    date: new Date(Date.now() + 9 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    date: formatLocalYYYYMMDD(new Date(Date.now() + 9 * 24 * 60 * 60 * 1000)),
     time: '08:30',
     priority: 'high',
     syllabus: 'Báo cáo kết quả rèn luyện và học tập giữa kỳ',
@@ -246,7 +247,7 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
   const [formTitle, setFormTitle] = useState('');
   const [formCategory, setFormCategory] = useState<ScheduleCategory>('exam');
   const [formSubject, setFormSubject] = useState('Toán học');
-  const [formDate, setFormDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [formDate, setFormDate] = useState(() => formatLocalYYYYMMDD(new Date()));
   const [formTime, setFormTime] = useState('08:00');
   const [formPriority, setFormPriority] = useState<SchedulePriority>('high');
   const [formSyllabus, setFormSyllabus] = useState('');
@@ -335,8 +336,8 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
       title: 'Kiểm tra 1 tiết môn Toán (Đại số & Hình học)',
       category: 'exam',
       subject: 'Toán học',
-      date: new Date().toISOString().split('T')[0],
-      time: new Date(Date.now() + 30 * 60000).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+      date: formatLocalYYYYMMDD(new Date()),
+      time: formatAccurateTime(Date.now() + 30 * 60000),
       priority: 'urgent',
       syllabus: 'Căn thức bậc hai, hàm số bậc nhất, hệ phương trình, tam giác đồng dạng',
       notes: 'Mang theo máy tính Casio FX-580VNX, thước kẻ, compa. Tự tin 10 điểm!',
@@ -460,7 +461,7 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
     setFormTitle('');
     setFormCategory(category);
     setFormSubject('Toán học');
-    setFormDate(new Date(Date.now() + 86400000).toISOString().split('T')[0]);
+    setFormDate(formatLocalYYYYMMDD(new Date(Date.now() + 86400000)));
     setFormTime('08:00');
     setFormPriority('high');
     setFormSyllabus('');
@@ -575,7 +576,7 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
     if (isCompleted) {
       return { text: '✓ Đã hoàn thành', colorClass: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' };
     }
-    const today = new Date().toISOString().split('T')[0];
+    const today = formatLocalYYYYMMDD(new Date());
     const targetDate = new Date(dateStr + 'T00:00:00');
     const currDate = new Date(today + 'T00:00:00');
     const diffTime = targetDate.getTime() - currDate.getTime();
@@ -1513,7 +1514,7 @@ export const PersonalSchedule: React.FC<PersonalScheduleProps> = ({
                 const dayNum = idx + 1;
                 const formattedDate = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
                 const dayEvents = allEvents.filter((e) => e.date === formattedDate);
-                const isToday = formattedDate === new Date().toISOString().split('T')[0];
+                const isToday = formattedDate === formatLocalYYYYMMDD(new Date());
                 const isSelected = selectedCalendarDay === formattedDate;
 
                 return (

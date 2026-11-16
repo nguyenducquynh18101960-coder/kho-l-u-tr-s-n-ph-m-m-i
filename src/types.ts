@@ -207,6 +207,7 @@ export interface GroupChatMessage {
   isAi?: boolean;
   content: string;
   timestamp: string;
+  createdAt?: number;
   isSystemNotice?: boolean;
   isWarning?: boolean;
   isMuteNotice?: boolean;
@@ -303,6 +304,8 @@ export interface DirectChatMessage {
   recipientId: string;
   content: string;
   timestamp: string;
+  createdAt?: number;
+  isAdminUpdate?: boolean;
   replyTo?: {
     id: string;
     senderName: string;
