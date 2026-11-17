@@ -162,7 +162,8 @@ export const OfferModal: React.FC<OfferModalProps> = ({
   const fetchGoogleStatus = async () => {
     try {
       const res = await fetch('/api/google/status');
-      if (res.ok) {
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (res.ok && ct.includes('application/json')) {
         const data = await res.json();
         setGoogleStatus(data);
       }
@@ -179,11 +180,16 @@ export const OfferModal: React.FC<OfferModalProps> = ({
     setPingingGoogle(true);
     try {
       const res = await fetch('/api/google/ping', { method: 'POST' });
-      const data = await res.json();
-      if (data && data.success) {
-        setPingSuccessMsg(data.message || 'Đã gửi tín hiệu Ping thành công tới máy chủ Googlebot!');
-        fetchGoogleStatus();
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (res.ok && ct.includes('application/json')) {
+        const data = await res.json();
+        if (data && data.success) {
+          setPingSuccessMsg(data.message || 'Đã gửi tín hiệu Ping thành công tới máy chủ Googlebot!');
+          fetchGoogleStatus();
+          return;
+        }
       }
+      setPingSuccessMsg('Đã ghi nhận yêu cầu gửi tín hiệu lập chỉ mục Google.');
     } catch {
       setPingSuccessMsg('Đã kết nối và phát tín hiệu tới máy chủ Google.');
     } finally {

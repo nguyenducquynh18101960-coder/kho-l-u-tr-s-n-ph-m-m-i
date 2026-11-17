@@ -25,6 +25,7 @@ import {
   BadgeCategory,
   BadgeTier,
   calculateLevel,
+  formatLevelLabel,
 } from '../types/achievements';
 import {
   loadStudentAchievements,
@@ -281,8 +282,10 @@ export const Achievements: React.FC<AchievementsProps> = ({
   // Level progress math
   const levelInfo = calculateLevel(stats.totalXp);
   const xpCurrentTier = stats.totalXp - levelInfo.currentLevelXp;
-  const xpTierRange = levelInfo.nextLevelXp - levelInfo.currentLevelXp;
-  const xpPercent = Math.min(100, Math.round((xpCurrentTier / xpTierRange) * 100));
+  const xpTierRange = Math.max(1, levelInfo.nextLevelXp - levelInfo.currentLevelXp);
+  const xpPercent = levelInfo.isMaxLevel
+    ? 100
+    : Math.min(100, Math.round((xpCurrentTier / xpTierRange) * 100));
 
   // Past 7 days streak history display
   const past7Days = Array.from({ length: 7 }).map((_, i) => {
@@ -347,9 +350,9 @@ export const Achievements: React.FC<AchievementsProps> = ({
                     </div>
                   )}
                 </div>
-                <div className="absolute -bottom-2 -right-2 px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 font-black text-xs shadow-md border-2 border-white dark:border-slate-900 flex items-center gap-1">
+                <div className="absolute -bottom-2 -right-2 px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 font-black text-xs shadow-md border-2 border-white dark:border-slate-900 flex items-center gap-1 whitespace-nowrap">
                   <Star className="w-3 h-3 fill-current" />
-                  <span>Lv.{stats.level}</span>
+                  <span>Lv.{formatLevelLabel(levelInfo.level)}</span>
                 </div>
               </div>
 
@@ -357,7 +360,7 @@ export const Achievements: React.FC<AchievementsProps> = ({
                 <div className="flex flex-wrap items-center gap-2 mb-1">
                   <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate">{userName}</h1>
                   <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                    {stats.levelTitle}
+                    {levelInfo.title}
                   </span>
                 </div>
 
@@ -366,17 +369,23 @@ export const Achievements: React.FC<AchievementsProps> = ({
                   <span className="font-extrabold text-emerald-600 dark:text-emerald-400">
                     {stats.totalXp.toLocaleString()} XP
                   </span>{' '}
-                  · Cần{' '}
-                  <span className="font-bold text-amber-500">
-                    {(levelInfo.nextLevelXp - stats.totalXp).toLocaleString()} XP
-                  </span>{' '}
-                  để lên Cấp {stats.level + 1}
+                  {levelInfo.isMaxLevel ? (
+                    <span className="font-bold text-amber-500">· 🎉 Đã đạt Cấp Tối Đa 2412 (MAX)!</span>
+                  ) : (
+                    <>
+                      · Cần{' '}
+                      <span className="font-bold text-amber-500">
+                        {Math.max(0, levelInfo.nextLevelXp - stats.totalXp).toLocaleString()} XP
+                      </span>{' '}
+                      để lên Cấp {formatLevelLabel(levelInfo.level + 1)}
+                    </>
+                  )}
                 </p>
 
                 {/* Level XP Progress Bar */}
                 <div className="w-full max-w-md">
                   <div className="flex justify-between text-[11px] font-bold text-slate-400 mb-1">
-                    <span>Tiến độ Cấp {stats.level}</span>
+                    <span>Tiến độ Cấp {formatLevelLabel(levelInfo.level)}</span>
                     <span>{xpPercent}%</span>
                   </div>
                   <div className="w-full h-2.5 rounded-full bg-slate-200 dark:bg-white/10 overflow-hidden">

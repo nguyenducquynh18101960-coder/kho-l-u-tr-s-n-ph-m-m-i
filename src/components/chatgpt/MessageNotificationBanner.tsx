@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, Users, X, ArrowRight, Bell } from 'lucide-react';
 import { formatAccurateTime } from '../../utils/timeFormat';
+import { safeParseJson } from '../../utils/safeFetchJson';
 
 export interface RecentNotification {
   id: string;
@@ -150,7 +151,7 @@ export const MessageNotificationBanner: React.FC<MessageNotificationBannerProps>
         );
         if (!res.ok) return;
 
-        const data = await res.json();
+        const data = await safeParseJson(res);
         if (data && data.success && Array.isArray(data.notifications)) {
           const freshNotifications: RecentNotification[] = [];
 

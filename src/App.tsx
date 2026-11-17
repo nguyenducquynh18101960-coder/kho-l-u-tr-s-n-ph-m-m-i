@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { GradeLevel, ChatSession, ChatMessage, SubjectInfo, UserPresenceStatus } from './types';
 import { BackgroundTheme, PRESET_THEMES, STORAGE_KEY_BG_THEME, STORAGE_KEY_VOICE_CALL } from './types/theme';
 import { UserAccount, STORAGE_KEY_AUTH_USER, isUserAdmin, STORAGE_KEY_USER_GENDER, saveAccountToHistory, MASTER_SECURITY_CODE } from './types/auth';
@@ -20,6 +20,7 @@ import { PermanentlyBannedScreen } from './components/chatgpt/PermanentlyBannedS
 import { OfflineIndicator } from './components/chatgpt/OfflineIndicator';
 import { AIVoicePlayerBar } from './components/chatgpt/AIVoicePlayerBar';
 import { MessageNotificationBanner } from './components/chatgpt/MessageNotificationBanner';
+import { LevelUpCelebrationOverlay } from './components/chatgpt/LevelUpCelebrationOverlay';
 
 // Modals & Security Gate
 import { Max10SecurityVerification, getOrCreateDeviceId } from './components/chatgpt/Max10SecurityVerification';
@@ -53,6 +54,7 @@ import { celebrateMilestone } from './utils/confettiFireworks';
 import { soundEffects } from './utils/soundEffects';
 import { getDailyQuestionQuota, MAX_DAILY_QUESTIONS } from './data/questionQuota';
 import { purgeUnrelatedLegacyClassGroups } from './data/classSystemData';
+import { isSearchEngineBot, syncHomepageSeoMeta } from './utils/seoBot';
 
 const STORAGE_KEY_SESSIONS = 'max10_chat_sessions_v3';
 const STORAGE_KEY_SELECTED_GRADE = 'max10_selected_grade_v1';
@@ -187,12 +189,32 @@ export function App() {
   // Auto-Update hook
   const { status: autoUpdateStatus, autoUpdateNotice, secondsUntilRefresh } = useAutoUpdate();
 
-  // Security Gate: "Và mỗi lần vào link thì sẽ xác minh như thế này thay chỗ nào có từ OLM thành MAX10 AI"
-  const [isSecurityVerified, setIsSecurityVerified] = useState<boolean>(false);
+  // Search engine crawler detection (Googlebot / Bingbot / Social scrapers bypass interstitials)
+  const isBotCrawler = useMemo(() => isSearchEngineBot(), []);
+
+  // Security Gate: bypass immediately for search bots, otherwise verify on first chat message
+  const [isSecurityVerified, setIsSecurityVerified] = useState<boolean>(() => {
+    if (isSearchEngineBot()) return true;
+    try {
+      return Boolean(sessionStorage.getItem('max10_security_session_token'));
+    } catch {
+      return false;
+    }
+  });
+  const [showSecurityGate, setShowSecurityGate] = useState<boolean>(false);
+  const pendingChatRef = useRef<{
+    text: string;
+    image?: { data: string; mimeType: string; previewUrl: string } | null;
+    isThinking?: boolean;
+  } | null>(null);
 
   // Modals
-  // User Requirement: "lúc ấn vào link thì nó hiện ra" -> Luôn luôn hiển thị màn hình giới thiệu trắng tinh gõ chữ khi mở link
-  const [showIntroSplash, setShowIntroSplash] = useState<boolean>(true);
+  // Show intro splash for human visitors; hide for search engine bots so Googlebot indexes homepage directly
+  const [showIntroSplash, setShowIntroSplash] = useState<boolean>(() => !isSearchEngineBot());
+
+  useEffect(() => {
+    syncHomepageSeoMeta();
+  }, []);
 
   // User Requirement: "với lại khi phóng to thì ẩn cả chỗ đặt câu hỏi mới từ chô Max10 AI-Gia Sư điểm 10 THCS ấn luôn"
   const [isChatFullscreen, setIsChatFullscreen] = useState<boolean>(false);
@@ -230,7 +252,9 @@ export function App() {
   useEffect(() => {
     purgeUnrelatedLegacyClassGroups();
     fetch('/api/classes/registered')
-      .then((r) => r.json())
+      .then((r) =>
+        r.ok && (r.headers.get('content-type') || '').includes('application/json') ? r.json() : null
+      )
       .then((data) => {
         if (data?.success && Array.isArray(data.classes) && data.classes.length > 0) {
           try {
@@ -317,8 +341,8 @@ export function App() {
     });
   };
 
-  // Send message to Max10 AI
-  const handleSendMessage = async (
+  // Execute chat request after security verification passes (or immediately if verified/crawler/admin)
+  const executeSendMessage = async (
     text: string,
     image?: { data: string; mimeType: string; previewUrl: string } | null,
     isThinking?: boolean
@@ -355,6 +379,10 @@ export function App() {
         }),
       });
 
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (!ct.includes('application/json')) {
+        throw new Error(`Máy chủ API chưa sẵn sàng (HTTP ${res.status}).`);
+      }
       const data = await res.json();
       if (data.reply || data.success) {
         const aiMsg: ChatMessage = {
@@ -388,6 +416,28 @@ export function App() {
     } finally {
       setChatLoading(false);
     }
+  };
+
+  // Send message to Max10 AI (triggers security verification only when human user sends a chat question)
+  const handleSendMessage = async (
+    text: string,
+    image?: { data: string; mimeType: string; previewUrl: string } | null,
+    isThinking?: boolean
+  ) => {
+    if ((!text || !text.trim()) && !image) return;
+
+    const ownerBypass =
+      isUserAdmin(currentUser) ||
+      (typeof window !== 'undefined' &&
+        sessionStorage.getItem('max10_master_security_verified') === 'true');
+
+    if (!isSecurityVerified && !isBotCrawler && !ownerBypass) {
+      pendingChatRef.current = { text, image, isThinking };
+      setShowSecurityGate(true);
+      return;
+    }
+
+    await executeSendMessage(text, image, isThinking);
   };
 
   // Regenerate last message
@@ -627,22 +677,26 @@ export function App() {
       setIsPermanentlyBanned(true);
     };
 
-    // Check real server ban list on boot (cannot bypass by clearing localStorage)
-    const q = new URLSearchParams({
-      deviceId,
-      userId: currentUser?.id || '',
-      email: currentUser?.email || '',
-    });
-    fetch(`/api/security/status?${q.toString()}`, {
-      headers: { 'x-max10-device-id': deviceId },
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data?.isClientBanned) {
-          triggerRealBan(data.banReason || 'Thiết bị hoặc tài khoản đã bị tường lửa Max10 AI chặn vĩnh viễn.');
-        }
+    // Check real server ban list on boot (skip for search crawlers)
+    if (!isBotCrawler) {
+      const q = new URLSearchParams({
+        deviceId,
+        userId: currentUser?.id || '',
+        email: currentUser?.email || '',
+      });
+      fetch(`/api/security/status?${q.toString()}`, {
+        headers: { 'x-max10-device-id': deviceId },
       })
-      .catch(() => {});
+        .then((r) =>
+          r.ok && (r.headers.get('content-type') || '').includes('application/json') ? r.json() : null
+        )
+        .then((data) => {
+          if (data?.isClientBanned) {
+            triggerRealBan(data.banReason || 'Thiết bị hoặc tài khoản đã bị tường lửa Max10 AI chặn vĩnh viễn.');
+          }
+        })
+        .catch(() => {});
+    }
 
     // Attach device/user headers and intercept real 403 firewall bans across all /api/* requests
     const w = window as any;
@@ -669,14 +723,17 @@ export function App() {
         const response = await origFetch(input, nextInit);
         if (typeof urlStr === 'string' && urlStr.startsWith('/api') && response.status === 403) {
           try {
-            const cloned = response.clone();
-            const body = await cloned.json();
-            if (body?.banned) {
-              window.dispatchEvent(
-                new CustomEvent('max10_server_banned', {
-                  detail: { reason: body.reason || body.error || 'Tường lửa phát hiện hành vi tấn công và đã chặn vĩnh viễn.' },
-                })
-              );
+            const ct = (response.headers.get('content-type') || '').toLowerCase();
+            if (ct.includes('application/json')) {
+              const cloned = response.clone();
+              const body = await cloned.json();
+              if (body?.banned) {
+                window.dispatchEvent(
+                  new CustomEvent('max10_server_banned', {
+                    detail: { reason: body.reason || body.error || 'Tường lửa phát hiện hành vi tấn công và đã chặn vĩnh viễn.' },
+                  })
+                );
+              }
             }
           } catch {}
         }
@@ -1150,12 +1207,22 @@ export function App() {
       </div>
 
       {/* Modals & Dialogs */}
-      {/* 0. Max10 Real Cryptographic Security Verification ("Thực hiện bảo mật - max10.ai") */}
-      {!isSecurityVerified && (
+      {/* 0. Max10 Security Verification: only shown when user sends a chat question (bypassed for Googlebot/crawlers) */}
+      {showSecurityGate && !isSecurityVerified && !isBotCrawler && (
         <Max10SecurityVerification
           userId={currentUser?.id}
-          onVerified={() => setIsSecurityVerified(true)}
+          onVerified={() => {
+            setIsSecurityVerified(true);
+            setShowSecurityGate(false);
+            const queued = pendingChatRef.current;
+            pendingChatRef.current = null;
+            if (queued) {
+              void executeSendMessage(queued.text, queued.image, queued.isThinking);
+            }
+          }}
           onBanned={(reason) => {
+            setShowSecurityGate(false);
+            pendingChatRef.current = null;
             try {
               localStorage.setItem('max10_permanently_banned', 'true');
               localStorage.setItem('max10_ban_reason', reason);
@@ -1166,9 +1233,9 @@ export function App() {
         />
       )}
 
-      {/* 1. Max10 Intro Splash (ONLY opens AFTER security verification completes) */}
+      {/* 1. Max10 Intro Splash (hidden for search engine crawlers so homepage indexes directly) */}
       <Max10IntroSplash
-        isOpen={isSecurityVerified && showIntroSplash}
+        isOpen={!isBotCrawler && !showSecurityGate && showIntroSplash}
         onClose={() => setShowIntroSplash(false)}
         isDark={isDark}
         userName={userName}
@@ -1303,7 +1370,7 @@ export function App() {
 
       {/* 12. Holiday Flower & Random Gift Spin Modal (8/3, 20/10, 20/11) */}
       <HolidayGiftAnimationModal
-        isOpen={isSecurityVerified && showHolidayGiftModal}
+        isOpen={!isBotCrawler && !showSecurityGate && showHolidayGiftModal}
         onClose={() => setShowHolidayGiftModal(false)}
         userName={currentUser?.name || userName}
         isTeacher={currentUser?.role === 'teacher'}
@@ -1312,6 +1379,13 @@ export function App() {
         isDark={isDark}
         initialHolidayId={holidayGiftInitialId}
         isExactHolidayToday={isExactHolidayToday}
+      />
+
+      {/* 13. XP Milestone & Level 2412 (MAX) Fireworks + Halo Celebration */}
+      <LevelUpCelebrationOverlay
+        userName={currentUser?.name || userName}
+        isDark={isDark}
+        enabled={!isBotCrawler && !showSecurityGate}
       />
     </div>
   );

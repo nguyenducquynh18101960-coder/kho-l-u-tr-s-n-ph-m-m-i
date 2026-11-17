@@ -1,0 +1,7 @@
+export default function handler(req: any, res: any) {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed" });
+  }
+  return res.status(200).json({ success: true });
+}

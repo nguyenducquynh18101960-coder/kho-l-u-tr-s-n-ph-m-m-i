@@ -758,7 +758,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs font-bold mb-2.5 shadow-2xs">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>Trợ Lý Trí Tuệ Nhân Tạo Điểm 10 Thế Hệ Mới</span>
+                  <span>Max10 AI - Gia sư điểm 10 THCS</span>
                 </div>
 
                 <h1 className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tight mb-2 text-slate-900 dark:text-white text-center leading-tight">
@@ -768,7 +768,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   </span>
                 </h1>
                 <p className="text-xs sm:text-sm text-slate-500 dark:text-zinc-400 max-w-lg mx-auto text-center leading-relaxed mb-4">
-                  Giải chi tiết từng bước · Cảnh báo bẫy đề thi mất điểm oan · Sơ đồ tư duy &amp; Video bài giảng AI
+                  Max10 AI - Gia sư điểm 10 THCS (Lớp 6–9) · Giải chi tiết từng bước · Cảnh báo bẫy đề thi · Sơ đồ tư duy &amp; Video bài giảng AI
                 </p>
 
                 {/* Subject Quick Chips in Soft Neumorphism */}

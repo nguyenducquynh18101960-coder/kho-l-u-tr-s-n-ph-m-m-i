@@ -31,7 +31,8 @@ export function useAutoUpdate() {
   const fetchStatus = async () => {
     try {
       const res = await fetch('/api/system/status?t=' + Date.now());
-      if (res.ok) {
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (res.ok && ct.includes('application/json')) {
         const data: SystemStatus = await res.json();
         if (data && typeof data.isUpdating === 'boolean') {
           setStatus(data);
@@ -167,7 +168,8 @@ export function useAutoUpdate() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isUpdating, message, estimatedMinutes }),
       });
-      if (res.ok) {
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (res.ok && ct.includes('application/json')) {
         const data = await res.json();
         if (data && data.status) {
           setStatus(data.status);

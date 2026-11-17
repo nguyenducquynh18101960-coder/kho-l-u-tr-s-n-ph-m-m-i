@@ -117,6 +117,8 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
     try {
       setLoadingSecurity(true);
       const res = await fetch('/api/security/banned-accounts');
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (!res.ok || !ct.includes('application/json')) return;
       const data = await res.json();
       if (data.success && Array.isArray(data.bannedAccounts)) {
         setBannedAccounts(data.bannedAccounts);
@@ -152,6 +154,11 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
           reason: banReasonInput.trim() || 'Chặn trực tiếp bởi Quản trị viên qua Tường lửa Max10 AI',
         }),
       });
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (!ct.includes('application/json')) {
+        showToast('Chức năng chặn từ xa cần máy chủ Node.js hoạt động.');
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         showToast('🛡️ Đã chặn vĩnh viễn và xóa dữ liệu đối tượng trên máy chủ!');
@@ -175,6 +182,17 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ securityCode: code.trim() }),
       });
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (!ct.includes('application/json')) {
+        if (code.trim() === MASTER_SECURITY_CODE) {
+          localStorage.removeItem('max10_permanently_banned');
+          localStorage.removeItem('max10_ban_reason');
+          showToast('✅ Đã gỡ ban cục bộ thành công với mã bảo mật duykobell123!');
+          return;
+        }
+        showToast('Mã bảo mật không đúng!');
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         showToast('✅ Đã gỡ ban thành công với mã bảo mật duykobell123!');
@@ -206,6 +224,8 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
     setLoading(true);
     try {
       const res = await fetch('/api/admin/accounts');
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (!res.ok || !ct.includes('application/json')) return;
       const data = await res.json();
       if (data.success && Array.isArray(data.accounts)) {
         // User requirement: "bỏ các tài khoản giả trong điều khiển Max10 đi chỉ có Mạc Khánh Duy mới là quản trị viên gmail là mackhanhduy992012@gmail.com"

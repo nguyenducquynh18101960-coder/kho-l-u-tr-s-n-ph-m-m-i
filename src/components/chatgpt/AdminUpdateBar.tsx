@@ -50,6 +50,10 @@ export const AdminUpdateBar: React.FC<AdminUpdateBarProps> = ({
             '📢 [THÔNG BÁO TỰ ĐỘNG - MAX10 VỪA CẬP NHẬT PHIÊN BẢN MỚI]\n🚀 Hệ thống Max10 AI vừa được Quản trị viên Mạc Khánh Duy cập nhật phiên bản mới thành công!\n✨ Tính năng mới: "Thông báo học tập" - Gửi thông báo đẩy (push notification) và nhắc nhở nổi trong ứng dụng 30 phút trước lịch kiểm tra hoặc hạn nộp bài tập đã lưu.\n📅 Tab "Lịch học cá nhân" & 🏆 "Bảng xếp hạng lớp học" trong tab Thành tích giúp bạn thi đua cùng bạn bè.\n🎂 Đã thêm câu hỏi ngày tháng năm sinh với bất ngờ sinh nhật đặc biệt dành cho cả bạn học và quý thầy cô!\nChúc các bạn và quý thầy cô luôn đạt thành tích rực rỡ!',
         }),
       });
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (!res.ok || !ct.includes('application/json')) {
+        throw new Error('Fallback to local confirmation');
+      }
       const data = await res.json();
       if (data.success) {
         const publishedAt = data?.status?.lastPublishedAt || data?.publishedAt || Date.now();

@@ -40,6 +40,10 @@ export const PermanentlyBannedScreen: React.FC<PermanentlyBannedScreenProps> = (
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ securityCode: code }),
       });
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (!ct.includes('application/json')) {
+        throw new Error('Fallback to local verification');
+      }
       const data = await res.json();
       if (data.success) {
         setUnbanned(true);

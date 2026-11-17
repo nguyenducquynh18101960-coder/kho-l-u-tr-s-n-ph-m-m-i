@@ -13,6 +13,7 @@ import {
   Globe,
 } from 'lucide-react';
 import { StudentAchievementStats, loadStudentAchievements } from '../../data/initialAchievements';
+import { formatLevelLabel } from '../../types/achievements';
 
 interface GlobalXpLeaderboardProps {
   currentStats: StudentAchievementStats;
@@ -136,7 +137,7 @@ export const GlobalXpLeaderboard: React.FC<GlobalXpLeaderboardProps> = ({
                 Vị trí của bạn: {userName || 'Bạn học'}
               </span>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
-                Cấp {currentStats.level}
+                Cấp {formatLevelLabel(currentStats.level)}
               </span>
             </div>
             <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
@@ -226,7 +227,7 @@ export const GlobalXpLeaderboard: React.FC<GlobalXpLeaderboardProps> = ({
                   {entry.xp} XP
                 </div>
                 <div className="text-[10px] text-slate-400 dark:text-zinc-500">
-                  Cấp {entry.level}
+                  Cấp {formatLevelLabel(entry.level)}
                 </div>
               </div>
             </div>

@@ -30,6 +30,7 @@ import { BackgroundTheme } from '../../types/theme';
 import { UserAccount } from '../../types/auth';
 import { PWAInstallButton } from './PWAInstallButton';
 import { loadStudentAchievements, StudentAchievementStats } from '../../data/initialAchievements';
+import { calculateLevel, formatLevelLabel, MAX_LEVEL } from '../../types/achievements';
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -101,9 +102,13 @@ export const Header: React.FC<HeaderProps> = ({
   }, []);
 
   const currentXp = achievementStats.totalXp;
-  const nextXp = achievementStats.nextLevelXp;
-  const xpNeeded = Math.max(0, nextXp - currentXp);
-  const xpPercent = Math.min(100, Math.round((currentXp / nextXp) * 100));
+  const levelInfo = calculateLevel(currentXp);
+  const nextXp = levelInfo.nextLevelXp;
+  const xpNeeded = levelInfo.isMaxLevel ? 0 : Math.max(0, nextXp - currentXp);
+  const xpTierRange = Math.max(1, nextXp - levelInfo.currentLevelXp);
+  const xpPercent = levelInfo.isMaxLevel
+    ? 100
+    : Math.min(100, Math.round(((currentXp - levelInfo.currentLevelXp) / xpTierRange) * 100));
 
   // Close tools popover when clicking outside
   useEffect(() => {
@@ -298,14 +303,18 @@ export const Header: React.FC<HeaderProps> = ({
           type="button"
           onClick={onOpenAchievementsModal || (() => onSelectTab('achievements'))}
           className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl transition-all neu-btn text-xs font-bold cursor-pointer hover:border-amber-400/50"
-          title={`Điểm số hiện tại: ${currentXp}/${nextXp} XP (Cấp ${achievementStats.level} - ${achievementStats.levelTitle}) · Còn ${xpNeeded} XP nữa để lên cấp!`}
+          title={
+            levelInfo.isMaxLevel
+              ? `Đạt Cấp Tối Đa ${MAX_LEVEL} (MAX) - ${levelInfo.title} · Tổng ${currentXp.toLocaleString()} XP!`
+              : `Điểm số hiện tại: ${currentXp.toLocaleString()}/${nextXp.toLocaleString()} XP (Cấp ${formatLevelLabel(levelInfo.level)} - ${levelInfo.title}) · Còn ${xpNeeded.toLocaleString()} XP nữa để lên Cấp ${levelInfo.level + 1}!`
+          }
         >
           <div className="flex items-center gap-1.5 shrink-0">
-            <span className="w-5 h-5 rounded-lg bg-gradient-to-tr from-amber-500 to-yellow-400 text-slate-950 font-black text-[10px] flex items-center justify-center shadow-xs">
-              {achievementStats.level}
+            <span className="min-w-5 px-1.5 h-5 rounded-lg bg-gradient-to-tr from-amber-500 to-yellow-400 text-slate-950 font-black text-[10px] flex items-center justify-center shadow-xs whitespace-nowrap">
+              {formatLevelLabel(levelInfo.level)}
             </span>
-            <span className="font-extrabold text-[11px] text-amber-600 dark:text-amber-400">
-              {currentXp}/{nextXp} XP
+            <span className="font-extrabold text-[11px] text-amber-600 dark:text-amber-400 whitespace-nowrap">
+              {levelInfo.isMaxLevel ? `${currentXp.toLocaleString()} XP (MAX)` : `${currentXp.toLocaleString()}/${nextXp.toLocaleString()} XP`}
             </span>
           </div>
 
@@ -318,7 +327,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           <span className="hidden xl:inline text-[10px] text-slate-400 dark:text-zinc-500 font-semibold shrink-0">
-            (còn {xpNeeded} XP)
+            {levelInfo.isMaxLevel ? '(MAX LEVEL)' : `(còn ${xpNeeded} XP)`}
           </span>
 
           <span className="hidden sm:inline-flex items-center gap-1 pl-1 border-l border-amber-500/30 text-[10px] text-orange-500 font-bold shrink-0">

@@ -106,7 +106,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setSavedAccounts(localList);
 
     fetch('/api/users/accounts')
-      .then((r) => r.json())
+      .then((r) =>
+        r.ok && (r.headers.get('content-type') || '').includes('application/json') ? r.json() : null
+      )
       .then((data) => {
         if (data?.success && Array.isArray(data.accounts)) {
           const mergedMap = new Map<string, UserAccount>();

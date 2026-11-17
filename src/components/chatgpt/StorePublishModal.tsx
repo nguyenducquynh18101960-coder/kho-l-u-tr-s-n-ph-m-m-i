@@ -78,7 +78,9 @@ export const StorePublishModal: React.FC<StorePublishModalProps> = ({
 
       // Fetch system status
       fetch('/api/system/status?t=' + Date.now())
-        .then((r) => r.json())
+        .then((r) =>
+          r.ok && (r.headers.get('content-type') || '').includes('application/json') ? r.json() : null
+        )
         .then((data) => {
           if (data && typeof data.isUpdating === 'boolean') {
             setIsUpdatingMode(data.isUpdating);

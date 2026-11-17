@@ -3,7 +3,7 @@ import { X, Gift, Sparkles, Flower2, Check, RotateCw, Crown, Trophy, Volume2 } f
 import { celebrateMilestone, launchCanvasFireworks, launchGoldenStarBurst } from '../../utils/confettiFireworks';
 import { soundEffects } from '../../utils/soundEffects';
 import { loadStudentAchievements, saveStudentAchievements } from '../../data/initialAchievements';
-import { calculateLevel } from '../../types/achievements';
+import { calculateLevel, formatLevelLabel } from '../../types/achievements';
 import ronaldoSiuStadiumImg from '../../assets/images/ronaldo_siu_stadium_1794918922903.jpg';
 
 export type HolidayId = 'tet' | '08_03' | '20_10' | 'halloween' | '20_11' | 'noel';
@@ -945,6 +945,38 @@ interface HolidayGiftAnimationModalProps {
   isExactHolidayToday?: boolean;
 }
 
+const getTodayDateKey = (): string => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const loadTodaySpinCount = (): number => {
+  try {
+    const today = getTodayDateKey();
+    const savedDate = localStorage.getItem(`${STORAGE_KEY_SPIN_COUNT}_date`);
+    if (savedDate !== today) {
+      localStorage.setItem(STORAGE_KEY_SPIN_COUNT, '0');
+      localStorage.setItem(`${STORAGE_KEY_SPIN_COUNT}_date`, today);
+      return 0;
+    }
+    const saved = localStorage.getItem(STORAGE_KEY_SPIN_COUNT);
+    const parsed = saved ? Number(saved) : 0;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const saveTodaySpinCount = (count: number) => {
+  try {
+    localStorage.setItem(STORAGE_KEY_SPIN_COUNT, String(count));
+    localStorage.setItem(`${STORAGE_KEY_SPIN_COUNT}_date`, getTodayDateKey());
+  } catch {}
+};
+
 const SLOT_WIDTH = 104; // px width of each slot item + gap
 const WINNING_INDEX = 28;
 const TOTAL_SLOTS = 34;
@@ -977,15 +1009,7 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
   const [spinTrack, setSpinTrack] = useState<HolidayGiftItem[]>([]);
   const [trackOffsetPx, setTrackOffsetPx] = useState<number>(0);
   const [drawnGift, setDrawnGift] = useState<HolidayGiftItem | null>(null);
-  const [spinCount, setSpinCount] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_SPIN_COUNT);
-      const parsed = saved ? Number(saved) : 0;
-      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-    } catch {
-      return 0;
-    }
-  });
+  const [spinCount, setSpinCount] = useState<number>(() => loadTodaySpinCount());
   const [claimBanner, setClaimBanner] = useState<string>('');
   const [showRonaldoSiu, setShowRonaldoSiu] = useState<boolean>(false);
 
@@ -1001,11 +1025,14 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
     spinTimersRef.current = [];
   };
 
-  const awardGiftXpOnce = (gift: HolidayGiftItem | null) => {
-    if (!gift || hasClaimedCurrentRef.current) return false;
+  const awardGiftXpOnce = (
+    gift: HolidayGiftItem | null
+  ): { awarded: boolean; leveledUp?: boolean; newLevel?: number; newTitle?: string } => {
+    if (!gift || hasClaimedCurrentRef.current) return { awarded: false };
     hasClaimedCurrentRef.current = true;
     try {
       const stats = loadStudentAchievements();
+      const prevLevel = calculateLevel(stats.totalXp).level;
       const newTotal = stats.totalXp + gift.xpBonus;
       const lvl = calculateLevel(newTotal);
       const updatedStats = {
@@ -1032,8 +1059,14 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
         STORAGE_KEY_RECEIVED_GIFTS,
         JSON.stringify([newRecord, ...existing].slice(0, 16))
       );
+      return {
+        awarded: true,
+        leveledUp: lvl.level > prevLevel,
+        newLevel: lvl.level,
+        newTitle: lvl.title,
+      };
     } catch {}
-    return true;
+    return { awarded: true };
   };
 
   useEffect(() => {
@@ -1046,6 +1079,7 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
       setTrackOffsetPx(0);
       setShowRonaldoSiu(false);
       setClaimBanner('');
+      setSpinCount(loadTodaySpinCount());
       hasClaimedCurrentRef.current = false;
     }
     return () => {
@@ -1077,6 +1111,9 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
   const handleCloseModal = () => {
     if (phase === 'opened' && drawnGift) {
       awardGiftXpOnce(drawnGift);
+      // Reset back to 0 spins once today's spin round is finished
+      setSpinCount(0);
+      saveTodaySpinCount(0);
     }
     clearSpinTimers();
     setDrawnGift(null);
@@ -1090,18 +1127,26 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
   const handleClaimGift = () => {
     if (!drawnGift) return;
     const bonus = drawnGift.xpBonus;
-    awardGiftXpOnce(drawnGift);
+    const result = awardGiftXpOnce(drawnGift);
     soundEffects.playCheckInReward();
 
-    // Clear the just-spun gift immediately so only spin count remains visible
+    // Clear the just-spun gift and reset spin count back to 0 for the next round
     clearSpinTimers();
     setDrawnGift(null);
     setSpinTrack([]);
     setTrackOffsetPx(0);
     setShowRonaldoSiu(false);
     setPhase('ready');
+    setSpinCount(0);
+    saveTodaySpinCount(0);
 
-    setClaimBanner(`Đã nhận quà (+${bonus} XP)! Tổng số lượt đã quay: ${spinCount} lượt.`);
+    const levelUpText =
+      result.leveledUp && result.newLevel
+        ? ` 🎉 Lên Cấp ${formatLevelLabel(result.newLevel)} (${result.newTitle})!`
+        : '';
+    setClaimBanner(
+      `Đã nhận quà (+${bonus} XP)!${levelUpText} Số lượt quay đã reset về 0 lượt để sẵn sàng quay tiếp.`
+    );
     if (claimBannerTimerRef.current) {
       window.clearTimeout(claimBannerTimerRef.current);
     }
@@ -1135,9 +1180,7 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
     setPhase('spinning');
     setSpinCount((c) => {
       const next = c + 1;
-      try {
-        localStorage.setItem(STORAGE_KEY_SPIN_COUNT, String(next));
-      } catch {}
+      saveTodaySpinCount(next);
       return next;
     });
     soundEffects.playCorrect();
@@ -1276,6 +1319,8 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
                       setSpinTrack([]);
                       setTrackOffsetPx(0);
                       setShowRonaldoSiu(false);
+                      setSpinCount(0);
+                      saveTodaySpinCount(0);
                     }}
                     className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer whitespace-nowrap ${
                       active ? 'bg-white text-slate-900 shadow-sm' : 'text-white/85 hover:bg-white/10'

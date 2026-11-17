@@ -319,8 +319,44 @@ export function loadStudentAchievements(): StudentAchievementStats {
 export function saveStudentAchievements(stats: StudentAchievementStats): void {
   try {
     if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY_STUDENT_ACHIEVEMENTS, JSON.stringify(stats));
-      window.dispatchEvent(new CustomEvent('max10_achievements_updated', { detail: stats }));
+      let prevXp = 0;
+      try {
+        const existingRaw = localStorage.getItem(STORAGE_KEY_STUDENT_ACHIEVEMENTS);
+        if (existingRaw) {
+          const parsedPrev = JSON.parse(existingRaw);
+          prevXp = Number(parsedPrev?.totalXp || 0);
+        }
+      } catch {}
+
+      const prevLevelInfo = calculateLevel(prevXp);
+      const nextLevelInfo = calculateLevel(stats.totalXp || 0);
+      const normalizedStats: StudentAchievementStats = {
+        ...stats,
+        level: nextLevelInfo.level,
+        levelTitle: nextLevelInfo.title,
+        nextLevelXp: nextLevelInfo.nextLevelXp,
+      };
+
+      localStorage.setItem(STORAGE_KEY_STUDENT_ACHIEVEMENTS, JSON.stringify(normalizedStats));
+      window.dispatchEvent(new CustomEvent('max10_achievements_updated', { detail: normalizedStats }));
+
+      if (normalizedStats.totalXp > prevXp && nextLevelInfo.level > prevLevelInfo.level) {
+        window.dispatchEvent(
+          new CustomEvent('max10_level_up', {
+            detail: {
+              prevLevel: prevLevelInfo.level,
+              newLevel: nextLevelInfo.level,
+              title: nextLevelInfo.title,
+              totalXp: normalizedStats.totalXp,
+              isMaxLevel: nextLevelInfo.isMaxLevel,
+              isMilestoneLevel:
+                nextLevelInfo.isMaxLevel ||
+                nextLevelInfo.level % 10 === 0 ||
+                nextLevelInfo.level === 5,
+            },
+          })
+        );
+      }
     }
   } catch (e) {
     console.error('Error saving student achievements', e);
