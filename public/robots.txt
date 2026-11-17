@@ -10,4 +10,4 @@ Allow: /
 User-agent: *
 Allow: /
 
-Sitemap: https://ais-pre-vnf6pultt3mbsewyewcrws-816343972167.asia-east1.run.app/sitemap.xml
+Sitemap: https://vercel.app/sitemap.xml
