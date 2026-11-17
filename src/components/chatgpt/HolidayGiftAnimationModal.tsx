@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { X, Gift, Sparkles, Flower2, Check, RotateCw, Crown, Trophy } from 'lucide-react';
+import { X, Gift, Sparkles, Flower2, Check, RotateCw, Crown, Trophy, Volume2 } from 'lucide-react';
 import { celebrateMilestone, launchCanvasFireworks, launchGoldenStarBurst } from '../../utils/confettiFireworks';
 import { soundEffects } from '../../utils/soundEffects';
 import { loadStudentAchievements, saveStudentAchievements } from '../../data/initialAchievements';
 import { calculateLevel } from '../../types/achievements';
+import ronaldoSiuStadiumImg from '../../assets/images/ronaldo_siu_stadium_1794918922903.jpg';
 
 export type HolidayId = 'tet' | '08_03' | '20_10' | 'halloween' | '20_11' | 'noel';
 export type GiftRarity = 'mythic' | 'legendary' | 'super_rare' | 'rare' | 'common';
@@ -1179,7 +1180,7 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
 
         const endSiuTimer = window.setTimeout(() => {
           setShowRonaldoSiu(false);
-        }, 5600);
+        }, 6800);
         spinTimersRef.current.push(endSiuTimer);
       } else if (winningGift.rarity === 'legendary' || winningGift.rarity === 'super_rare') {
         celebrateMilestone();
@@ -1401,100 +1402,110 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
             drawnGift &&
             rarityConfig && (
               <div className="space-y-3">
-                {/* RONALDO "SIUUUUU" LONG MYTHIC CELEBRATION STAGE */}
+                {/* RONALDO "SIUUUUU" STADIUM & GRASS PITCH MYTHIC CELEBRATION STAGE */}
                 {drawnGift.rarity === 'mythic' && showRonaldoSiu && (
-                  <div className="relative overflow-hidden rounded-2xl border-2 border-amber-400 bg-gradient-to-br from-slate-950 via-rose-950/90 to-amber-950/90 p-5 text-center text-white shadow-[0_0_40px_rgba(245,158,11,0.55)]">
-                    {/* Stadium spotlight & golden shockwave rings */}
-                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                      <div className="w-36 h-36 rounded-full border-2 border-amber-400/60 animate-cr7-shockwave" />
-                      <div
-                        className="w-36 h-36 rounded-full border-2 border-rose-400/50 animate-cr7-shockwave"
-                        style={{ animationDelay: '0.5s' }}
+                  <div className="relative overflow-hidden rounded-2xl border-2 border-amber-400 bg-slate-950 text-white shadow-[0_0_45px_rgba(245,158,11,0.65)] animate-cr7-stadium">
+                    {/* Real Stadium Scene with Cristiano Ronaldo's Face, #7 Jersey & Grass Pitch */}
+                    <div className="relative h-56 sm:h-64 w-full overflow-hidden">
+                      <img
+                        src={ronaldoSiuStadiumImg}
+                        alt="Cristiano Ronaldo ăn mừng SIUUUU trên sân cỏ"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover object-center scale-105"
                       />
-                    </div>
 
-                    <div className="relative z-10 flex flex-col items-center space-y-2">
-                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-amber-400 to-rose-500 text-slate-950 text-[11px] font-black uppercase tracking-wider shadow-lg">
-                        <Trophy className="w-3.5 h-3.5" />
-                        <span>⚽ ĐỒ THẦN THOẠI 0,5% · ĂN MỪNG CR7</span>
+                      {/* Stadium Floodlight Beams */}
+                      <div
+                        className="pointer-events-none absolute -top-12 left-6 w-28 h-56 bg-gradient-to-b from-white/45 via-amber-200/15 to-transparent blur-xl origin-top animate-floodlight"
+                        aria-hidden="true"
+                      />
+                      <div
+                        className="pointer-events-none absolute -top-12 right-6 w-28 h-56 bg-gradient-to-b from-white/45 via-emerald-200/15 to-transparent blur-xl origin-top animate-floodlight"
+                        style={{ animationDelay: '1.1s' }}
+                        aria-hidden="true"
+                      />
+
+                      {/* Shockwave Rings around Ronaldo */}
+                      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                        <div className="w-40 h-40 rounded-full border-2 border-amber-400/70 animate-cr7-shockwave" />
+                        <div
+                          className="w-40 h-40 rounded-full border-2 border-emerald-400/60 animate-cr7-shockwave"
+                          style={{ animationDelay: '0.55s' }}
+                        />
                       </div>
 
-                      {/* Animated CR7 Jump-Spin-Spread Silhouette with #7 Jersey */}
-                      <div className="relative flex items-center justify-center py-2">
-                        <svg
-                          viewBox="0 0 180 150"
-                          className="w-36 h-28 drop-shadow-[0_0_18px_rgba(251,191,36,0.85)] animate-cr7-jump"
-                          aria-hidden="true"
+                      {/* Gradient Scrim for Crisp Text Contrast */}
+                      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-emerald-950 via-black/30 to-black/55" />
+
+                      {/* Top Mythic Badge + Replay SIUUUU Sound Button */}
+                      <div className="absolute top-3 left-3 right-3 z-20 flex flex-wrap items-center justify-between gap-2">
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-amber-400 to-rose-500 text-slate-950 text-[11px] font-black uppercase tracking-wider shadow-lg">
+                          <Trophy className="w-3.5 h-3.5" />
+                          <span>⚽ ĐỒ THẦN THOẠI 0,5% · RONALDO SIUUUU</span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => soundEffects.playRonaldoSiuCelebration()}
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/65 hover:bg-black/85 border border-amber-400/60 text-amber-300 text-[11px] font-extrabold backdrop-blur-sm transition-all cursor-pointer shadow-md"
+                          title="Phát lại tiếng Ronaldo SIUUUU trên sân cỏ"
                         >
-                          <circle cx="90" cy="75" r="54" fill="url(#cr7Aura)" opacity="0.45" />
-                          <defs>
-                            <radialGradient id="cr7Aura" cx="50%" cy="50%" r="50%">
-                              <stop offset="0%" stopColor="#fde047" />
-                              <stop offset="100%" stopColor="#f43f5e" stopOpacity="0" />
-                            </radialGradient>
-                          </defs>
-                          <circle cx="90" cy="26" r="12" fill="#facc15" stroke="#fff" strokeWidth="2" />
-                          <path
-                            d="M72 42 L108 42 L102 84 L78 84 Z"
-                            fill="#dc2626"
-                            stroke="#fde047"
-                            strokeWidth="2.5"
-                            strokeLinejoin="round"
-                          />
-                          <text
-                            x="90"
-                            y="70"
-                            textAnchor="middle"
-                            fill="#fef08a"
-                            fontSize="22"
-                            fontWeight="900"
-                            fontFamily="sans-serif"
-                          >
-                            7
-                          </text>
-                          <path
-                            d="M74 46 L26 80 L34 88 L78 58"
-                            fill="#facc15"
-                            stroke="#fff"
-                            strokeWidth="2"
-                            strokeLinejoin="round"
-                          />
-                          <path
-                            d="M106 46 L154 80 L146 88 L102 58"
-                            fill="#facc15"
-                            stroke="#fff"
-                            strokeWidth="2"
-                            strokeLinejoin="round"
-                          />
-                          <path
-                            d="M80 84 L54 134 L68 138 L88 92"
-                            fill="#1e293b"
-                            stroke="#fde047"
-                            strokeWidth="2"
-                            strokeLinejoin="round"
-                          />
-                          <path
-                            d="M100 84 L126 134 L112 138 L92 92"
-                            fill="#1e293b"
-                            stroke="#fde047"
-                            strokeWidth="2"
-                            strokeLinejoin="round"
-                          />
-                          <path d="M22 140 L158 140" stroke="#fde047" strokeWidth="3" strokeLinecap="round" strokeDasharray="6 6" />
-                        </svg>
+                          <Volume2 className="w-3.5 h-3.5" />
+                          <span>Nghe lại SIUUUU!</span>
+                        </button>
                       </div>
 
-                      {/* Long Stretching SIUUUUU Banner */}
-                      <div className="w-full overflow-hidden py-1">
-                        <div className="animate-cr7-siu-text font-black text-2xl sm:text-4xl italic tracking-widest bg-gradient-to-r from-amber-300 via-white to-rose-400 bg-clip-text text-transparent drop-shadow-[0_4px_16px_rgba(251,191,36,0.9)] select-none whitespace-nowrap">
+                      {/* Giant SIUUUUU Typography Overlay */}
+                      <div className="absolute bottom-2 inset-x-0 z-20 px-4 text-center">
+                        <div className="animate-cr7-siu-text font-black text-2xl sm:text-4xl italic tracking-widest bg-gradient-to-r from-amber-300 via-white to-emerald-300 bg-clip-text text-transparent drop-shadow-[0_4px_18px_rgba(0,0,0,0.95)] select-none whitespace-nowrap">
                           SIUUUUUUUUUUUU!!!
                         </div>
                       </div>
+                    </div>
 
-                      <p className="text-[11px] font-bold text-amber-200/95">
-                        🔥 Bùng nổ sân vận động! Bạn vừa quay trúng vật phẩm THẦN THOẠI hiếm nhất!
+                    {/* Vibrant Green Football Grass Pitch Foreground (Sân cỏ) */}
+                    <div
+                      className="relative px-4 py-3 border-t-2 border-white/80 text-center overflow-hidden"
+                      style={{
+                        background:
+                          'repeating-linear-gradient(90deg, #15803d 0px, #15803d 28px, #16a34a 28px, #16a34a 56px)',
+                      }}
+                    >
+                      {/* Center Pitch Circle & Halfway Line */}
+                      <div
+                        className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 rounded-full border-2 border-white/45"
+                        aria-hidden="true"
+                      />
+                      <div
+                        className="pointer-events-none absolute left-1/2 top-0 bottom-0 -translate-x-1/2 w-0.5 bg-white/45"
+                        aria-hidden="true"
+                      />
+
+                      <p className="relative z-10 text-xs font-black text-white drop-shadow-[0_1px_4px_rgba(0,0,0,0.85)]">
+                        🏟️ Bùng nổ sân cỏ cùng CR7! Bạn vừa quay trúng vật phẩm THẦN THOẠI hiếm nhất!
                       </p>
                     </div>
+                  </div>
+                )}
+
+                {/* Compact Replay Celebration Trigger after initial 6.8s showcase settles */}
+                {drawnGift.rarity === 'mythic' && !showRonaldoSiu && (
+                  <div className="flex items-center justify-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowRonaldoSiu(true);
+                        celebrateMilestone();
+                        launchGoldenStarBurst();
+                        soundEffects.playRonaldoSiuCelebration();
+                        const t = window.setTimeout(() => setShowRonaldoSiu(false), 6800);
+                        spinTimersRef.current.push(t);
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gradient-to-r from-emerald-600 to-amber-500 text-white text-xs font-black shadow-md hover:brightness-105 transition-all cursor-pointer"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>⚽ Xem &amp; Nghe lại Ronaldo SIUUUU trên sân cỏ!</span>
+                    </button>
                   </div>
                 )}
 

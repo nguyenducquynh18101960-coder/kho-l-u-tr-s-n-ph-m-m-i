@@ -2106,7 +2106,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
             {/* Footer text (ChatGPT Style) */}
             <p className="text-[10px] sm:text-[11px] text-center text-slate-400 dark:text-zinc-500 mt-1.5 select-none">
-              Max10 AI có thể mắc lỗi. Hãy kiểm tra các thông tin học tập quan trọng. ·{' '}
+              Max10 AI có thể mắc lỗi. Hãy kiểm tra lại các thông tin học tập quan trọng. ·{' '}
               <button
                 type="button"
                 onClick={onOpenOfferModal || onOpenNameModal}

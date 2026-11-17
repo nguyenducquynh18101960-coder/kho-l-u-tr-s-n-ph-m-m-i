@@ -315,4 +315,38 @@
   animation: cr7ScreenShake 1.2s ease-out;
 }
 
+@keyframes cr7StadiumPop {
+  0% {
+    transform: scale(0.86);
+    opacity: 0;
+  }
+  35% {
+    transform: scale(1.03);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes floodlightSweep {
+  0%, 100% {
+    opacity: 0.45;
+    transform: rotate(-8deg) scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: rotate(8deg) scale(1.06);
+  }
+}
+
+.animate-cr7-stadium {
+  animation: cr7StadiumPop 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-floodlight {
+  animation: floodlightSweep 2.6s ease-in-out infinite;
+}
+
 
