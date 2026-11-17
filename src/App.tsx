@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { GradeLevel, ChatSession, ChatMessage, SubjectInfo, UserPresenceStatus } from './types';
 import { BackgroundTheme, PRESET_THEMES, STORAGE_KEY_BG_THEME, STORAGE_KEY_VOICE_CALL } from './types/theme';
 import { UserAccount, STORAGE_KEY_AUTH_USER, isUserAdmin, STORAGE_KEY_USER_GENDER, saveAccountToHistory, MASTER_SECURITY_CODE } from './types/auth';
@@ -22,8 +22,8 @@ import { AIVoicePlayerBar } from './components/chatgpt/AIVoicePlayerBar';
 import { MessageNotificationBanner } from './components/chatgpt/MessageNotificationBanner';
 import { LevelUpCelebrationOverlay } from './components/chatgpt/LevelUpCelebrationOverlay';
 
-// Modals & Security Gate
-import { Max10SecurityVerification, getOrCreateDeviceId } from './components/chatgpt/Max10SecurityVerification';
+// Modals & Device Helper
+import { getOrCreateDeviceId } from './components/chatgpt/Max10SecurityVerification';
 import { Max10IntroSplash } from './components/chatgpt/Max10IntroSplash';
 import { OfferModal } from './components/chatgpt/OfferModal';
 import { ThemeBackgroundModal } from './components/chatgpt/ThemeBackgroundModal';
@@ -189,24 +189,8 @@ export function App() {
   // Auto-Update hook
   const { status: autoUpdateStatus, autoUpdateNotice, secondsUntilRefresh } = useAutoUpdate();
 
-  // Search engine crawler detection (Googlebot / Bingbot / Social scrapers bypass interstitials)
+  // Search engine crawler detection (Googlebot / Bingbot / Social scrapers)
   const isBotCrawler = useMemo(() => isSearchEngineBot(), []);
-
-  // Security Gate: bypass immediately for search bots, otherwise verify on first chat message
-  const [isSecurityVerified, setIsSecurityVerified] = useState<boolean>(() => {
-    if (isSearchEngineBot()) return true;
-    try {
-      return Boolean(sessionStorage.getItem('max10_security_session_token'));
-    } catch {
-      return false;
-    }
-  });
-  const [showSecurityGate, setShowSecurityGate] = useState<boolean>(false);
-  const pendingChatRef = useRef<{
-    text: string;
-    image?: { data: string; mimeType: string; previewUrl: string } | null;
-    isThinking?: boolean;
-  } | null>(null);
 
   // Modals
   // Show intro splash for human visitors; hide for search engine bots so Googlebot indexes homepage directly
@@ -341,8 +325,8 @@ export function App() {
     });
   };
 
-  // Execute chat request after security verification passes (or immediately if verified/crawler/admin)
-  const executeSendMessage = async (
+  // Send message directly to Max10 AI without any blocking security verification step
+  const handleSendMessage = async (
     text: string,
     image?: { data: string; mimeType: string; previewUrl: string } | null,
     isThinking?: boolean
@@ -416,28 +400,6 @@ export function App() {
     } finally {
       setChatLoading(false);
     }
-  };
-
-  // Send message to Max10 AI (triggers security verification only when human user sends a chat question)
-  const handleSendMessage = async (
-    text: string,
-    image?: { data: string; mimeType: string; previewUrl: string } | null,
-    isThinking?: boolean
-  ) => {
-    if ((!text || !text.trim()) && !image) return;
-
-    const ownerBypass =
-      isUserAdmin(currentUser) ||
-      (typeof window !== 'undefined' &&
-        sessionStorage.getItem('max10_master_security_verified') === 'true');
-
-    if (!isSecurityVerified && !isBotCrawler && !ownerBypass) {
-      pendingChatRef.current = { text, image, isThinking };
-      setShowSecurityGate(true);
-      return;
-    }
-
-    await executeSendMessage(text, image, isThinking);
   };
 
   // Regenerate last message
@@ -1207,35 +1169,9 @@ export function App() {
       </div>
 
       {/* Modals & Dialogs */}
-      {/* 0. Max10 Security Verification: only shown when user sends a chat question (bypassed for Googlebot/crawlers) */}
-      {showSecurityGate && !isSecurityVerified && !isBotCrawler && (
-        <Max10SecurityVerification
-          userId={currentUser?.id}
-          onVerified={() => {
-            setIsSecurityVerified(true);
-            setShowSecurityGate(false);
-            const queued = pendingChatRef.current;
-            pendingChatRef.current = null;
-            if (queued) {
-              void executeSendMessage(queued.text, queued.image, queued.isThinking);
-            }
-          }}
-          onBanned={(reason) => {
-            setShowSecurityGate(false);
-            pendingChatRef.current = null;
-            try {
-              localStorage.setItem('max10_permanently_banned', 'true');
-              localStorage.setItem('max10_ban_reason', reason);
-            } catch {}
-            setBanReason(reason);
-            setIsPermanentlyBanned(true);
-          }}
-        />
-      )}
-
       {/* 1. Max10 Intro Splash (hidden for search engine crawlers so homepage indexes directly) */}
       <Max10IntroSplash
-        isOpen={!isBotCrawler && !showSecurityGate && showIntroSplash}
+        isOpen={!isBotCrawler && showIntroSplash}
         onClose={() => setShowIntroSplash(false)}
         isDark={isDark}
         userName={userName}
@@ -1370,7 +1306,7 @@ export function App() {
 
       {/* 12. Holiday Flower & Random Gift Spin Modal (8/3, 20/10, 20/11) */}
       <HolidayGiftAnimationModal
-        isOpen={!isBotCrawler && !showSecurityGate && showHolidayGiftModal}
+        isOpen={!isBotCrawler && showHolidayGiftModal}
         onClose={() => setShowHolidayGiftModal(false)}
         userName={currentUser?.name || userName}
         isTeacher={currentUser?.role === 'teacher'}
@@ -1385,7 +1321,7 @@ export function App() {
       <LevelUpCelebrationOverlay
         userName={currentUser?.name || userName}
         isDark={isDark}
-        enabled={!isBotCrawler && !showSecurityGate}
+        enabled={!isBotCrawler}
       />
     </div>
   );
