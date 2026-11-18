@@ -101,7 +101,7 @@ export function useAutoUpdate() {
                   senderAvatar: 'https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy',
                   recipientId: 'all_broadcast',
                   content:
-                    '📢 [THÔNG BÁO TỰ ĐỘNG - CẬP NHẬT ỨNG DỤNG]\nQuản trị viên Mạc Khánh Duy vừa phát hành bản cập nhật mới nhất cho hệ thống Max10 AI!\n✨ Tính năng mới: "Thông báo học tập" - Gửi thông báo đẩy và nhắc nhở trong ứng dụng 30 phút trước lịch kiểm tra hoặc hạn nộp bài tập đã lưu.\n📅 Tab "Lịch học cá nhân" & 🏆 "Bảng xếp hạng lớp học" trong tab Thành tích giúp bạn thi đua cùng bạn bè.\nChúc bạn học tập đạt trọn vẹn Điểm 10!',
+                    '📢 [CẬP NHẬT MỚI TỪ MAX10 AI - PHIÊN BẢN STUDY HUB]\n🚀 Max10 AI vừa nâng cấp toàn diện giao diện & tính năng học tập thông minh:\n✨ Không gian Study Hub 3 vùng gọn gàng: Gia sư AI, Cộng đồng & Chat, Kho Luyện Tập (hỗ trợ làm đề Offline), Công cụ AI & Lịch học.\n🎥 Gọi Video & Thoại dùng Camera & Micro thật, tự động hiện ảnh đại diện khi tắt cam và hộp thoại nhận/từ chối cuộc gọi tức thì.\n💬 Nhắn tin, trả lời trích dẫn và gọi @Max10 AI giải bài ngay trong nhóm lẫn chat 1-1.\nChúc các bạn học tập hiệu quả và chinh phục Điểm 10!',
                   timestamp: exactTimeStr,
                   createdAt: publishTime,
                   isAdminUpdate: true,

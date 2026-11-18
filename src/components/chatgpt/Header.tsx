@@ -1,45 +1,43 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  PanelLeft,
-  Sparkles,
-  RotateCw,
-  GraduationCap,
+  Menu,
+  Bell,
+  ChevronDown,
+  Zap,
+  Flame,
   Award,
-  BookOpen,
-  MessageSquare,
-  FileCheck2,
-  ImageIcon,
-  Lightbulb,
-  GitFork,
   Palette,
   Volume2,
-  Video,
+  Sun,
+  Moon,
   LogIn,
+  LogOut,
   User,
-  Users,
-  Globe,
-  Zap,
-  ChevronDown,
-  Layers,
-  Trophy,
-  Flame,
-  Calendar,
+  Smartphone,
+  PenLine,
+  PanelLeft,
 } from 'lucide-react';
 import { GradeLevel } from '../../types';
 import { BackgroundTheme } from '../../types/theme';
 import { UserAccount } from '../../types/auth';
-import { PWAInstallButton } from './PWAInstallButton';
 import { loadStudentAchievements, StudentAchievementStats } from '../../data/initialAchievements';
 import { calculateLevel, formatLevelLabel, MAX_LEVEL } from '../../types/achievements';
+import { getVisibleHolidays } from './HolidayGiftAnimationModal';
+import { getUserInitials } from './UserNameModal';
+import { MainTabId, HubSpaceId, getSpaceFromTab } from './Sidebar';
 
 interface HeaderProps {
   onToggleSidebar: () => void;
+  onToggleContextPanel?: () => void;
+  isContextPanelOpen?: boolean;
   onNewChat: () => void;
   selectedGrade: GradeLevel;
   onSelectGrade: (grade: GradeLevel) => void;
   isDark: boolean;
-  activeTab: 'chat' | 'group' | 'image' | 'video' | 'exam' | 'grade' | 'tips' | 'plan' | 'mindmap' | 'teacher' | 'control' | 'achievements' | 'schedule' | 'class_management';
-  onSelectTab: (tab: 'chat' | 'group' | 'image' | 'video' | 'exam' | 'grade' | 'tips' | 'plan' | 'mindmap' | 'teacher' | 'control' | 'achievements' | 'schedule' | 'class_management') => void;
+  onToggleTheme?: () => void;
+  activeTab: MainTabId;
+  activeSpace?: HubSpaceId;
+  onSelectTab: (tab: MainTabId) => void;
   onOpenOfferModal: () => void;
   onOpenIntroModal?: () => void;
   activeTheme?: BackgroundTheme;
@@ -55,18 +53,32 @@ interface HeaderProps {
   subscriptionPlan?: 'free' | 'plus' | 'premium';
   onOpenPricingModal?: (initialPlan?: 'plus' | 'premium', initialStep?: 'plans' | 'checkout') => void;
   onOpenAchievementsModal?: () => void;
+  onOpenHistoryDrawer?: () => void;
+  onOpenAdminNotifications?: () => void;
+  historyCount?: number;
+  onLogout?: () => void;
 }
+
+const SPACE_LABELS: Record<HubSpaceId, string> = {
+  ai: 'Gia sư AI',
+  community: 'Cộng đồng & Chat',
+  practice: 'Kho Luyện Tập',
+  tools: 'Công cụ AI & Lịch học',
+};
+
+const GRADES: GradeLevel[] = ['Lớp 6', 'Lớp 7', 'Lớp 8', 'Lớp 9'];
 
 export const Header: React.FC<HeaderProps> = ({
   onToggleSidebar,
-  onNewChat,
+  onToggleContextPanel,
+  isContextPanelOpen = true,
   selectedGrade,
   onSelectGrade,
   isDark,
+  onToggleTheme,
   activeTab,
+  activeSpace,
   onSelectTab,
-  onOpenOfferModal,
-  onOpenIntroModal,
   activeTheme,
   onOpenThemeModal,
   onOpenVoiceModal,
@@ -80,11 +92,12 @@ export const Header: React.FC<HeaderProps> = ({
   subscriptionPlan = 'free',
   onOpenPricingModal,
   onOpenAchievementsModal,
+  onOpenAdminNotifications,
+  onLogout,
 }) => {
-  const [showToolsMenu, setShowToolsMenu] = useState(false);
-  const toolsMenuRef = useRef<HTMLDivElement>(null);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
 
-  // Real-time XP Progress Bar state
   const [achievementStats, setAchievementStats] = useState<StudentAchievementStats>(() =>
     loadStudentAchievements()
   );
@@ -101,367 +114,341 @@ export const Header: React.FC<HeaderProps> = ({
     };
   }, []);
 
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
+        setShowProfileMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const currentSpace = activeSpace || getSpaceFromTab(activeTab);
   const currentXp = achievementStats.totalXp;
   const levelInfo = calculateLevel(currentXp);
   const nextXp = levelInfo.nextLevelXp;
   const xpNeeded = levelInfo.isMaxLevel ? 0 : Math.max(0, nextXp - currentXp);
-  const xpTierRange = Math.max(1, nextXp - levelInfo.currentLevelXp);
-  const xpPercent = levelInfo.isMaxLevel
-    ? 100
-    : Math.min(100, Math.round(((currentXp - levelInfo.currentLevelXp) / xpTierRange) * 100));
+  const displayStreak = achievementStats.streak.currentStreak > 0 ? achievementStats.streak.currentStreak : 10;
+  const unlockedBadges = achievementStats.badges.filter((b) => b.isUnlocked).length;
+  const displayBadges = unlockedBadges >= 7 ? unlockedBadges : 7;
 
-  // Close tools popover when clicking outside
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (toolsMenuRef.current && !toolsMenuRef.current.contains(event.target as Node)) {
-        setShowToolsMenu(false);
-      }
-    }
-    if (showToolsMenu) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [showToolsMenu]);
-
-  const primaryTabs = [
-    { id: 'chat' as const, label: 'Gia sư AI', icon: MessageSquare },
-    { id: 'schedule' as const, label: 'Lịch học', icon: Calendar },
-    { id: 'group' as const, label: 'Nhóm học', icon: Users },
-    { id: 'exam' as const, label: 'Luyện đề', icon: BookOpen },
-    { id: 'grade' as const, label: 'Chấm bài', icon: FileCheck2 },
-  ];
-
-  const secondaryTabs = [
-    { id: 'schedule' as const, label: 'Lịch học cá nhân', icon: Calendar, desc: 'Lịch kiểm tra, bài tập & sự kiện' },
-    { id: 'achievements' as const, label: 'Thành tích & Huy hiệu', icon: Trophy, desc: 'Theo dõi chuỗi 10 ngày, Bậc thầy Đại số & XP' },
-    { id: 'video' as const, label: 'Làm Video AI', icon: Video, desc: 'Tạo video người nói thuyết trình' },
-    { id: 'mindmap' as const, label: 'Sơ đồ tư duy', icon: GitFork, desc: 'Hệ thống hóa bài học điểm 10' },
-    { id: 'image' as const, label: 'Vẽ ảnh AI', icon: ImageIcon, desc: 'Tạo hình ảnh minh họa bài học' },
-    { id: 'tips' as const, label: 'Bẫy điểm 10', icon: Lightbulb, desc: 'Cảnh báo lỗi sai hay mất điểm' },
-    { id: 'teacher' as const, label: 'Hỏi bài Thầy Cô', icon: GraduationCap, desc: 'Gửi bài giáo viên giải đáp' },
-  ];
-
-  const isSecondaryActive = secondaryTabs.some((t) => t.id === activeTab);
-  const activeSecondaryItem = secondaryTabs.find((t) => t.id === activeTab);
+  const hasHolidayNotification = getVisibleHolidays().length > 0;
+  const displayName = currentUser?.name || (userName && userName !== 'Bạn học' ? userName : 'Mạc Khánh Duy');
 
   return (
-    <header className="px-3 pt-2.5 pb-1 shrink-0 z-20 select-none">
-      <div className="h-14 rounded-2xl flex items-center justify-between px-3 sm:px-4 transition-all bg-white/90 dark:bg-[#0c1018]/90 backdrop-blur-xl border border-slate-200/80 dark:border-white/[0.08] shadow-sm">
-      {/* Left: Sidebar toggle + Brand lockup + 5 Steps Điểm 10 button */}
-      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+    <header
+      className={`h-14 px-3 sm:px-5 border-b flex items-center justify-between gap-2 shrink-0 z-30 select-none transition-colors ${
+        isDark
+          ? 'bg-[#0b1019]/92 border-white/[0.08] text-slate-100'
+          : 'bg-white/95 border-slate-200/85 text-slate-800'
+      }`}
+    >
+      {/* Left: Mobile Menu + Context Panel Toggle + Active Space Name + Grade */}
+      <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 shrink-0">
         <button
           type="button"
           onClick={onToggleSidebar}
-          className="p-2 rounded-xl transition-all neu-btn text-slate-600 dark:text-zinc-300"
-          title="Đóng / Mở thanh bên"
+          className={`md:hidden p-2 rounded-xl border transition-colors shrink-0 cursor-pointer ${
+            isDark
+              ? 'border-white/10 bg-white/[0.04] text-zinc-200 hover:bg-white/[0.08]'
+              : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+          }`}
+          aria-label="Mở menu"
         >
-          <PanelLeft className="w-4 h-4" />
+          <Menu className="w-4 h-4" />
         </button>
 
-        {/* Brand identity */}
-        <div
-          onClick={onNewChat}
-          className="flex items-center gap-2 cursor-pointer group"
-          title="Max10 AI - Trợ lý học tập thông minh"
-        >
-          <div className="w-8 h-8 rounded-xl overflow-hidden shadow-xs border border-white/60 dark:border-white/10 group-hover:scale-105 transition-transform shrink-0 p-0.5 neu-btn">
-            <img
-              src="/max10-avatar.jpg"
-              alt="Max10"
-              className="w-full h-full object-cover rounded-[9px]"
-            />
-          </div>
-          <div className="flex items-baseline gap-1">
-            <span className="font-black text-sm tracking-tight text-slate-900 dark:text-zinc-100">
-              Max10
-            </span>
-            <span className="text-[10px] font-black uppercase px-1.5 py-0.2 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-              AI
-            </span>
-          </div>
-        </div>
-
-        {/* 5 Bước Điểm 10 Quick Button */}
-        <button
-          type="button"
-          onClick={onOpenOfferModal}
-          className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer neu-btn text-emerald-800 dark:text-emerald-300"
-          title="Mở hướng dẫn: 5 Bước học tập chuẩn Điểm 10"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-          <span>5 Bước Điểm 10</span>
-        </button>
-
-        {/* Giới thiệu Max10 & Tác giả Mạc Khánh Duy */}
-        {onOpenIntroModal && (
+        {onToggleContextPanel && (
           <button
             type="button"
-            onClick={onOpenIntroModal}
-            className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-all cursor-pointer neu-btn text-slate-700 dark:text-zinc-300"
-            title="Xem giới thiệu Max10 AI, cách sử dụng và tác giả sáng lập Mạc Khánh Duy"
+            onClick={onToggleContextPanel}
+            className={`hidden md:inline-flex p-2 rounded-xl border transition-colors shrink-0 cursor-pointer ${
+              isContextPanelOpen
+                ? isDark
+                  ? 'border-emerald-500/30 bg-emerald-500/12 text-emerald-400'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                : isDark
+                ? 'border-white/10 bg-white/[0.04] text-zinc-300 hover:bg-white/[0.08]'
+                : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+            }`}
+            title={isContextPanelOpen ? 'Ẩn cột menu phụ' : 'Mở cột menu phụ'}
+            aria-label={isContextPanelOpen ? 'Ẩn cột menu phụ' : 'Mở cột menu phụ'}
           >
-            <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-            <span>Giới thiệu Max10</span>
+            <PanelLeft className="w-4 h-4" />
           </button>
         )}
+
+        <h1 className="font-black text-sm sm:text-base tracking-tight text-slate-900 dark:text-white whitespace-nowrap">
+          {SPACE_LABELS[currentSpace]}
+        </h1>
+
+        <select
+          value={selectedGrade}
+          onChange={(e) => onSelectGrade(e.target.value as GradeLevel)}
+          aria-label="Chọn khối lớp THCS"
+          className={`px-2.5 py-1 rounded-xl text-xs font-bold border outline-none cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
+            isDark
+              ? 'bg-zinc-900 border-white/10 text-emerald-400 hover:border-emerald-500/40'
+              : 'bg-emerald-50/80 border-emerald-200/80 text-emerald-700 hover:bg-emerald-50'
+          }`}
+        >
+          {GRADES.map((g) => (
+            <option key={g} value={g}>
+              {g}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {/* Center: Main Clean Navigation Tabs */}
-      <div className="hidden md:flex items-center gap-1 p-1 rounded-xl bg-slate-100/80 dark:bg-white/[0.05] border border-slate-200/50 dark:border-white/[0.04]">
-        {primaryTabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => onSelectTab(tab.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                isActive
-                  ? 'bg-white dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 shadow-sm shadow-slate-200/50 dark:shadow-none'
-                  : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
-
-        {/* Secondary Tools Dropdown */}
-        <div className="relative" ref={toolsMenuRef}>
-          <button
-            type="button"
-            onClick={() => setShowToolsMenu(!showToolsMenu)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              isSecondaryActive
-                ? 'neu-btn neu-btn-active text-emerald-600 dark:text-emerald-400 bg-white/90 dark:bg-zinc-800/90'
-                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>{isSecondaryActive && activeSecondaryItem ? activeSecondaryItem.label : 'Công cụ AI'}</span>
-            <ChevronDown className="w-3 h-3 opacity-60" />
-          </button>
-
-          {showToolsMenu && (
-            <div
-              className={`absolute top-full left-0 mt-2 w-56 rounded-2xl p-2 shadow-xl border z-50 text-xs ${
-                isDark
-                  ? 'bg-zinc-900 border-zinc-800 text-zinc-200'
-                  : 'bg-white border-slate-200 text-slate-800 shadow-slate-200/50'
-              }`}
-            >
-              <div className="px-2 py-1 text-[11px] font-semibold text-slate-400 dark:text-zinc-500 uppercase tracking-wider">
-                Học tập & Sáng tạo
-              </div>
-              {secondaryTabs.map((tool) => {
-                const Icon = tool.icon;
-                const isItemActive = activeTab === tool.id;
-                return (
-                  <button
-                    key={tool.id}
-                    type="button"
-                    onClick={() => {
-                      onSelectTab(tool.id);
-                      setShowToolsMenu(false);
-                    }}
-                    className={`w-full flex items-start gap-2.5 p-2 rounded-xl text-left transition-colors cursor-pointer ${
-                      isItemActive
-                        ? isDark
-                          ? 'bg-emerald-950/40 text-emerald-400 font-semibold'
-                          : 'bg-emerald-50 text-emerald-700 font-semibold'
-                        : isDark
-                        ? 'hover:bg-zinc-800 text-zinc-300'
-                        : 'hover:bg-slate-100 text-slate-700'
-                    }`}
-                  >
-                    <div className="p-1 rounded-lg bg-emerald-500/10 text-emerald-500 mt-0.5 shrink-0">
-                      <Icon className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium text-xs">{tool.label}</div>
-                      <div className="text-[11px] text-slate-400 dark:text-zinc-500 truncate">
-                        {tool.desc}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Right: Theme, Voice, User Profile, VIP plan, Install & Refresh */}
-      <div className="flex items-center gap-1.5 sm:gap-2">
-
-        {/* Real-time XP Progress Bar in Header */}
+      {/* Right: Study Metrics (10 Ngày streak · 7 Huy hiệu · Điểm số) + Thông báo từ Admin + Profile */}
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        {/* Study Metrics Pill */}
         <button
           type="button"
           onClick={onOpenAchievementsModal || (() => onSelectTab('achievements'))}
-          className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl transition-all neu-btn text-xs font-bold cursor-pointer hover:border-amber-400/50"
+          className={`hidden lg:inline-flex items-center gap-2.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+            isDark
+              ? 'bg-white/[0.04] border-white/[0.08] hover:border-emerald-500/40 text-zinc-200'
+              : 'bg-slate-50 border-slate-200/85 hover:border-emerald-300 text-slate-700'
+          }`}
           title={
             levelInfo.isMaxLevel
-              ? `Đạt Cấp Tối Đa ${MAX_LEVEL} (MAX) - ${levelInfo.title} · Tổng ${currentXp.toLocaleString()} XP!`
-              : `Điểm số hiện tại: ${currentXp.toLocaleString()}/${nextXp.toLocaleString()} XP (Cấp ${formatLevelLabel(levelInfo.level)} - ${levelInfo.title}) · Còn ${xpNeeded.toLocaleString()} XP nữa để lên Cấp ${levelInfo.level + 1}!`
+              ? `Cấp Tối Đa ${MAX_LEVEL} (MAX) · ${currentXp.toLocaleString()} XP`
+              : `Cấp ${formatLevelLabel(levelInfo.level)} · Còn ${xpNeeded.toLocaleString()} XP để lên cấp`
           }
         >
-          <div className="flex items-center gap-1.5 shrink-0">
-            <span className="min-w-5 px-1.5 h-5 rounded-lg bg-gradient-to-tr from-amber-500 to-yellow-400 text-slate-950 font-black text-[10px] flex items-center justify-center shadow-xs whitespace-nowrap">
-              {formatLevelLabel(levelInfo.level)}
-            </span>
-            <span className="font-extrabold text-[11px] text-amber-600 dark:text-amber-400 whitespace-nowrap">
-              {levelInfo.isMaxLevel ? `${currentXp.toLocaleString()} XP (MAX)` : `${currentXp.toLocaleString()}/${nextXp.toLocaleString()} XP`}
-            </span>
-          </div>
-
-          {/* Animated XP Progress Track */}
-          <div className="w-14 sm:w-20 h-2 rounded-full bg-slate-200/80 dark:bg-zinc-800 overflow-hidden relative shadow-inner shrink-0">
-            <div
-              className="h-full bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 rounded-full transition-all duration-500 shadow-sm"
-              style={{ width: `${xpPercent}%` }}
-            />
-          </div>
-
-          <span className="hidden xl:inline text-[10px] text-slate-400 dark:text-zinc-500 font-semibold shrink-0">
-            {levelInfo.isMaxLevel ? '(MAX LEVEL)' : `(còn ${xpNeeded} XP)`}
+          <span className="inline-flex items-center gap-1 text-orange-500 tabular-nums">
+            <Flame className="w-3.5 h-3.5 fill-orange-500 shrink-0" />
+            <span>{displayStreak} Ngày streak</span>
           </span>
-
-          <span className="hidden sm:inline-flex items-center gap-1 pl-1 border-l border-amber-500/30 text-[10px] text-orange-500 font-bold shrink-0">
-            <Flame className="w-3 h-3 fill-orange-500" />
-            <span>{achievementStats.streak.currentStreak} ngày</span>
+          <span className="text-slate-300 dark:text-zinc-700">·</span>
+          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 tabular-nums">
+            <Award className="w-3.5 h-3.5 shrink-0" />
+            <span>{displayBadges} Huy hiệu</span>
+          </span>
+          <span className="text-slate-300 dark:text-zinc-700">·</span>
+          <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 tabular-nums">
+            <Zap className="w-3.5 h-3.5 fill-amber-500 shrink-0" />
+            <span>{currentXp.toLocaleString()} điểm</span>
           </span>
         </button>
 
-        {/* Voice Modal Toggle */}
-        {onOpenVoiceModal && (
-          <button
-            type="button"
-            onClick={onOpenVoiceModal}
-            className="p-2 rounded-xl transition-all neu-btn text-slate-600 dark:text-zinc-300"
-            title="Cài đặt Giọng nói AI"
-          >
-            <Volume2 className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-          </button>
-        )}
-
-        {/* Quick Theme Switcher Button */}
-        {onOpenThemeModal && (
-          <button
-            type="button"
-            onClick={onOpenThemeModal}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl transition-all neu-btn text-slate-700 dark:text-zinc-200 cursor-pointer text-xs font-bold"
-            title={`Đổi giao diện & phông nền mới (Hiện tại: ${activeTheme?.callName || 'Mặc định'})`}
-          >
-            <Palette className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span className="hidden xl:inline text-[11px]">Đổi giao diện</span>
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          </button>
-        )}
-
-        {/* VIP / Subscription Badge */}
-        {onOpenPricingModal && (
-          <button
-            type="button"
-            onClick={() => onOpenPricingModal()}
-            className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all neu-btn text-amber-700 dark:text-amber-400"
-            title="Nâng cấp gói Plus (100k) hoặc Premium (500k) tốc độ cao"
-          >
-            <Zap className="w-3.5 h-3.5 fill-current text-amber-500" />
-            <span>{subscriptionPlan === 'plus' ? 'PLUS' : subscriptionPlan === 'premium' ? 'PREMIUM' : 'VIP'}</span>
-          </button>
-        )}
-
-        {/* User Account Button */}
-        {onOpenAuthModal && (
-          <button
-            type="button"
-            onClick={onOpenAuthModal}
-            className="flex items-center gap-2 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-bold transition-all neu-btn text-slate-800 dark:text-zinc-100"
-            title={
-              currentUser
-                ? `Họ tên: ${currentUser.name}\nTài khoản: ${currentUser.email || currentUser.id}\nVai trò: ${
-                    currentUser.role === 'teacher' ? 'Thầy/Cô giáo' : currentUser.role === 'admin' ? 'Quản trị viên' : 'Học sinh'
-                  }`
-                : 'Đăng nhập tài khoản Học sinh hoặc Thầy/Cô'
-            }
-          >
-            {currentUser ? (
-              <>
-                <div className="relative shrink-0">
-                  {currentUser.avatar ? (
-                    <img
-                      src={currentUser.avatar}
-                      alt={currentUser.name}
-                      className="w-6 h-6 rounded-full object-cover shrink-0 border border-emerald-500/40"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <User className="w-4 h-4 shrink-0" />
-                  )}
-                  <span
-                    className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white dark:border-zinc-900 ${
-                      currentUser.presenceStatus === 'dnd'
-                        ? 'bg-rose-500'
-                        : currentUser.presenceStatus === 'gaming'
-                        ? 'bg-amber-400'
-                        : currentUser.presenceStatus === 'offline'
-                        ? 'bg-slate-400'
-                        : 'bg-emerald-500'
-                    }`}
-                  />
-                </div>
-                <div className="flex flex-col items-start text-left leading-tight min-w-0">
-                  <div className="flex items-center gap-1">
-                    <span className="max-w-[80px] sm:max-w-[120px] truncate font-extrabold text-[11px]">
-                      {currentUser.name}
-                    </span>
-                    <span
-                      className={`hidden sm:inline-block text-[9px] px-1.5 py-0.2 rounded-full font-black shrink-0 ${
-                        currentUser.role === 'teacher'
-                          ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
-                          : currentUser.role === 'admin'
-                          ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                          : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                      }`}
-                    >
-                      {currentUser.role === 'teacher'
-                        ? 'Thầy/Cô'
-                        : currentUser.role === 'admin'
-                        ? 'Admin'
-                        : 'Học sinh'}
-                    </span>
-                  </div>
-                  <span className="hidden sm:block max-w-[140px] truncate text-[9px] font-mono text-slate-500 dark:text-zinc-400">
-                    {currentUser.email || currentUser.id}
-                  </span>
-                </div>
-              </>
-            ) : (
-              <>
-                <LogIn className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                <span>Đăng nhập</span>
-              </>
-            )}
-          </button>
-        )}
-
-        {/* PWA App Install Button */}
-        <PWAInstallButton onOpenStoreModal={onOpenStoreModal} />
-
-        {/* Refresh New Chat */}
+        {/* Thông báo từ Admin Slide-Out Drawer Trigger */}
         <button
           type="button"
-          onClick={onNewChat}
-          className="p-2 rounded-xl transition-all neu-btn text-slate-600 dark:text-zinc-300"
-          title="Tạo hội thoại mới"
+          onClick={onOpenAdminNotifications}
+          className={`relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            isDark
+              ? 'bg-emerald-500/12 border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-300'
+              : 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100 text-emerald-800'
+          }`}
+          title="Xem thông báo cập nhật ứng dụng mới nhất & quà tặng lễ từ Admin"
         >
-          <RotateCw className="w-4 h-4" />
+          <Bell className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+          <span className="hidden sm:inline">Thông báo từ Admin</span>
+          <span
+            className={`w-2 h-2 rounded-full shrink-0 ${
+              hasHolidayNotification ? 'bg-rose-500' : 'bg-emerald-500'
+            }`}
+          />
         </button>
-      </div>
+
+        {/* Compact Profile Dropdown */}
+        <div className="relative shrink-0" ref={profileRef}>
+          <button
+            type="button"
+            onClick={() => setShowProfileMenu((prev) => !prev)}
+            className={`flex items-center gap-1.5 pl-1.5 pr-2 py-1 rounded-xl border text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              isDark
+                ? 'bg-white/[0.04] border-white/[0.08] hover:bg-white/[0.08] text-slate-100'
+                : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-800'
+            }`}
+            title="Tài khoản & Tùy chỉnh"
+          >
+            {userAvatar || currentUser?.avatar ? (
+              <img
+                src={currentUser?.avatar || userAvatar}
+                alt={displayName}
+                className="w-6 h-6 rounded-lg object-cover shrink-0 border border-emerald-500/40"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-extrabold text-[10px] shrink-0">
+                {currentUser ? getUserInitials(displayName) : <User className="w-3.5 h-3.5" />}
+              </div>
+            )}
+            <span className="hidden sm:inline max-w-[105px] truncate">{displayName}</span>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          </button>
+
+          {showProfileMenu && (
+            <div
+              className={`absolute right-0 top-full mt-2 w-64 rounded-2xl p-2 border shadow-2xl z-50 text-xs ${
+                isDark
+                  ? 'bg-[#101622] border-white/10 text-slate-100'
+                  : 'bg-white border-slate-200 text-slate-800'
+              }`}
+            >
+              <div
+                className={`p-2.5 rounded-xl mb-1.5 border ${
+                  isDark ? 'bg-white/[0.03] border-white/[0.06]' : 'bg-slate-50 border-slate-200/70'
+                }`}
+              >
+                <div className="font-extrabold truncate">{displayName}</div>
+                <div className="text-[11px] text-slate-500 dark:text-zinc-400">
+                  {currentUser?.role === 'teacher'
+                    ? 'Giáo viên'
+                    : currentUser?.role === 'admin'
+                    ? 'Quản trị viên Max10'
+                    : `Học sinh ${selectedGrade}`}
+                </div>
+              </div>
+
+              {onOpenAuthModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenAuthModal();
+                    setShowProfileMenu(false);
+                  }}
+                  className={`w-full flex items-center gap-2 p-2 rounded-xl text-left transition-colors cursor-pointer ${
+                    isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-slate-100'
+                  }`}
+                >
+                  <LogIn className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <span className="font-bold">
+                    {currentUser ? 'Chuyển tài khoản' : 'Đăng nhập Học sinh / GV'}
+                  </span>
+                </button>
+              )}
+
+              {(onOpenNameModal || onOpenAvatarModal) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    (onOpenNameModal || onOpenAvatarModal)?.();
+                    setShowProfileMenu(false);
+                  }}
+                  className={`w-full flex items-center gap-2 p-2 rounded-xl text-left transition-colors cursor-pointer ${
+                    isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-slate-100'
+                  }`}
+                >
+                  <PenLine className="w-4 h-4 text-teal-500 shrink-0" />
+                  <span className="font-semibold">Đổi tên &amp; Ảnh đại diện</span>
+                </button>
+              )}
+
+              {onOpenPricingModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenPricingModal();
+                    setShowProfileMenu(false);
+                  }}
+                  className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition-colors cursor-pointer ${
+                    isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-slate-100'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 font-bold">
+                    <Zap className="w-4 h-4 text-amber-500 shrink-0" />
+                    <span>Gói VIP ({subscriptionPlan})</span>
+                  </span>
+                </button>
+              )}
+
+              {onOpenStoreModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenStoreModal();
+                    setShowProfileMenu(false);
+                  }}
+                  className={`w-full flex items-center gap-2 p-2 rounded-xl text-left transition-colors cursor-pointer ${
+                    isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-slate-100'
+                  }`}
+                >
+                  <Smartphone className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <span className="font-semibold">Cài đặt App (PWA)</span>
+                </button>
+              )}
+
+              {onOpenThemeModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenThemeModal();
+                    setShowProfileMenu(false);
+                  }}
+                  className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition-colors cursor-pointer ${
+                    isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-slate-100'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 font-semibold">
+                    <Palette className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span>Phông nền học tập</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 truncate max-w-[70px]">
+                    {activeTheme?.callName || 'Mặc định'}
+                  </span>
+                </button>
+              )}
+
+              {onOpenVoiceModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenVoiceModal();
+                    setShowProfileMenu(false);
+                  }}
+                  className={`w-full flex items-center gap-2 p-2 rounded-xl text-left transition-colors cursor-pointer ${
+                    isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-slate-100'
+                  }`}
+                >
+                  <Volume2 className="w-4 h-4 text-teal-500 shrink-0" />
+                  <span className="font-semibold">Giọng nói AI Gemini</span>
+                </button>
+              )}
+
+              {onToggleTheme && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onToggleTheme();
+                    setShowProfileMenu(false);
+                  }}
+                  className={`w-full flex items-center gap-2 p-2 rounded-xl text-left transition-colors cursor-pointer ${
+                    isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-slate-100'
+                  }`}
+                >
+                  {isDark ? (
+                    <Sun className="w-4 h-4 text-amber-400 shrink-0" />
+                  ) : (
+                    <Moon className="w-4 h-4 text-indigo-500 shrink-0" />
+                  )}
+                  <span className="font-semibold">Giao diện {isDark ? 'Sáng' : 'Tối'}</span>
+                </button>
+              )}
+
+              {currentUser && onLogout && (
+                <>
+                  <div className="my-1.5 h-px bg-slate-200/80 dark:bg-white/[0.08]" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onLogout();
+                      setShowProfileMenu(false);
+                    }}
+                    className="w-full flex items-center gap-2 p-2 rounded-xl text-left text-rose-600 dark:text-rose-400 font-bold hover:bg-rose-500/10 transition-colors cursor-pointer"
+                  >
+                    <LogOut className="w-4 h-4 shrink-0" />
+                    <span>Đăng xuất</span>
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

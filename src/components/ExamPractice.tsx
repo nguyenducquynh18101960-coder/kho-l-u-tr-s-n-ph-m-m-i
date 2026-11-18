@@ -7,26 +7,26 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
-  HelpCircle,
   Award,
   RefreshCw,
   ArrowRight,
   Sparkles,
-  ChevronRight,
   ShieldCheck,
   Trophy,
-  Crown,
   BookOpen,
   Plus,
   UploadCloud,
   GraduationCap,
-  Filter,
   Trash2,
   Users,
-  BarChart3,
   Download,
   Eye,
   X,
+  Wifi,
+  WifiOff,
+  Database,
+  Shuffle,
+  BookmarkCheck,
 } from 'lucide-react';
 import { HonorRollLeaderboard } from './HonorRollLeaderboard';
 import { awardStudentActivity } from '../data/initialAchievements';
@@ -42,6 +42,19 @@ import {
   fetchClassExamResourcesFromServer,
   incrementExamResourceDownload,
 } from '../data/classSystemData';
+import {
+  CachedExamEntry,
+  PendingHonorRollSubmission,
+  loadCachedExams,
+  saveCachedExam,
+  deleteCachedExam,
+  updateCachedExamResult,
+  buildOfflineMixedQuiz,
+  loadPendingHonorRoll,
+  queuePendingHonorRoll,
+  removePendingHonorRoll,
+} from '../data/offlineExamBank';
+import { safeParseJson } from '../utils/safeFetchJson';
 
 interface ExamPracticeProps {
   currentGrade: GradeLevel;
@@ -88,7 +101,50 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
   const [activeQuestionIdx, setActiveQuestionIdx] = useState<number>(0);
 
+  // Offline Quiz Mode state & cached exam question bank
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+  const [offlineMode, setOfflineMode] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? !navigator.onLine : false
+  );
+  const [isCurrentExamOffline, setIsCurrentExamOffline] = useState<boolean>(false);
+  const [cachedExams, setCachedExams] = useState<CachedExamEntry[]>(() => loadCachedExams());
+  const [pendingHonorQueue, setPendingHonorQueue] = useState<PendingHonorRollSubmission[]>(() =>
+    loadPendingHonorRoll()
+  );
+  const [syncingQueue, setSyncingQueue] = useState<boolean>(false);
+  const [statusBanner, setStatusBanner] = useState<{
+    type: 'info' | 'warning' | 'success';
+    text: string;
+  } | null>(null);
+  const [confirmDeleteLibraryId, setConfirmDeleteLibraryId] = useState<string | null>(null);
+
   const availableTopics = currentSubject.topics[currentGrade] || [];
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      setStatusBanner({
+        type: 'success',
+        text: 'Đã khôi phục kết nối Internet! Em có thể tạo đề AI mới hoặc đồng bộ điểm lên Bảng Vàng.',
+      });
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      setOfflineMode(true);
+      setStatusBanner({
+        type: 'warning',
+        text: 'Mất kết nối mạng — Đã tự động bật Chế độ Thi Offline với kho câu hỏi đã lưu trên máy.',
+      });
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   useEffect(() => {
     if (availableTopics.length > 0) {
@@ -123,12 +179,73 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
     return () => clearInterval(timer);
   }, [examData, isSubmitted, timeRemaining]);
 
-  const handleGenerateExam = async () => {
-    setLoading(true);
+  const startOfflineMixedQuiz = (noticeText?: string) => {
+    const built = buildOfflineMixedQuiz({
+      cachedExams,
+      subjectId: currentSubject.id,
+      subjectName: currentSubject.name,
+      grade: currentGrade,
+      numQuestions,
+    });
+
+    if (!built) {
+      setStatusBanner({
+        type: 'warning',
+        text: 'Kho đề Offline hiện chưa có câu hỏi nào. Hãy kết nối mạng tạo 1 đề để lưu tự động nhé!',
+      });
+      return false;
+    }
+
+    setExamData(built.exam);
+    setTimeRemaining((built.exam.durationMinutes || 15) * 60);
+    setUserAnswers({});
     setIsSubmitted(false);
+    setSubmittedToHonorRoll(false);
+    setActiveQuestionIdx(0);
+    setIsCurrentExamOffline(true);
+    setStatusBanner({
+      type: 'info',
+      text:
+        noticeText ||
+        `Chế độ Ngoại tuyến (Offline): Đã tạo bài kiểm tra ${built.exam.questions.length} câu từ bộ đề đã lưu gần đây.`,
+    });
+    return true;
+  };
+
+  const handleStartCachedExam = (entry: CachedExamEntry) => {
+    setExamData(entry.exam);
+    setTimeRemaining((entry.exam.durationMinutes || 15) * 60);
+    setUserAnswers({});
+    setIsSubmitted(false);
+    setSubmittedToHonorRoll(false);
+    setActiveQuestionIdx(0);
+    setIsCurrentExamOffline(true);
+    setSubTab('practice');
+    setStatusBanner({
+      type: 'info',
+      text: `Đang làm bài Offline: "${entry.exam.title}" (Không cần kết nối Internet).`,
+    });
+  };
+
+  const handleDeleteCachedExam = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = deleteCachedExam(id);
+    setCachedExams(updated);
+  };
+
+  const handleGenerateExam = async () => {
+    setIsSubmitted(false);
+    setSubmittedToHonorRoll(false);
     setUserAnswers({});
     setActiveQuestionIdx(0);
+    setStatusBanner(null);
 
+    if (!isOnline || offlineMode) {
+      startOfflineMixedQuiz();
+      return;
+    }
+
+    setLoading(true);
     try {
       const res = await fetch('/api/exam/generate', {
         method: 'POST',
@@ -142,15 +259,37 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
         }),
       });
 
-      const data = await res.json();
-      if (data.success && data.exam) {
+      const data = await safeParseJson(res);
+      if (res.ok && data?.success && data?.exam) {
         setExamData(data.exam);
         setTimeRemaining((data.exam.durationMinutes || 15) * 60);
+        setIsCurrentExamOffline(false);
+
+        // Auto-cache recent generated exam questions for offline quiz mode
+        const updatedCache = saveCachedExam({
+          grade: currentGrade,
+          subjectId: currentSubject.id,
+          subjectName: currentSubject.name,
+          examType,
+          topic: selectedTopic,
+          source: 'ai_generated',
+          exam: data.exam,
+        });
+        setCachedExams(updatedCache);
       } else {
-        throw new Error(data.error || 'Không thể tạo đề thi');
+        throw new Error(data?.error || 'Máy chủ tạo đề hiện không phản hồi.');
       }
-    } catch (err: any) {
-      alert(`⚠️ Lỗi: ${err.message || 'Có sự cố khi tạo đề thi, vui lòng thử lại.'}`);
+    } catch {
+      // Seamless automatic fallback to cached offline quiz questions
+      const ok = startOfflineMixedQuiz(
+        'Không thể kết nối máy chủ AI — Đã tự động mở Đề Thi Offline từ các câu hỏi đã lưu gần đây!'
+      );
+      if (!ok) {
+        setStatusBanner({
+          type: 'warning',
+          text: 'Không thể kết nối máy chủ và chưa có câu hỏi Offline nào được lưu.',
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -186,6 +325,10 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
   const handleSubmitExam = () => {
     setIsSubmitted(true);
     const { score, correctCount } = calculateScore();
+    if (examData?.title) {
+      const updatedCache = updateCachedExamResult(examData.title, score);
+      setCachedExams(updatedCache);
+    }
     if (currentSubject.id === 'toan') {
       awardStudentActivity({ type: 'solve_algebra', count: Math.max(1, correctCount), score });
     } else {
@@ -204,52 +347,106 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
   const handleSubmitToHonorRoll = async () => {
     if (submittedToHonorRoll || honorRollSubmitting) return;
     setHonorRollSubmitting(true);
-    try {
-      const studentDisplayName = currentUser?.name || userName || 'Học sinh Max10';
-      const studentAvatar = currentUser?.avatar || '';
-      const timeSpent = (examData?.durationMinutes || 15) * 60 - timeRemaining;
+    const studentDisplayName = currentUser?.name || userName || 'Học sinh Max10';
+    const studentAvatar = currentUser?.avatar || '';
+    const timeSpent = (examData?.durationMinutes || 15) * 60 - timeRemaining;
+    const payload = {
+      studentName: studentDisplayName,
+      avatar: studentAvatar,
+      school: 'THCS',
+      grade: currentGrade,
+      subject: currentSubject.name,
+      score,
+      totalQuestions: total,
+      correctCount,
+      timeSpentSeconds: timeSpent > 0 ? timeSpent : 300,
+      examType:
+        examType === '15_phut'
+          ? 'Kiểm tra 15 phút'
+          : examType === 'giua_ky'
+          ? 'Khảo sát Giữa kỳ'
+          : examType === 'cuoi_ky'
+          ? 'Thi Học kỳ'
+          : 'Thi HSG & Vào 10 Chuyên',
+      note:
+        score === 10
+          ? 'Thủ Khoa Điểm 10 Tuyệt Đối'
+          : score >= 9
+          ? 'Á Khoa Xuất Sắc'
+          : 'Bảng Vàng Danh Dự',
+    };
 
+    if (!isOnline) {
+      const nextQueue = queuePendingHonorRoll(payload);
+      setPendingHonorQueue(nextQueue);
+      setSubmittedToHonorRoll(true);
+      setHonorRollSubmitting(false);
+      setStatusBanner({
+        type: 'info',
+        text: 'Đang Ngoại tuyến: Đã lưu điểm vào hàng đợi và sẽ đồng bộ lên Bảng Vàng khi có Internet!',
+      });
+      return;
+    }
+
+    try {
       const res = await fetch('/api/exam/honor-roll/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          studentName: studentDisplayName,
-          avatar: studentAvatar,
-          school: 'THCS',
-          grade: currentGrade,
-          subject: currentSubject.name,
-          score,
-          totalQuestions: total,
-          correctCount,
-          timeSpentSeconds: timeSpent > 0 ? timeSpent : 300,
-          examType:
-            examType === '15_phut'
-              ? 'Kiểm tra 15 phút'
-              : examType === 'giua_ky'
-              ? 'Khảo sát Giữa kỳ'
-              : examType === 'cuoi_ky'
-              ? 'Thi Học kỳ'
-              : 'Thi HSG & Vào 10 Chuyên',
-          note:
-            score === 10
-              ? 'Thủ Khoa Điểm 10 Tuyệt Đối'
-              : score >= 9
-              ? 'Á Khoa Xuất Sắc'
-              : 'Bảng Vàng Danh Dự',
-        }),
+        body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeParseJson(res);
+      if (res.ok && data?.success) {
         setSubmittedToHonorRoll(true);
         setTimeout(() => {
           setSubTab('honor_roll');
         }, 500);
+      } else {
+        throw new Error('Offline fallback');
       }
-    } catch (e) {
-      console.error('Lỗi gửi kết quả lên bảng vàng:', e);
+    } catch {
+      const nextQueue = queuePendingHonorRoll(payload);
+      setPendingHonorQueue(nextQueue);
+      setSubmittedToHonorRoll(true);
+      setStatusBanner({
+        type: 'info',
+        text: 'Đã lưu kết quả cục bộ — bấm "Đồng bộ Bảng Vàng" khi kết nối lại máy chủ.',
+      });
     } finally {
       setHonorRollSubmitting(false);
+    }
+  };
+
+  const handleSyncPendingHonorRoll = async () => {
+    if (!isOnline || syncingQueue || pendingHonorQueue.length === 0) return;
+    setSyncingQueue(true);
+    let syncedCount = 0;
+    let remaining = [...pendingHonorQueue];
+
+    for (const item of pendingHonorQueue) {
+      try {
+        const res = await fetch('/api/exam/honor-roll/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(item.payload),
+        });
+        const data = await safeParseJson(res);
+        if (res.ok && data?.success) {
+          remaining = removePendingHonorRoll(item.id);
+          syncedCount += 1;
+        }
+      } catch {
+        break;
+      }
+    }
+
+    setPendingHonorQueue(remaining);
+    setSyncingQueue(false);
+    if (syncedCount > 0) {
+      setStatusBanner({
+        type: 'success',
+        text: `Đã đồng bộ thành công ${syncedCount} kết quả thi Offline lên Bảng Vàng Danh Dự!`,
+      });
     }
   };
 
@@ -283,11 +480,15 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
 
   const handleDeleteMockExam = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('Bạn có chắc muốn xóa bộ đề thi này khỏi thư viện?')) {
-      const updated = mockExamsList.filter((m) => m.id !== id);
-      setMockExamsList(updated);
-      saveMockExams(updated);
+    if (confirmDeleteLibraryId !== id) {
+      setConfirmDeleteLibraryId(id);
+      setTimeout(() => setConfirmDeleteLibraryId((prev) => (prev === id ? null : prev)), 3500);
+      return;
     }
+    const updated = mockExamsList.filter((m) => m.id !== id);
+    setMockExamsList(updated);
+    saveMockExams(updated);
+    setConfirmDeleteLibraryId(null);
   };
 
   const handleStartLibraryExam = (exam: ClassMockExam) => {
@@ -307,17 +508,33 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
       score10Secret: `Bí kíp Điểm 10: Trình bày mạch lạc, không đốt cháy giai đoạn để đảm bảo đạt trọn vẹn điểm số tuyệt đối.`,
     }));
 
-    setExamData({
+    const libExam: ExamData = {
       title: `${exam.title} - Lớp ${exam.className}`,
       durationMinutes: exam.durationMinutes,
       instructions: `Bộ đề thi thử chính thức lớp ${exam.className} do ${exam.creatorTeacherName} biên soạn.`,
       questions: generatedQuestions,
-    });
+    };
+
+    setExamData(libExam);
     setTimeRemaining(exam.durationMinutes * 60);
     setUserAnswers({});
     setIsSubmitted(false);
+    setSubmittedToHonorRoll(false);
     setActiveQuestionIdx(0);
+    setIsCurrentExamOffline(true);
     setSubTab('practice');
+
+    const updatedCache = saveCachedExam({
+      id: `lib-${exam.id}`,
+      grade: currentGrade,
+      subjectId: currentSubject.id,
+      subjectName: exam.subject,
+      examType: 'giua_ky',
+      topic: exam.title,
+      source: 'library',
+      exam: libExam,
+    });
+    setCachedExams(updatedCache);
   };
 
   const filteredLibraryExams = mockExamsList.filter((exam) => {
@@ -542,10 +759,18 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
                           <button
                             type="button"
                             onClick={(e) => handleDeleteMockExam(exam.id, e)}
-                            className="p-1 rounded-lg text-slate-400 hover:text-rose-500 transition-colors"
+                            className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                              confirmDeleteLibraryId === exam.id
+                                ? 'bg-rose-600 text-white px-2 text-[10px] font-bold'
+                                : 'text-slate-400 hover:text-rose-500'
+                            }`}
                             title="Xóa đề thi"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            {confirmDeleteLibraryId === exam.id ? (
+                              <span>Xác nhận xóa?</span>
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
                           </button>
                         )}
                       </div>
@@ -936,174 +1161,406 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
         </div>
       ) : (
         <>
-          {/* View 1: Configuration & Exam Creator */}
-          {!examData && (
-            <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-slate-200 dark:border-zinc-800 p-6 sm:p-8 shadow-xs">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="h-12 w-12 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-                  <FileText className="w-6 h-6" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-                    Phòng Luyện Đề Săn Điểm 10
-                  </h2>
-                  <p className="text-sm text-slate-500 dark:text-zinc-400">
-                    Tạo đề thi bám sát cấu trúc Bộ GD&ĐT cho {currentSubject.name} - {currentGrade} với các câu hỏi phân hóa điểm 10.
-                  </p>
-                </div>
-              </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            {/* Exam Type Selection */}
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-                Loại bài kiểm tra
-              </label>
-              <div className="grid grid-cols-2 gap-2.5">
-                {[
-                  { id: '15_phut', title: '15 Phút', desc: 'Kiểm tra miệng & 15p' },
-                  { id: 'giua_ky', title: 'Giữa Kỳ', desc: 'Kiểm tra 1 tiết (45p)' },
-                  { id: 'cuoi_ky', title: 'Học Kỳ', desc: 'Thi học kỳ I / II' },
-                  { id: 'hsg_chuyen', title: 'HSG & Vào 10', desc: 'Câu phân loại điểm 10' },
-                ].map((type) => (
-                  <button
-                    key={type.id}
-                    type="button"
-                    onClick={() => setExamType(type.id as any)}
-                    className={`p-3 rounded-xl border text-left transition-all ${
-                      examType === type.id
-                        ? 'bg-indigo-50/70 border-indigo-500 text-indigo-900 font-bold ring-1 ring-indigo-500'
-                        : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-slate-50/50'
-                    }`}
-                  >
-                    <div className="text-sm font-bold">{type.title}</div>
-                    <div className="text-xs text-slate-500">{type.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Topic / Chapter Selection */}
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-                Chủ đề / Chuyên đề ôn tập
-              </label>
-              <select
-                value={selectedTopic}
-                onChange={(e) => setSelectedTopic(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-              >
-                {availableTopics.map((topic, i) => (
-                  <option key={i} value={topic}>
-                    {topic}
-                  </option>
-                ))}
-                <option value="Tổng hợp toàn bộ kiến thức kỳ này">
-                  ✨ Đề thi tổng hợp toàn diện (Chuẩn đề thi thật)
-                </option>
-              </select>
-
-              {/* Number of questions */}
-              <div className="mt-4">
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-                  Số lượng câu hỏi
-                </label>
-                <div className="flex gap-3">
-                  {[3, 5, 8, 10].map((num) => (
-                    <button
-                      key={num}
-                      type="button"
-                      onClick={() => setNumQuestions(num)}
-                      className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${
-                        numQuestions === num
-                          ? 'bg-slate-900 text-white border-slate-900'
-                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      {num} câu
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 mb-6 flex items-start gap-3 text-xs text-amber-800">
-            <Sparkles className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <strong className="font-bold">Tiêu chí Đề Săn Điểm 10:</strong> Đề thi bao gồm các câu hỏi từ căn bản đến nâng cao, đặc biệt có câu hỏi vận dụng cao để rèn phản xạ tư duy và mục "Bí kíp tránh bẫy" giải thích chi tiết sau khi nộp bài.
-            </div>
-          </div>
-
-          <button
-            onClick={handleGenerateExam}
-            disabled={loading}
-            className="w-full py-3.5 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm sm:text-base flex items-center justify-center gap-2 shadow-sm transition-all disabled:opacity-50"
+          {/* Offline / Online Connection & Cached Quiz Status Banner */}
+          <div
+            className={`rounded-2xl border p-3.5 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+              !isOnline || offlineMode
+                ? isDark
+                  ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                : isDark
+                ? 'bg-zinc-900 border-zinc-800 text-zinc-200'
+                : 'bg-white border-slate-200 text-slate-800'
+            }`}
           >
-            {loading ? (
-              <>
-                <RefreshCw className="w-5 h-5 animate-spin" />
-                <span>AI đang biên soạn đề thi chuẩn điểm 10...</span>
-              </>
-            ) : (
-              <>
-                <span>Bắt đầu làm bài thi</span>
-                <ArrowRight className="w-5 h-5" />
-              </>
-            )}
-          </button>
-        </div>
-      )}
-
-      {/* View 2: Active Exam Taking or Review */}
-      {examData && (
-        <div className="space-y-6">
-          {/* Top Bar: Exam Title, Timer, Status */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4 sticky top-[135px] z-30">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold px-2.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200">
-                  {currentSubject.name} - {currentGrade}
-                </span>
-                <span className="text-xs text-slate-500 font-medium">
-                  {examData.questions.length} câu hỏi
-                </span>
+            <div className="flex items-center gap-3">
+              <div
+                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                  !isOnline || offlineMode
+                    ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                    : 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
+                }`}
+              >
+                {!isOnline ? (
+                  <WifiOff className="w-5 h-5" />
+                ) : offlineMode ? (
+                  <Database className="w-5 h-5" />
+                ) : (
+                  <Wifi className="w-5 h-5" />
+                )}
               </div>
-              <h3 className="text-base sm:text-lg font-bold text-slate-900 mt-1">
-                {examData.title}
-              </h3>
+              <div>
+                <div className="text-xs sm:text-sm font-black flex items-center gap-2 flex-wrap">
+                  <span>
+                    {!isOnline
+                      ? 'Đang Ngoại tuyến — Chế độ Thi Offline đang bật'
+                      : offlineMode
+                      ? 'Chế độ Luyện Đề Offline (Không cần Internet)'
+                      : 'Đang Trực tuyến · Tự động lưu đề thi Offline'}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/10 dark:bg-white/10">
+                    {cachedExams.length} đề ·{' '}
+                    {cachedExams.reduce((acc, item) => acc + (item.exam.questions?.length || 0), 0)} câu đã lưu
+                  </span>
+                </div>
+                <p className="text-[11px] opacity-80 mt-0.5">
+                  Mọi đề thi vừa tạo đều được tự động lưu vào bộ nhớ máy để em làm bài lại ngay cả khi mất mạng.
+                </p>
+              </div>
             </div>
 
-            <div className="flex items-center gap-4">
-              {/* Countdown Timer */}
-              <div className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border text-sm font-bold ${
-                isSubmitted
-                  ? 'bg-slate-100 border-slate-200 text-slate-500'
-                  : timeRemaining < 120
-                  ? 'bg-rose-50 border-rose-200 text-rose-600 animate-pulse'
-                  : 'bg-indigo-50 border-indigo-200 text-indigo-700'
-              }`}>
-                <Clock className="w-4 h-4" />
-                <span>{isSubmitted ? 'Đã hoàn thành' : formatTime(timeRemaining)}</span>
-              </div>
-
-              {!isSubmitted ? (
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              {pendingHonorQueue.length > 0 && isOnline && (
                 <button
-                  onClick={handleSubmitExam}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm shadow-xs transition-colors"
+                  type="button"
+                  onClick={handleSyncPendingHonorRoll}
+                  disabled={syncingQueue}
+                  className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-60"
                 >
-                  Nộp bài chấm điểm
-                </button>
-              ) : (
-                <button
-                  onClick={() => setExamData(null)}
-                  className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm shadow-xs transition-colors"
-                >
-                  Luyện đề mới
+                  <RefreshCw className={`w-3.5 h-3.5 ${syncingQueue ? 'animate-spin' : ''}`} />
+                  <span>Đồng bộ {pendingHonorQueue.length} điểm lên Bảng Vàng</span>
                 </button>
               )}
+
+              <button
+                type="button"
+                onClick={() => setOfflineMode((prev) => !prev)}
+                className={`px-3.5 py-2 rounded-xl text-xs font-black border transition-all flex items-center gap-1.5 cursor-pointer ${
+                  offlineMode
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                    : isDark
+                    ? 'bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700'
+                    : 'bg-slate-100 border-slate-300 text-slate-800 hover:bg-slate-200'
+                }`}
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>{offlineMode ? '✓ Đang bật Offline Mode' : 'Bật Chế độ Offline'}</span>
+              </button>
             </div>
           </div>
+
+          {statusBanner && (
+            <div
+              className={`rounded-2xl border px-4 py-3 text-xs font-semibold flex items-center justify-between gap-3 ${
+                statusBanner.type === 'success'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200'
+                  : statusBanner.type === 'warning'
+                  ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-700 text-amber-900 dark:text-amber-200'
+                  : 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-700 text-indigo-900 dark:text-indigo-200'
+              }`}
+            >
+              <span>{statusBanner.text}</span>
+              <button
+                type="button"
+                onClick={() => setStatusBanner(null)}
+                className="p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer shrink-0"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* View 1: Configuration & Exam Creator + Cached Offline Quiz Bank */}
+          {!examData && (
+            <div className="space-y-6">
+              <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-slate-200 dark:border-zinc-800 p-6 sm:p-8 shadow-xs">
+                <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className="h-12 w-12 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                      <FileText className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+                        Phòng Luyện Đề Săn Điểm 10
+                      </h2>
+                      <p className="text-sm text-slate-500 dark:text-zinc-400">
+                        Tạo đề thi bám sát cấu trúc Bộ GD&ĐT cho {currentSubject.name} - {currentGrade} với các câu hỏi phân hóa điểm 10.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                  {/* Exam Type Selection */}
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 mb-2">
+                      Loại bài kiểm tra
+                    </label>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {[
+                        { id: '15_phut', title: '15 Phút', desc: 'Kiểm tra miệng & 15p' },
+                        { id: 'giua_ky', title: 'Giữa Kỳ', desc: 'Kiểm tra 1 tiết (45p)' },
+                        { id: 'cuoi_ky', title: 'Học Kỳ', desc: 'Thi học kỳ I / II' },
+                        { id: 'hsg_chuyen', title: 'HSG & Vào 10', desc: 'Câu phân loại điểm 10' },
+                      ].map((type) => (
+                        <button
+                          key={type.id}
+                          type="button"
+                          onClick={() => setExamType(type.id as any)}
+                          className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                            examType === type.id
+                              ? 'bg-indigo-50/70 dark:bg-indigo-950/50 border-indigo-500 text-indigo-900 dark:text-indigo-200 font-bold ring-1 ring-indigo-500'
+                              : 'border-slate-200 dark:border-zinc-700 hover:border-slate-300 text-slate-700 dark:text-zinc-200 bg-slate-50/50 dark:bg-zinc-800/60'
+                          }`}
+                        >
+                          <div className="text-sm font-bold">{type.title}</div>
+                          <div className="text-xs text-slate-500 dark:text-zinc-400">{type.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Topic / Chapter Selection */}
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 mb-2">
+                      Chủ đề / Chuyên đề ôn tập
+                    </label>
+                    <select
+                      value={selectedTopic}
+                      onChange={(e) => setSelectedTopic(e.target.value)}
+                      className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 px-3.5 py-2.5 text-sm font-medium text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-zinc-800"
+                    >
+                      {availableTopics.map((topic, i) => (
+                        <option key={i} value={topic}>
+                          {topic}
+                        </option>
+                      ))}
+                      <option value="Tổng hợp toàn bộ kiến thức kỳ này">
+                        ✨ Đề thi tổng hợp toàn diện (Chuẩn đề thi thật)
+                      </option>
+                    </select>
+
+                    {/* Number of questions */}
+                    <div className="mt-4">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 mb-2">
+                        Số lượng câu hỏi
+                      </label>
+                      <div className="flex gap-3">
+                        {[3, 5, 8, 10].map((num) => (
+                          <button
+                            key={num}
+                            type="button"
+                            onClick={() => setNumQuestions(num)}
+                            className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                              numQuestions === num
+                                ? 'bg-slate-900 dark:bg-indigo-600 text-white border-slate-900 dark:border-indigo-500'
+                                : 'bg-white dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-700'
+                            }`}
+                          >
+                            {num} câu
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 mb-6 flex items-start gap-3 text-xs text-amber-800 dark:text-amber-200">
+                  <Sparkles className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="font-bold">Tiêu chí Đề Săn Điểm 10:</strong> Đề thi bao gồm các câu hỏi từ căn bản đến nâng cao, đặc biệt có câu hỏi vận dụng cao để rèn phản xạ tư duy và mục "Bí kíp tránh bẫy" giải thích chi tiết sau khi nộp bài.
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={handleGenerateExam}
+                    disabled={loading}
+                    className={`w-full py-3.5 px-6 rounded-xl font-bold text-sm sm:text-base flex items-center justify-center gap-2 shadow-sm transition-all disabled:opacity-50 cursor-pointer ${
+                      !isOnline || offlineMode
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                    }`}
+                  >
+                    {loading ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 animate-spin" />
+                        <span>AI đang biên soạn đề thi...</span>
+                      </>
+                    ) : !isOnline || offlineMode ? (
+                      <>
+                        <Shuffle className="w-5 h-5" />
+                        <span>Làm Đề Trộn Offline ({numQuestions} câu)</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Bắt đầu làm bài thi (AI)</span>
+                        <ArrowRight className="w-5 h-5" />
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => startOfflineMixedQuiz()}
+                    disabled={cachedExams.length === 0}
+                    className="w-full py-3.5 px-6 rounded-xl border border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 font-bold text-sm sm:text-base flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <Database className="w-5 h-5" />
+                    <span>Trắc nghiệm Offline từ câu đã lưu</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Cached Exams Library for Offline Practice */}
+              <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-slate-200 dark:border-zinc-800 p-5 sm:p-6 shadow-xs space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                      <BookmarkCheck className="w-5 h-5 text-emerald-500" />
+                      <span>Kho Đề Thi Đã Lưu Ngoại Tuyến ({cachedExams.length})</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-zinc-400">
+                      Làm lại trực tiếp không cần Wi-Fi / 4G. Điểm cao nhất của em được lưu tự động trên thiết bị.
+                    </p>
+                  </div>
+                </div>
+
+                {cachedExams.length === 0 ? (
+                  <div className="p-6 text-center rounded-2xl border border-dashed border-slate-300 dark:border-zinc-700 text-xs text-slate-500 dark:text-zinc-400">
+                    Chưa có đề thi nào được lưu. Tạo 1 đề thi bất kỳ khi có mạng để lưu ngoại tuyến!
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {cachedExams.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className={`p-4 rounded-2xl border flex flex-col justify-between gap-3 transition-all ${
+                          isDark
+                            ? 'bg-zinc-800/70 border-zinc-700 hover:border-emerald-500/50'
+                            : 'bg-slate-50/70 border-slate-200 hover:border-emerald-400'
+                        }`}
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                                {entry.source === 'ai_generated'
+                                  ? 'Đề AI đã lưu'
+                                  : entry.source === 'library'
+                                  ? 'Đề thư viện'
+                                  : 'Đề mẫu Offline'}
+                              </span>
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-700 dark:text-indigo-300">
+                                {entry.subjectName} · {entry.grade}
+                              </span>
+                            </div>
+
+                            {entry.source !== 'offline_starter' && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteCachedExam(entry.id, e)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
+                                title="Xóa khỏi bộ nhớ Offline"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+
+                          <h4 className="text-sm font-black text-slate-900 dark:text-white leading-snug">
+                            {entry.exam.title}
+                          </h4>
+
+                          <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-zinc-400 flex-wrap">
+                            <span>{entry.exam.questions.length} câu hỏi</span>
+                            <span>•</span>
+                            <span>{entry.exam.durationMinutes} phút</span>
+                            {typeof entry.bestScore === 'number' && (
+                              <>
+                                <span>•</span>
+                                <span className="font-black text-amber-600 dark:text-amber-400">
+                                  ⭐ Cao nhất: {entry.bestScore}/10
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleStartCachedExam(entry)}
+                          className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-all"
+                        >
+                          <WifiOff className="w-3.5 h-3.5" />
+                          <span>Làm Bài Offline Ngay</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* View 2: Active Exam Taking or Review */}
+          {examData && (
+            <div className="space-y-6">
+              {/* Top Bar: Exam Title, Timer, Status */}
+              <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-slate-200 dark:border-zinc-800 p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4 sticky top-[135px] z-30">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700">
+                      {currentSubject.name} - {currentGrade}
+                    </span>
+                    {isCurrentExamOffline && (
+                      <span className="text-[11px] font-black px-2.5 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700 inline-flex items-center gap-1">
+                        <WifiOff className="w-3 h-3" />
+                        <span>Offline Mode</span>
+                      </span>
+                    )}
+                    <span className="text-xs text-slate-500 dark:text-zinc-400 font-medium">
+                      {examData.questions.length} câu hỏi
+                    </span>
+                  </div>
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white mt-1">
+                    {examData.title}
+                  </h3>
+                </div>
+
+                <div className="flex items-center gap-3 flex-wrap">
+                  {/* Countdown Timer */}
+                  <div className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border text-sm font-bold ${
+                    isSubmitted
+                      ? 'bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-500 dark:text-zinc-400'
+                      : timeRemaining < 120
+                      ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 animate-pulse'
+                      : 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300'
+                  }`}>
+                    <Clock className="w-4 h-4" />
+                    <span>{isSubmitted ? 'Đã hoàn thành' : formatTime(timeRemaining)}</span>
+                  </div>
+
+                  {!isSubmitted ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleSubmitExam}
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm shadow-xs transition-colors cursor-pointer"
+                      >
+                        Nộp bài chấm điểm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setExamData(null)}
+                        className="px-3 py-2 rounded-xl border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 text-xs font-bold cursor-pointer"
+                      >
+                        Đổi đề
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setExamData(null)}
+                      className="px-4 py-2 rounded-xl bg-slate-900 dark:bg-indigo-600 hover:bg-slate-800 dark:hover:bg-indigo-500 text-white font-bold text-xs sm:text-sm shadow-xs transition-colors cursor-pointer"
+                    >
+                      Luyện đề mới
+                    </button>
+                  )}
+                </div>
+              </div>
 
           {/* Score Result Card (when submitted) */}
           {isSubmitted && (

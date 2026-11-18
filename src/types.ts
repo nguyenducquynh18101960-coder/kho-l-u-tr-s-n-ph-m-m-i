@@ -251,12 +251,27 @@ export interface ChatGroup {
   members: GroupMember[];
   mutedUsers: Record<string, UserMuteRecord>;
   createdBy: string;
+  createdByName?: string;
   code?: string; // Group code like Zalo (e.g. ZL-8392)
   onlyAdminCanAdd?: boolean; // When true: only group creator / admin can add members (User requested: "nhóm khi tạo chỉ bạn và bạn mới có thể thêm người vào")
   isPublic?: boolean;
   pinnedNotice?: string;
   isClassGroup?: boolean;
   isCustomClassGroup?: boolean;
+  isCommunity?: boolean;
+  communityCategory?: 'game' | 'study';
+  createdByAdmin?: boolean;
+  gamePlatform?: 'All' | 'Mobile' | 'PC' | 'Console' | 'Cross-Platform' | string;
+  gameTitle?: string;
+  gameGenre?: string;
+  isPinnedTrending?: boolean;
+  pinnedTrendingAt?: number;
+  trendingBadge?: string;
+  approvalStatus?: 'approved' | 'pending' | 'rejected';
+  submittedById?: string;
+  submittedByName?: string;
+  approvedAt?: number;
+  approvedBy?: string;
   classCode?: string;
   studentCapacity?: number;
   maxMembers?: number;

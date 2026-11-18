@@ -415,7 +415,7 @@ export function getClassHomeroomTeacher(classCode: ClassCode): HomeroomTeacher |
  */
 export function isLegacyAutoCreatedClassGroup(g: any): boolean {
   if (!g || !g.id) return true;
-  if (g.isCustomClassGroup) return false;
+  if (g.isCustomClassGroup || g.isCommunity || g.createdByAdmin) return false;
   const name = (g.name || '').toString();
   if (
     g.id.startsWith('default-') ||

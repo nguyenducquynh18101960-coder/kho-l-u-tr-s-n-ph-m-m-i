@@ -235,15 +235,16 @@ async function startServer() {
       const db = loadSocialDb();
       if (!db.directMessages) db.directMessages = [];
 
+      const LATEST_OFFICIAL_UPDATE_MESSAGE =
+        "📢 [CẬP NHẬT MỚI TỪ MAX10 AI - PHIÊN BẢN STUDY HUB]\n🚀 Max10 AI vừa nâng cấp toàn diện giao diện & tính năng học tập thông minh:\n✨ Không gian Study Hub 3 vùng gọn gàng: Gia sư AI, Cộng đồng & Chat, Kho Luyện Tập (hỗ trợ làm đề Offline), Công cụ AI & Lịch học.\n🎥 Gọi Video & Thoại dùng Camera & Micro thật, tự động hiện ảnh đại diện khi tắt cam và hộp thoại nhận/từ chối cuộc gọi tức thì.\n💬 Nhắn tin, trả lời trích dẫn và gọi @Max10 AI giải bài ngay trong nhóm lẫn chat 1-1.\nChúc các bạn học tập hiệu quả và chinh phục Điểm 10!";
+
       const updateAnnouncement = {
         id: "dm-admin-update-" + now,
         senderId: "admin-mac-khanh-duy",
         senderName: "Mạc Khánh Duy (Quản trị viên)",
         senderAvatar: "https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy",
         recipientId: "all_broadcast",
-        content:
-          customMessage ||
-          "📢 [THÔNG BÁO TỰ ĐỘNG - MAX10 VỪA CẬP NHẬT PHIÊN BẢN MỚI]\nQuản trị viên Mạc Khánh Duy vừa phát hành bản cập nhật mới nhất cho hệ thống Max10 AI!\n✨ Đã nâng cấp Quản lý Lớp học thực tế (Chỉ kích hoạt khi có Thầy/Cô đăng ký), Lịch thi chung, Duyệt bài tập & Biểu đồ Tổng hợp.\n💬 Hỗ trợ nhóm lớp không giới hạn học sinh và tag @từng thành viên + @Max10 AI.\nỨng dụng hoạt động mượt mà, chúc các bạn học tập bứt phá Điểm 10!",
+        content: customMessage || LATEST_OFFICIAL_UPDATE_MESSAGE,
         timestamp: exactTimeStr,
         createdAt: now,
         isAdminUpdate: true,
@@ -269,7 +270,7 @@ async function startServer() {
 
   // Real Admin Broadcast & Update Announcement right inside GroupChatStudio
   app.post("/api/admin/broadcast", (req, res) => {
-    const { content, publishUpdate = false, senderId, senderName, senderAvatar } = req.body;
+    const { content, publishUpdate = false, senderId, senderName, senderAvatar, replyTo } = req.body;
     if (!content || !String(content).trim()) {
       return res.status(400).json({ success: false, error: "Nội dung tin nhắn không được để trống" });
     }
@@ -289,6 +290,7 @@ async function startServer() {
       timestamp: exactTimeStr,
       createdAt: now,
       isAdminUpdate: !!publishUpdate,
+      ...(replyTo && replyTo.content ? { replyTo } : {}),
     };
 
     db.directMessages.push(broadcastMsg);
@@ -367,6 +369,58 @@ async function startServer() {
     threads.sort((a, b) => b.lastCreatedAt - a.lastCreatedAt);
 
     res.json({ success: true, broadcastMessages, threads });
+  });
+
+  // Alias GET /api/admin/broadcasts for Notification views
+  app.get("/api/admin/broadcasts", (_req, res) => {
+    const db = loadSocialDb();
+    const messages = (db.directMessages || [])
+      .filter((m: any) => m.recipientId === "all_broadcast")
+      .sort((a: any, b: any) => (a.createdAt || 0) - (b.createdAt || 0));
+    res.json({ success: true, messages });
+  });
+
+  // Admin Auto-Reply Configuration (Tự động trả lời vs Tự trả lời thủ công khi có @Admin)
+  app.get("/api/admin/auto-reply", (_req, res) => {
+    const db = loadSocialDb();
+    const cfg = db.adminAutoReply || {
+      enabled: true,
+      customGreeting: "",
+      updatedAt: Date.now(),
+    };
+    res.json({
+      success: true,
+      ...cfg,
+      pendingMentions: (db.adminMentions || []).slice(-30).reverse(),
+    });
+  });
+
+  app.post("/api/admin/auto-reply", (req, res) => {
+    const { enabled, customGreeting } = req.body || {};
+    const db = loadSocialDb();
+    db.adminAutoReply = {
+      enabled: typeof enabled === "boolean" ? enabled : true,
+      customGreeting:
+        typeof customGreeting === "string"
+          ? customGreeting.trim()
+          : db.adminAutoReply?.customGreeting || "",
+      updatedAt: Date.now(),
+    };
+    saveSocialDb(db);
+    res.json({ success: true, ...db.adminAutoReply });
+  });
+
+  app.post("/api/admin/mentions/ack", (req, res) => {
+    const { mentionId, targetId } = req.body || {};
+    const db = loadSocialDb();
+    if (!db.adminMentions) db.adminMentions = [];
+    db.adminMentions = db.adminMentions.filter((m: any) => {
+      if (mentionId && m.id === mentionId) return false;
+      if (targetId && m.targetId === targetId) return false;
+      return true;
+    });
+    saveSocialDb(db);
+    res.json({ success: true, pendingMentions: db.adminMentions });
   });
 
   // ================= PAYMENT & AUTO-UPGRADE SYSTEM (VIETQR) =================
@@ -3682,6 +3736,345 @@ Yêu cầu kịch bản video gồm:
     groups?: any[];
     groupMessages?: Record<string, any[]>;
     registeredClasses?: any[];
+    adminAutoReply?: { enabled: boolean; customGreeting?: string; updatedAt?: number };
+    adminMentions?: any[];
+    deletedStarterCommunities?: string[];
+    trendingSeededV1?: boolean;
+  }
+
+  const isServerAiEntity = (member: { id?: string; name?: string; isAi?: boolean; role?: string } | null | undefined) => {
+    if (!member) return true;
+    if (member.isAi) return true;
+    if (member.role === "ai_tutor" || member.role === "system") return true;
+    const id = String(member.id || "").toLowerCase();
+    const name = String(member.name || "").toLowerCase();
+    if (id === "admin-mac-khanh-duy") return false;
+    if (
+      id.startsWith("ai-") ||
+      id.startsWith("std-") ||
+      id === "user-quynh" ||
+      id === "system-bot" ||
+      id.includes("tutor") ||
+      id.includes("tro-ly") ||
+      id.includes("max10")
+    ) {
+      return true;
+    }
+    if (
+      name.includes("max10 ai") ||
+      name.includes("trợ lý") ||
+      name.includes("robot") ||
+      name.includes("hệ thống")
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  function getStarterAdminCommunities(): any[] {
+    const now = Date.now();
+    const adminMember = {
+      id: "admin-mac-khanh-duy",
+      name: "Mạc Khánh Duy (Quản trị viên)",
+      avatar: "https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy",
+      role: "admin",
+      school: "Ban Quản Trị Max10 AI",
+    };
+
+    const makeGameCommunity = (cfg: {
+      id: string;
+      name: string;
+      description: string;
+      avatarIcon: string;
+      code: string;
+      gamePlatform: "Cross-Platform" | "Mobile" | "PC" | "Console";
+      gameTitle: string;
+      gameGenre: string;
+      offsetMs: number;
+      isPinnedTrending?: boolean;
+      trendingBadge?: string;
+    }) => ({
+      id: cfg.id,
+      name: cfg.name,
+      description: cfg.description,
+      grade: "Lớp 9",
+      subject: `Trò chơi · ${cfg.gamePlatform}`,
+      avatarIcon: cfg.avatarIcon,
+      createdAt: now - cfg.offsetMs,
+      createdBy: "admin-mac-khanh-duy",
+      createdByName: "Mạc Khánh Duy (Quản trị viên)",
+      createdByAdmin: true,
+      isCommunity: true,
+      communityCategory: "game",
+      gamePlatform: cfg.gamePlatform,
+      gameTitle: cfg.gameTitle,
+      gameGenre: cfg.gameGenre,
+      isPinnedTrending: Boolean(cfg.isPinnedTrending),
+      ...(cfg.isPinnedTrending ? { pinnedTrendingAt: now - cfg.offsetMs, trendingBadge: cfg.trendingBadge || "Thịnh hành" } : {}),
+      approvalStatus: "approved",
+      approvedAt: now - cfg.offsetMs,
+      approvedBy: "admin-mac-khanh-duy",
+      isPublic: true,
+      onlyAdminCanAdd: false,
+      code: cfg.code,
+      pinnedNotice: `${cfg.avatarIcon} Cộng đồng ${cfg.gameTitle} (${cfg.gamePlatform}) do Admin Mạc Khánh Duy lập — Nơi giao lưu của các game thủ người thật, không có AI giả. Gõ @Admin để hỏi Quản trị viên!`,
+      members: [adminMember],
+      mutedUsers: {},
+    });
+
+    return [
+      {
+        id: "community-study-max10",
+        name: "Cộng Đồng Học Tập Điểm 10 THCS",
+        description:
+          "Không gian học tập chung cho mọi tài khoản thật cùng trao đổi Toán, Văn, Anh, KHTN và hỏi trực tiếp @Mạc Khánh Duy (Admin).",
+        grade: "Lớp 9",
+        subject: "Học tập",
+        avatarIcon: "📚",
+        createdAt: now - 300000,
+        createdBy: "admin-mac-khanh-duy",
+        createdByName: "Mạc Khánh Duy (Quản trị viên)",
+        createdByAdmin: true,
+        isCommunity: true,
+        communityCategory: "study",
+        approvalStatus: "approved",
+        isPublic: true,
+        onlyAdminCanAdd: false,
+        code: "CD-HOCTAP",
+        pinnedNotice:
+          "📚 Cộng đồng Học tập do Admin Mạc Khánh Duy lập — Chỉ thành viên người thật, gõ @ để hỏi Admin hoặc @Max10 AI!",
+        members: [adminMember],
+        mutedUsers: {},
+      },
+      makeGameCommunity({
+        id: "community-game-max10",
+        name: "Cộng Đồng Game Tổng Hợp & Mini Game Mọi Nền Tảng",
+        description:
+          "Tổng hợp tất cả các trò chơi điện tử trên Mobile, PC, Console, Web & Đấu trường Mini Game thuộc bài cùng bạn bè người thật.",
+        avatarIcon: "🎮",
+        code: "CD-TROCHOI",
+        gamePlatform: "Cross-Platform",
+        gameTitle: "Tổng hợp Mọi Game & Mini Game",
+        gameGenre: "Đa thể loại",
+        offsetMs: 280000,
+      }),
+      // CROSS-PLATFORM GAMES
+      makeGameCommunity({
+        id: "community-game-minecraft",
+        name: "Cộng Đồng Minecraft (Java, Bedrock, PE & Console)",
+        description:
+          "Sinh tồn, xây dựng, Redstone, Mod/Addon, chơi server chung giữa PC, Điện thoại, PS5, Xbox & Nintendo Switch.",
+        avatarIcon: "🧱",
+        code: "CD-MCPE",
+        gamePlatform: "Cross-Platform",
+        gameTitle: "Minecraft (Java / Bedrock / PE)",
+        gameGenre: "Sandbox / Sinh tồn",
+        offsetMs: 260000,
+        isPinnedTrending: true,
+        trendingBadge: "Thịnh hành",
+      }),
+      makeGameCommunity({
+        id: "community-game-roblox",
+        name: "Cộng Đồng Roblox (Blox Fruits, Brookhaven, Doors, Obby)",
+        description:
+          "Tìm team săn boss Blox Fruits, cày sự kiện, chia sẻ map Obby/Tycoon & lập nhóm chơi Roblox trên PC, Mobile và Console.",
+        avatarIcon: "🧊",
+        code: "CD-ROBLOX",
+        gamePlatform: "Cross-Platform",
+        gameTitle: "Roblox (Blox Fruits, Doors, Brookhaven...)",
+        gameGenre: "Thế giới ảo / Nhập vai",
+        offsetMs: 245000,
+        isPinnedTrending: true,
+        trendingBadge: "Top Yêu Thích",
+      }),
+      makeGameCommunity({
+        id: "community-game-hoyoverse",
+        name: "Cộng Đồng HoYoverse (Genshin Impact, Honkai: Star Rail, ZZZ)",
+        description:
+          "Thảo luận build nhân vật, đi bí cảnh Co-op, săn Nguyên Thạch & chia sẻ UID trên PC, Mobile và PlayStation/Xbox.",
+        avatarIcon: "✨",
+        code: "CD-HOYO",
+        gamePlatform: "Cross-Platform",
+        gameTitle: "Genshin Impact / Honkai: Star Rail / ZZZ",
+        gameGenre: "Action RPG / Gacha",
+        offsetMs: 230000,
+      }),
+      makeGameCommunity({
+        id: "community-game-fortnite",
+        name: "Cộng Đồng Fortnite, Rocket League & Battle Royale",
+        description:
+          "Lập Squad leo rank Zero Build, Creative Map, Fall Guys & Rocket League liên nền tảng PC, Console và Mobile.",
+        avatarIcon: "🏆",
+        code: "CD-FORTNITE",
+        gamePlatform: "Cross-Platform",
+        gameTitle: "Fortnite / Rocket League",
+        gameGenre: "Battle Royale / Đấu trường",
+        offsetMs: 215000,
+      }),
+      makeGameCommunity({
+        id: "community-game-party-coop",
+        name: "Cộng Đồng Party & Co-op (Among Us, Stumble Guys, Goose Goose Duck)",
+        description:
+          "Tạo phòng chơi chung vui nhộn sau giờ học: Among Us, Fall Guys, Stumble Guys, Goose Goose Duck trên mọi thiết bị.",
+        avatarIcon: "🛸",
+        code: "CD-PARTY",
+        gamePlatform: "Cross-Platform",
+        gameTitle: "Among Us / Fall Guys / Stumble Guys",
+        gameGenre: "Party / Co-op Vui nhộn",
+        offsetMs: 200000,
+      }),
+      makeGameCommunity({
+        id: "community-game-sports-racing",
+        name: "Cộng Đồng Thể Thao & Đua Xe (FC Online, EA FC, eFootball, Asphalt)",
+        description:
+          "Giao lưu chiến thuật bóng đá EA Sports FC, FC Online, eFootball, NBA 2K và đua xe Asphalt / Forza trên mọi nền tảng.",
+        avatarIcon: "⚽",
+        code: "CD-SPORTS",
+        gamePlatform: "Cross-Platform",
+        gameTitle: "EA FC / FC Online / eFootball / Asphalt",
+        gameGenre: "Thể thao / Đua xe",
+        offsetMs: 185000,
+      }),
+      makeGameCommunity({
+        id: "community-game-board-web",
+        name: "Cộng Đồng Cờ Vua, Cờ Tướng, Ma Sói & Game Web",
+        description:
+          "Đấu trí Chess.com, Lichess, Cờ Tướng, Ma Sói, Skribbl.io, Krunker.io & các game trình duyệt Web nhẹ mượt.",
+        avatarIcon: "♟️",
+        code: "CD-BOARD",
+        gamePlatform: "Cross-Platform",
+        gameTitle: "Chess.com / Ma Sói / Web Games",
+        gameGenre: "Trí tuệ / Board Game / Web",
+        offsetMs: 170000,
+      }),
+      // MOBILE GAMES
+      makeGameCommunity({
+        id: "community-game-lienquan",
+        name: "Cộng Đồng Liên Quân Mobile & Tốc Chiến (Wild Rift)",
+        description:
+          "Tìm đồng đội 5v5 leo Rank Cao Thủ/Thách Đấu, giao lưu tướng tủ, bảng ngọc và giải đấu Liên Quân / Mobile Legends / Tốc Chiến.",
+        avatarIcon: "📱",
+        code: "CD-AOV",
+        gamePlatform: "Mobile",
+        gameTitle: "Liên Quân Mobile / Tốc Chiến / MLBB",
+        gameGenre: "MOBA Mobile",
+        offsetMs: 155000,
+        isPinnedTrending: true,
+        trendingBadge: "Hot Tuần Này",
+      }),
+      makeGameCommunity({
+        id: "community-game-pubg-ff",
+        name: "Cộng Đồng Free Fire, PUBG Mobile & Call of Duty Mobile",
+        description:
+          "Tạo phòng Custom, lập team 4 người săn Booyah / Top 1 trên iOS & Android cho Free Fire, PUBG Mobile và COD Mobile.",
+        avatarIcon: "🔫",
+        code: "CD-FPSMOB",
+        gamePlatform: "Mobile",
+        gameTitle: "Free Fire / PUBG Mobile / COD Mobile",
+        gameGenre: "Bắn súng Sinh tồn Mobile",
+        offsetMs: 140000,
+      }),
+      makeGameCommunity({
+        id: "community-game-supercell",
+        name: "Cộng Đồng Brawl Stars, Clash Royale & Clash of Clans",
+        description:
+          "Lập Clan, giao lưu chiến thuật cày cúp Brawl Stars, Clash Royale, Clash of Clans và Squad Busters trên di động.",
+        avatarIcon: "⚡",
+        code: "CD-CELL",
+        gamePlatform: "Mobile",
+        gameTitle: "Brawl Stars / Clash Royale / Clash of Clans",
+        gameGenre: "Chiến thuật / Đấu trường Mobile",
+        offsetMs: 125000,
+      }),
+      makeGameCommunity({
+        id: "community-game-playtogether",
+        name: "Cộng Đồng Play Together, Blockman Go & Mobile Giải Trí",
+        description:
+          "Câu cá, trang trí nhà, săn kho báu Play Together, Eggy Party, Blockman Go & game mobile nhẹ nhàng.",
+        avatarIcon: "🏝️",
+        code: "CD-PLAYTOG",
+        gamePlatform: "Mobile",
+        gameTitle: "Play Together / Eggy Party / Blockman Go",
+        gameGenre: "Mô phỏng / Giải trí Mobile",
+        offsetMs: 110000,
+      }),
+      // PC GAMES
+      makeGameCommunity({
+        id: "community-game-lol-tft",
+        name: "Cộng Đồng Liên Minh Huyền Thoại (LoL) & Đấu Trường Chân Lý (TFT)",
+        description:
+          "Rủ nhau đánh Normal, ARAM, leo Rank LoL & chia sẻ đội hình meta Đấu Trường Chân Lý (TFT) trên PC / Mac.",
+        avatarIcon: "💻",
+        code: "CD-LOLTFT",
+        gamePlatform: "PC",
+        gameTitle: "Liên Minh Huyền Thoại / TFT",
+        gameGenre: "MOBA / Cờ nhân phẩm PC",
+        offsetMs: 95000,
+      }),
+      makeGameCommunity({
+        id: "community-game-valorant-cs2",
+        name: "Cộng Đồng FPS PC (Valorant, CS2, Apex Legends, Overwatch 2)",
+        description:
+          "Tìm 5-stack Valorant, CS2, Apex Legends, Overwatch 2, chia sẻ crosshair & chiến thuật map trên PC.",
+        avatarIcon: "🎯",
+        code: "CD-FPSPC",
+        gamePlatform: "PC",
+        gameTitle: "Valorant / Counter-Strike 2 / Apex Legends",
+        gameGenre: "Bắn súng Chiến thuật PC",
+        offsetMs: 80000,
+        isPinnedTrending: true,
+        trendingBadge: "Giải đấu",
+      }),
+      makeGameCommunity({
+        id: "community-game-steam-sandbox",
+        name: "Cộng Đồng Steam, PC Indie & Thế Giới Mở (GTA V, Terraria, Dota 2)",
+        description:
+          "Hội game PC trên Steam & Epic: GTA V, Terraria, Stardew Valley, Dota 2, Palworld, Black Myth: Wukong, Hollow Knight.",
+        avatarIcon: "🖥️",
+        code: "CD-STEAM",
+        gamePlatform: "PC",
+        gameTitle: "GTA V / Terraria / Stardew Valley / Dota 2 / Steam",
+        gameGenre: "Steam / Indie / Thế giới mở PC",
+        offsetMs: 65000,
+      }),
+      // CONSOLE GAMES
+      makeGameCommunity({
+        id: "community-game-nintendo",
+        name: "Cộng Đồng Nintendo Switch (Mario Kart, Pokémon, Zelda, Splatoon)",
+        description:
+          "Giao lưu Mario Kart 8 Deluxe, Pokémon Scarlet/Violet, Zelda, Animal Crossing, Super Smash Bros & Splatoon 3.",
+        avatarIcon: "🕹️",
+        code: "CD-SWITCH",
+        gamePlatform: "Console",
+        gameTitle: "Mario Kart / Pokémon / Zelda / Smash Bros",
+        gameGenre: "Nintendo Switch / Handheld",
+        offsetMs: 50000,
+      }),
+      makeGameCommunity({
+        id: "community-game-ps-xbox",
+        name: "Cộng Đồng PlayStation & Xbox (Elden Ring, God of War, Spider-Man)",
+        description:
+          "Trao đổi game PS5, PS4, Xbox Series X/S & Game Pass: Elden Ring, Spider-Man, God of War, Halo, Forza Horizon, Gran Turismo.",
+        avatarIcon: "🎮",
+        code: "CD-PSXBOX",
+        gamePlatform: "Console",
+        gameTitle: "PlayStation 5 / Xbox Series / Elden Ring",
+        gameGenre: "PlayStation & Xbox Console",
+        offsetMs: 35000,
+      }),
+      makeGameCommunity({
+        id: "community-game-retro-rhythm",
+        name: "Cộng Đồng Game Nhịp Điệu, Đối Kháng & Kinh Điển (osu!, GBA, Arcade)",
+        description:
+          "Thử thách osu!, Project Sekai, Street Fighter, Tekken, Mario & game kinh điển Retro / Arcade / Giả lập.",
+        avatarIcon: "👾",
+        code: "CD-RETRO",
+        gamePlatform: "Console",
+        gameTitle: "osu! / Tekken / Retro & Rhythm Games",
+        gameGenre: "Nhịp điệu / Đối kháng / Retro",
+        offsetMs: 20000,
+      }),
+    ];
   }
 
   function loadSocialDb(): SocialDb {
@@ -3713,10 +4106,114 @@ Yêu cầu kịch bản video gồm:
               f.user2Id !== "user-quynh"
           );
           if (!parsed.directMessages) parsed.directMessages = [];
+          // Upgrade any legacy "THÔNG BÁO TỰ ĐỘNG..." copy to the current Study Hub announcement
+          let upgradedLegacyCopy = false;
+          const UPDATED_BROADCAST_COPY =
+            "📢 [CẬP NHẬT MỚI TỪ MAX10 AI - PHIÊN BẢN STUDY HUB]\n🚀 Max10 AI vừa nâng cấp toàn diện giao diện & tính năng học tập thông minh:\n✨ Không gian Study Hub 3 vùng gọn gàng: Gia sư AI, Cộng đồng & Chat, Kho Luyện Tập (hỗ trợ làm đề Offline), Công cụ AI & Lịch học.\n🎥 Gọi Video & Thoại dùng Camera & Micro thật, tự động hiện ảnh đại diện khi tắt cam và hộp thoại nhận/từ chối cuộc gọi tức thì.\n💬 Nhắn tin, trả lời trích dẫn và gọi @Max10 AI giải bài ngay trong nhóm lẫn chat 1-1.\nChúc các bạn học tập hiệu quả và chinh phục Điểm 10!";
+          parsed.directMessages = parsed.directMessages.map((m: any) => {
+            const c = String(m?.content || "");
+            if (
+              c.includes("THÔNG BÁO TỰ ĐỘNG - MAX10 VỪA CẬP NHẬT PHIÊN BẢN MỚI") ||
+              c.includes("THÔNG BÁO TỰ ĐỘNG - CẬP NHẬT ỨNG DỤNG") ||
+              c.includes("câu hỏi ngày tháng năm sinh với bất ngờ sinh nhật")
+            ) {
+              upgradedLegacyCopy = true;
+              return { ...m, content: UPDATED_BROADCAST_COPY };
+            }
+            return m;
+          });
           if (!parsed.blockedUsers) parsed.blockedUsers = [];
           if (!parsed.groups) parsed.groups = [];
           if (!parsed.groupMessages) parsed.groupMessages = {};
           if (!parsed.registeredClasses) parsed.registeredClasses = [];
+          if (!parsed.adminAutoReply) {
+            parsed.adminAutoReply = { enabled: true, customGreeting: "", updatedAt: Date.now() };
+            upgradedLegacyCopy = true;
+          }
+          if (!Array.isArray(parsed.adminMentions)) {
+            parsed.adminMentions = [];
+          }
+          if (!Array.isArray(parsed.deletedStarterCommunities)) {
+            parsed.deletedStarterCommunities = [];
+          }
+
+          // Clean AI entities out of community member arrays
+          parsed.groups = parsed.groups.map((g: any) => {
+            if (g?.isCommunity && Array.isArray(g.members)) {
+              const filteredMembers = g.members.filter((m: any) => !isServerAiEntity(m));
+              if (filteredMembers.length !== g.members.length) {
+                upgradedLegacyCopy = true;
+              }
+              return { ...g, onlyAdminCanAdd: false, members: filteredMembers };
+            }
+            return g;
+          });
+
+          // Merge all official Admin starter communities (Study + Cross-Platform Games) missing from DB (unless explicitly deleted)
+          const starters = getStarterAdminCommunities();
+          const starterMap = new Map(starters.map((s: any) => [s.id, s]));
+          const existingIds = new Set(parsed.groups.map((g: any) => g && g.id).filter(Boolean));
+          const deletedSet = new Set(parsed.deletedStarterCommunities || []);
+
+          // Enrich legacy community-game-max10 if missing platform metadata
+          parsed.groups = parsed.groups.map((g: any) => {
+            if (g && starterMap.has(g.id) && g.communityCategory === "game" && !g.gamePlatform) {
+              const ref = starterMap.get(g.id);
+              upgradedLegacyCopy = true;
+              return {
+                ...g,
+                gamePlatform: ref.gamePlatform,
+                gameTitle: ref.gameTitle,
+                gameGenre: ref.gameGenre,
+              };
+            }
+            return g;
+          });
+
+          const missingStarters = starters.filter(
+            (s: any) => !existingIds.has(s.id) && !deletedSet.has(s.id)
+          );
+          if (missingStarters.length > 0) {
+            parsed.groups = [...parsed.groups, ...missingStarters];
+            upgradedLegacyCopy = true;
+          }
+
+          // Seed initial approvalStatus & default pinned trending games once
+          const defaultTrendingMap: Record<string, string> = {
+            "community-game-minecraft": "Thịnh hành",
+            "community-game-roblox": "Top Yêu Thích",
+            "community-game-lienquan": "Hot Tuần Này",
+            "community-game-valorant-cs2": "Giải đấu",
+          };
+          const anyPinnedAlready = parsed.groups.some((g: any) => Boolean(g?.isPinnedTrending));
+          parsed.groups = parsed.groups.map((g: any) => {
+            if (!g || !g.isCommunity) return g;
+            let next = g;
+            if (!next.approvalStatus) {
+              next = { ...next, approvalStatus: "approved" };
+              upgradedLegacyCopy = true;
+            }
+            if (!parsed.trendingSeededV1 && !anyPinnedAlready && defaultTrendingMap[next.id]) {
+              next = {
+                ...next,
+                isPinnedTrending: true,
+                pinnedTrendingAt: Date.now(),
+                trendingBadge: defaultTrendingMap[next.id],
+              };
+              upgradedLegacyCopy = true;
+            }
+            return next;
+          });
+          if (!parsed.trendingSeededV1) {
+            parsed.trendingSeededV1 = true;
+            upgradedLegacyCopy = true;
+          }
+
+          if (upgradedLegacyCopy) {
+            try {
+              fs.writeFileSync(SOCIAL_DB_PATH, JSON.stringify(parsed, null, 2), "utf-8");
+            } catch {}
+          }
           return parsed;
         }
       }
@@ -3729,9 +4226,12 @@ Yêu cầu kịch bản video gồm:
       friendships: [],
       directMessages: [],
       blockedUsers: [],
-      groups: [],
+      groups: getStarterAdminCommunities(),
       groupMessages: {},
       registeredClasses: [],
+      adminAutoReply: { enabled: true, customGreeting: "", updatedAt: Date.now() },
+      adminMentions: [],
+      deletedStarterCommunities: [],
     };
     try {
       fs.writeFileSync(SOCIAL_DB_PATH, JSON.stringify(initDb, null, 2), "utf-8");
@@ -4385,12 +4885,42 @@ Yêu cầu kịch bản video gồm:
       content: rawContent,
       timestamp: req.body.timestamp || formatVietnamTime(msgCreatedAt),
       createdAt: msgCreatedAt,
+      ...(req.body.replyTo && req.body.replyTo.content ? { replyTo: req.body.replyTo } : {}),
     };
 
     db.directMessages.push(newMsg);
     // Keep max 500 recent direct messages
     if (db.directMessages.length > 500) {
       db.directMessages = db.directMessages.slice(-500);
+    }
+
+    // Track @Admin mention in DM/Broadcast for manual Admin reply mode
+    const lowerDm = rawContent.toLowerCase();
+    if (
+      senderId !== "admin-mac-khanh-duy" &&
+      (lowerDm.includes("@admin") ||
+        lowerDm.includes("@mạc khánh duy") ||
+        lowerDm.includes("@mac khanh duy") ||
+        recipientId === "admin-mac-khanh-duy")
+    ) {
+      if (!db.adminMentions) db.adminMentions = [];
+      db.adminMentions.push({
+        id: "mention-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
+        type: "direct",
+        targetId: recipientId === "all_broadcast" ? "all_broadcast" : senderId,
+        targetName:
+          recipientId === "all_broadcast"
+            ? "Thông Báo & Cập Nhật Từ Admin"
+            : `Tin nhắn riêng từ ${senderName || "Học sinh"}`,
+        senderId,
+        senderName: senderName || "Học sinh Max10",
+        content: rawContent,
+        createdAt: msgCreatedAt,
+        timestamp: newMsg.timestamp,
+      });
+      if (db.adminMentions.length > 100) {
+        db.adminMentions = db.adminMentions.slice(-100);
+      }
     }
 
     saveSocialDb(db);
@@ -4427,7 +4957,7 @@ Yêu cầu kịch bản video gồm:
   // ==========================================
   const isLegacyUnrelatedGroup = (g: any) => {
     if (!g || !g.id) return true;
-    if (g.isCustomClassGroup) return false;
+    if (g.isCustomClassGroup || g.isCommunity || g.createdByAdmin) return false;
     const name = (g.name || "").toString();
     if (
       g.id.startsWith("default-") ||
@@ -4441,6 +4971,251 @@ Yêu cầu kịch bản video gồm:
     }
     return false;
   };
+
+  app.get("/api/communities", (req, res) => {
+    const category = ((req.query.category as string) || "").trim().toLowerCase();
+    const platform = ((req.query.platform as string) || "").trim().toLowerCase();
+    const q = ((req.query.search as string) || "").trim().toLowerCase();
+    const includePending = req.query.includePending === "true";
+    const db = loadSocialDb();
+    let communities = (db.groups || []).filter((g: any) => g && g.isCommunity && !isLegacyUnrelatedGroup(g));
+    if (!includePending) {
+      communities = communities.filter((g: any) => (g.approvalStatus || "approved") === "approved");
+    }
+    if (category === "game" || category === "study") {
+      communities = communities.filter((g: any) => g.communityCategory === category);
+    }
+    if (platform && platform !== "all") {
+      communities = communities.filter(
+        (g: any) => String(g.gamePlatform || "").toLowerCase() === platform
+      );
+    }
+    if (q) {
+      communities = communities.filter(
+        (g: any) =>
+          (g.name && g.name.toLowerCase().includes(q)) ||
+          (g.gameTitle && g.gameTitle.toLowerCase().includes(q)) ||
+          (g.gamePlatform && g.gamePlatform.toLowerCase().includes(q)) ||
+          (g.gameGenre && g.gameGenre.toLowerCase().includes(q)) ||
+          (g.description && g.description.toLowerCase().includes(q))
+      );
+    }
+    res.json({ success: true, communities });
+  });
+
+  // Propose a new Game/Study Community (User proposals go to pending queue; Admin is approved immediately)
+  app.post("/api/communities/propose", (req, res) => {
+    const {
+      name,
+      description,
+      avatarIcon,
+      communityCategory,
+      gamePlatform,
+      gameTitle,
+      gameGenre,
+      requesterId,
+      requesterName,
+      requesterAvatar,
+      isAdminRequester,
+      pinTrending,
+      trendingBadge,
+    } = req.body || {};
+
+    if (!name || !String(name).trim() || !requesterId) {
+      return res.status(400).json({ success: false, error: "Tên cộng đồng và thông tin người gửi không được trống." });
+    }
+
+    const db = loadSocialDb();
+    if (!db.groups) db.groups = [];
+    const now = Date.now();
+    const isAdminCreator = requesterId === "admin-mac-khanh-duy" || Boolean(isAdminRequester);
+    const resolvedCategory = communityCategory === "study" ? "study" : "game";
+    const resolvedPlatform = resolvedCategory === "game" ? gamePlatform || "Cross-Platform" : undefined;
+    const commId = "community-" + now + "-" + Math.random().toString(36).substring(2, 5);
+    const commCode = "CD-" + Math.random().toString(36).substring(2, 6).toUpperCase();
+
+    const newCommunity = {
+      id: commId,
+      name: String(name).trim(),
+      description:
+        String(description || "").trim() ||
+        (resolvedCategory === "game"
+          ? `Cộng đồng Game ${String(gameTitle || name).trim()} (${resolvedPlatform}) cho thành viên người thật.`
+          : "Cộng đồng học tập cho thành viên người thật."),
+      grade: "Lớp 9",
+      subject: resolvedCategory === "game" ? `Trò chơi · ${resolvedPlatform}` : "Học tập",
+      avatarIcon: avatarIcon || (resolvedCategory === "game" ? "🎮" : "📚"),
+      createdAt: now,
+      createdBy: isAdminCreator ? "admin-mac-khanh-duy" : requesterId,
+      createdByName: requesterName || "Thành viên Max10",
+      createdByAdmin: isAdminCreator,
+      isCommunity: true,
+      communityCategory: resolvedCategory,
+      ...(resolvedPlatform ? { gamePlatform: resolvedPlatform } : {}),
+      ...(gameTitle ? { gameTitle: String(gameTitle).trim() } : {}),
+      ...(gameGenre ? { gameGenre: String(gameGenre).trim() } : {}),
+      isPinnedTrending: isAdminCreator ? Boolean(pinTrending) : false,
+      ...(isAdminCreator && pinTrending
+        ? { pinnedTrendingAt: now, trendingBadge: String(trendingBadge || "Thịnh hành").trim() }
+        : {}),
+      approvalStatus: isAdminCreator ? "approved" : "pending",
+      submittedById: requesterId,
+      submittedByName: requesterName || "Thành viên Max10",
+      ...(isAdminCreator ? { approvedAt: now, approvedBy: "admin-mac-khanh-duy" } : {}),
+      isPublic: true,
+      onlyAdminCanAdd: false,
+      code: commCode,
+      pinnedNotice:
+        resolvedCategory === "game"
+          ? `🎮 Cộng đồng ${String(gameTitle || name).trim()} (${resolvedPlatform}) — Nơi giao lưu game thủ người thật!`
+          : `📚 Cộng đồng ${String(name).trim()} — Nơi giao lưu học tập người thật!`,
+      members: [
+        {
+          id: requesterId,
+          name: requesterName || "Thành viên",
+          avatar: requesterAvatar || "",
+          role: isAdminCreator ? "admin" : "member",
+          school: isAdminCreator ? "Ban Quản Trị Max10 AI" : "Thành viên Max10",
+        },
+      ],
+      mutedUsers: {},
+    };
+
+    db.groups.unshift(newCommunity);
+    saveSocialDb(db);
+    res.json({ success: true, group: newCommunity });
+  });
+
+  // Admin: Approve or Reject a proposed community
+  app.post("/api/communities/:id/approve", (req, res) => {
+    const commId = req.params.id;
+    const { action, adminId, isAdminRequester, pinTrending, trendingBadge } = req.body || {};
+    const isAdminUser = adminId === "admin-mac-khanh-duy" || Boolean(isAdminRequester);
+    if (!isAdminUser) {
+      return res.status(403).json({ success: false, error: "Chỉ Quản trị viên (Admin) mới có quyền duyệt cộng đồng!" });
+    }
+
+    const db = loadSocialDb();
+    if (!db.groups) db.groups = [];
+    const idx = db.groups.findIndex((g: any) => g.id === commId);
+    if (idx < 0) {
+      return res.status(404).json({ success: false, error: "Không tìm thấy cộng đồng cần duyệt" });
+    }
+
+    const now = Date.now();
+    if (action === "reject") {
+      db.groups[idx] = {
+        ...db.groups[idx],
+        approvalStatus: "rejected",
+        isPinnedTrending: false,
+        approvedAt: now,
+        approvedBy: "admin-mac-khanh-duy",
+      };
+    } else {
+      db.groups[idx] = {
+        ...db.groups[idx],
+        approvalStatus: "approved",
+        approvedAt: now,
+        approvedBy: "admin-mac-khanh-duy",
+        ...(pinTrending
+          ? {
+              isPinnedTrending: true,
+              pinnedTrendingAt: now,
+              trendingBadge: String(trendingBadge || db.groups[idx].trendingBadge || "Thịnh hành").trim(),
+            }
+          : {}),
+      };
+    }
+
+    saveSocialDb(db);
+    res.json({ success: true, group: db.groups[idx] });
+  });
+
+  // Admin: Pin or Unpin a trending video game community
+  app.post("/api/communities/:id/pin-trending", (req, res) => {
+    const commId = req.params.id;
+    const { pinned, trendingBadge, adminId, isAdminRequester } = req.body || {};
+    const isAdminUser = adminId === "admin-mac-khanh-duy" || Boolean(isAdminRequester);
+    if (!isAdminUser) {
+      return res.status(403).json({ success: false, error: "Chỉ Quản trị viên (Admin) mới có quyền ghim trò chơi thịnh hành!" });
+    }
+
+    const db = loadSocialDb();
+    if (!db.groups) db.groups = [];
+    const idx = db.groups.findIndex((g: any) => g.id === commId);
+    if (idx < 0) {
+      return res.status(404).json({ success: false, error: "Không tìm thấy cộng đồng" });
+    }
+
+    const nextPinned = typeof pinned === "boolean" ? pinned : !db.groups[idx].isPinnedTrending;
+    db.groups[idx] = {
+      ...db.groups[idx],
+      isPinnedTrending: nextPinned,
+      pinnedTrendingAt: nextPinned ? Date.now() : undefined,
+      trendingBadge: nextPinned
+        ? String(trendingBadge || db.groups[idx].trendingBadge || "Thịnh hành").trim()
+        : db.groups[idx].trendingBadge,
+    };
+
+    saveSocialDb(db);
+    res.json({ success: true, group: db.groups[idx] });
+  });
+
+  // Admin: Edit / Manage community metadata
+  app.patch("/api/communities/:id", (req, res) => {
+    const commId = req.params.id;
+    const {
+      adminId,
+      isAdminRequester,
+      name,
+      description,
+      avatarIcon,
+      communityCategory,
+      gamePlatform,
+      gameTitle,
+      gameGenre,
+      pinnedNotice,
+      isPinnedTrending,
+      trendingBadge,
+      approvalStatus,
+    } = req.body || {};
+    const isAdminUser = adminId === "admin-mac-khanh-duy" || Boolean(isAdminRequester);
+    if (!isAdminUser) {
+      return res.status(403).json({ success: false, error: "Chỉ Quản trị viên (Admin) mới có quyền chỉnh sửa cộng đồng!" });
+    }
+
+    const db = loadSocialDb();
+    if (!db.groups) db.groups = [];
+    const idx = db.groups.findIndex((g: any) => g.id === commId);
+    if (idx < 0) {
+      return res.status(404).json({ success: false, error: "Không tìm thấy cộng đồng" });
+    }
+
+    const current = db.groups[idx];
+    const nextCategory = communityCategory === "game" || communityCategory === "study" ? communityCategory : current.communityCategory;
+    const nextPlatform = nextCategory === "game" ? gamePlatform || current.gamePlatform || "Cross-Platform" : undefined;
+    const nextPinned = typeof isPinnedTrending === "boolean" ? isPinnedTrending : current.isPinnedTrending;
+
+    db.groups[idx] = {
+      ...current,
+      ...(name !== undefined && String(name).trim() ? { name: String(name).trim() } : {}),
+      ...(description !== undefined ? { description: String(description).trim() } : {}),
+      ...(avatarIcon !== undefined ? { avatarIcon } : {}),
+      communityCategory: nextCategory,
+      subject: nextCategory === "game" ? `Trò chơi · ${nextPlatform}` : "Học tập",
+      ...(nextPlatform ? { gamePlatform: nextPlatform } : {}),
+      ...(gameTitle !== undefined ? { gameTitle: String(gameTitle).trim() } : {}),
+      ...(gameGenre !== undefined ? { gameGenre: String(gameGenre).trim() } : {}),
+      ...(pinnedNotice !== undefined ? { pinnedNotice: String(pinnedNotice).trim() } : {}),
+      isPinnedTrending: Boolean(nextPinned),
+      ...(nextPinned ? { pinnedTrendingAt: current.pinnedTrendingAt || Date.now() } : {}),
+      ...(trendingBadge !== undefined ? { trendingBadge: String(trendingBadge).trim() } : {}),
+      ...(approvalStatus ? { approvalStatus } : {}),
+    };
+
+    saveSocialDb(db);
+    res.json({ success: true, group: db.groups[idx] });
+  });
 
   app.get("/api/groups", (req, res) => {
     const q = ((req.query.search as string) || "").trim().toLowerCase();
@@ -4460,6 +5235,9 @@ Yêu cầu kịch bản video gồm:
           (g.name && g.name.toLowerCase().includes(q)) ||
           (g.code && g.code.toLowerCase().includes(q)) ||
           (g.subject && g.subject.toLowerCase().includes(q)) ||
+          (g.gameTitle && g.gameTitle.toLowerCase().includes(q)) ||
+          (g.gamePlatform && g.gamePlatform.toLowerCase().includes(q)) ||
+          (g.gameGenre && g.gameGenre.toLowerCase().includes(q)) ||
           (g.description && g.description.toLowerCase().includes(q)) ||
           (g.classCode && g.classCode.toLowerCase().includes(q))
       );
@@ -4481,6 +5259,18 @@ Yêu cầu kịch bản video gồm:
       onlyAdminCanAdd,
       isClassGroup,
       isCustomClassGroup,
+      isCommunity,
+      communityCategory,
+      createdByAdmin,
+      gamePlatform,
+      gameTitle,
+      gameGenre,
+      isPinnedTrending,
+      pinnedTrendingAt,
+      trendingBadge,
+      approvalStatus,
+      isPublic,
+      pinnedNotice,
       classCode,
       studentCapacity,
       maxMembers,
@@ -4491,37 +5281,97 @@ Yêu cầu kịch bản video gồm:
       return res.status(400).json({ success: false, error: "Tên nhóm và người tạo không được để trống" });
     }
 
+    const isOfficialAdminCreator =
+      createdBy === "admin-mac-khanh-duy" || Boolean(createdByAdmin);
+
+    if (isCommunity && !isOfficialAdminCreator) {
+      return res.status(403).json({
+        success: false,
+        error: "Chỉ Quản trị viên (Admin) mới có quyền lập Cộng đồng chính thức!",
+      });
+    }
+
     const db = loadSocialDb();
     if (!db.groups) db.groups = [];
 
-    const groupId = req.body.id || ("group-" + Date.now());
-    const groupCode = (code || ("ZL-" + Math.random().toString(36).substring(2, 6).toUpperCase())).toUpperCase();
+    const groupId = req.body.id || (isCommunity ? "community-" + Date.now() : "group-" + Date.now());
+    const groupCode = (
+      code ||
+      (isCommunity ? "CD-" : "ZL-") + Math.random().toString(36).substring(2, 6).toUpperCase()
+    ).toUpperCase();
 
-    // Default creator member: ONLY YOU (User requested: "nhóm khi tạo chỉ bạn")
-    const initialMembers = req.body.members || [
-      {
-        id: createdBy,
-        name: createdByName || "Bạn (Trưởng nhóm)",
-        role: "admin",
-        avatar: creatorAvatar || "",
-        school: "THCS Nguyễn Du",
-      },
-    ];
+    const rawMembers = Array.isArray(req.body.members)
+      ? req.body.members
+      : [
+          {
+            id: createdBy,
+            name: createdByName || "Bạn (Trưởng nhóm)",
+            role: "admin",
+            avatar: creatorAvatar || "",
+            school: isCommunity ? "Ban Quản Trị Max10 AI" : "THCS Nguyễn Du",
+          },
+        ];
+
+    // Strictly exclude any AI entities from group/community members
+    const initialMembers = rawMembers.filter((m: any) => !isServerAiEntity(m));
+
+    const resolvedCategory = communityCategory === "game" ? "game" : "study";
+    const resolvedPlatform =
+      resolvedCategory === "game" ? gamePlatform || "Cross-Platform" : undefined;
 
     const newGroup = {
       id: groupId,
       name: name.trim(),
-      description: (description || "Nhóm học tập và trao đổi bài").trim(),
+      description: (
+        description ||
+        (isCommunity
+          ? resolvedCategory === "game"
+            ? `Cộng đồng trò chơi (${resolvedPlatform}) & thi đấu cho người thật (do Admin lập)`
+            : "Cộng đồng học tập cho nhiều người thật (do Admin lập)"
+          : "Nhóm học tập và trao đổi bài")
+      ).trim(),
       grade: grade || "Lớp 9",
-      subject: subject || "Toán",
-      avatarIcon: avatarIcon || "📚",
+      subject:
+        subject ||
+        (isCommunity
+          ? resolvedCategory === "game"
+            ? `Trò chơi · ${resolvedPlatform}`
+            : "Học tập"
+          : "Toán"),
+      avatarIcon:
+        avatarIcon || (isCommunity ? (resolvedCategory === "game" ? "🎮" : "📚") : "📚"),
       createdAt: req.body.createdAt || Date.now(),
       createdBy,
       createdByName: createdByName || "Bạn",
       code: groupCode,
-      onlyAdminCanAdd: onlyAdminCanAdd !== undefined ? onlyAdminCanAdd : true,
+      // Communities always allow many real users to join freely
+      onlyAdminCanAdd: isCommunity ? false : onlyAdminCanAdd !== undefined ? onlyAdminCanAdd : true,
       members: initialMembers,
       mutedUsers: req.body.mutedUsers || {},
+      ...(isCommunity
+        ? {
+            isCommunity: true,
+            communityCategory: resolvedCategory,
+            createdByAdmin: true,
+            ...(resolvedPlatform ? { gamePlatform: resolvedPlatform } : {}),
+            ...(gameTitle ? { gameTitle: String(gameTitle).trim() } : {}),
+            ...(gameGenre ? { gameGenre: String(gameGenre).trim() } : {}),
+            isPinnedTrending: Boolean(isPinnedTrending),
+            ...(isPinnedTrending
+              ? {
+                  pinnedTrendingAt: pinnedTrendingAt || Date.now(),
+                  trendingBadge: String(trendingBadge || "Thịnh hành").trim(),
+                }
+              : {}),
+            approvalStatus: approvalStatus || "approved",
+            approvedAt: Date.now(),
+            approvedBy: "admin-mac-khanh-duy",
+            isPublic: isPublic !== false,
+            pinnedNotice:
+              pinnedNotice ||
+              `🌐 Cộng đồng do Admin Mạc Khánh Duy lập — Nơi nhiều thành viên người thật giao lưu, không có AI giả. Gõ @ để hỏi Admin!`,
+          }
+        : {}),
       ...(isClassGroup ? { isClassGroup: true } : {}),
       ...(isCustomClassGroup ? { isCustomClassGroup: true } : {}),
       ...(classCode ? { classCode } : {}),
@@ -4535,7 +5385,7 @@ Yêu cầu kịch bản video gồm:
     if (idx >= 0) {
       db.groups[idx] = newGroup;
     } else {
-      db.groups.push(newGroup);
+      db.groups.unshift(newGroup);
     }
     saveSocialDb(db);
 
@@ -4550,6 +5400,12 @@ Yêu cầu kịch bản video gồm:
     if (db.groupMessages && db.groupMessages[groupId]) {
       delete db.groupMessages[groupId];
     }
+    if (groupId.startsWith("community-")) {
+      if (!Array.isArray(db.deletedStarterCommunities)) db.deletedStarterCommunities = [];
+      if (!db.deletedStarterCommunities.includes(groupId)) {
+        db.deletedStarterCommunities.push(groupId);
+      }
+    }
     saveSocialDb(db);
     res.json({ success: true, deletedId: groupId });
   });
@@ -4560,6 +5416,12 @@ Yêu cầu kịch bản video gồm:
     if (!requesterId || !member || !member.id) {
       return res.status(400).json({ success: false, error: "Thiếu thông tin người yêu cầu hoặc thành viên mới" });
     }
+    if (isServerAiEntity(member)) {
+      return res.status(400).json({
+        success: false,
+        error: "Không thêm tài khoản AI vào danh sách thành viên cộng đồng/nhóm!",
+      });
+    }
 
     const db = loadSocialDb();
     if (!db.groups) db.groups = [];
@@ -4568,8 +5430,8 @@ Yêu cầu kịch bản video gồm:
       return res.status(404).json({ success: false, error: "Không tìm thấy nhóm" });
     }
 
-    // REQUIREMENT: "nhóm khi tạo chỉ bạn và bạn mới có thể thêm người vào"
-    if (group.onlyAdminCanAdd && group.createdBy !== requesterId) {
+    // REQUIREMENT: "nhóm khi tạo chỉ bạn và bạn mới có thể thêm người vào" (Communities are open to real users)
+    if (!group.isCommunity && group.onlyAdminCanAdd && group.createdBy !== requesterId) {
       return res.status(403).json({
         success: false,
         error: "Chỉ trưởng nhóm (bạn) mới có quyền thêm người vào nhóm này (Chuẩn Zalo)!",
@@ -4583,7 +5445,7 @@ Yêu cầu kịch bản video gồm:
         id: member.id,
         name: member.name || "Thành viên",
         avatar: member.avatar || "",
-        role: "member",
+        role: member.id === "admin-mac-khanh-duy" ? "admin" : "member",
         school: member.school || "",
       });
       saveSocialDb(db);
@@ -4598,12 +5460,18 @@ Yêu cầu kịch bản video gồm:
     if (!userId) {
       return res.status(400).json({ success: false, error: "Thiếu thông tin người dùng" });
     }
+    if (isServerAiEntity({ id: userId, name: userName })) {
+      return res.status(400).json({
+        success: false,
+        error: "Cộng đồng chỉ dành cho tài khoản người thật, không cho phép AI tham gia!",
+      });
+    }
 
     const db = loadSocialDb();
     if (!db.groups) db.groups = [];
     const group = db.groups.find((g: any) => g.id === groupId);
     if (!group) {
-      return res.status(404).json({ success: false, error: "Không tìm thấy nhóm" });
+      return res.status(404).json({ success: false, error: "Không tìm thấy nhóm hoặc cộng đồng" });
     }
 
     if (!group.members) group.members = [];
@@ -4613,7 +5481,7 @@ Yêu cầu kịch bản video gồm:
         id: userId,
         name: userName || "Thành viên",
         avatar: userAvatar || "",
-        role: "member",
+        role: userId === "admin-mac-khanh-duy" ? "admin" : "member",
         school: school || "",
       });
       saveSocialDb(db);
@@ -4648,11 +5516,44 @@ Yêu cầu kịch bản video gồm:
       createdAt: msg.createdAt || Date.now(),
     };
 
-    db.groupMessages[groupId].push(newMsg);
+    const alreadyExists = db.groupMessages[groupId].some((m: any) => m.id === newMsg.id);
+    if (!alreadyExists) {
+      db.groupMessages[groupId].push(newMsg);
+    }
     // Keep max 500 messages per group
     if (db.groupMessages[groupId].length > 500) {
       db.groupMessages[groupId] = db.groupMessages[groupId].slice(-500);
     }
+
+    // Track @Admin mention for manual Admin reply mode
+    const lowerContent = String(newMsg.content || "").toLowerCase();
+    const mentionsAdmin =
+      (lowerContent.includes("@admin") ||
+        lowerContent.includes("@mạc khánh duy") ||
+        lowerContent.includes("@mac khanh duy")) &&
+      newMsg.senderId !== "admin-mac-khanh-duy" &&
+      !newMsg.isAi &&
+      !newMsg.isSystemNotice;
+
+    if (mentionsAdmin) {
+      if (!db.adminMentions) db.adminMentions = [];
+      const grp = (db.groups || []).find((g: any) => g.id === groupId);
+      db.adminMentions.push({
+        id: "mention-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
+        type: "group",
+        targetId: groupId,
+        targetName: grp?.name || "Cộng đồng / Nhóm",
+        senderId: newMsg.senderId,
+        senderName: newMsg.senderName,
+        content: newMsg.content,
+        createdAt: newMsg.createdAt,
+        timestamp: newMsg.timestamp || formatVietnamTime(newMsg.createdAt),
+      });
+      if (db.adminMentions.length > 100) {
+        db.adminMentions = db.adminMentions.slice(-100);
+      }
+    }
+
     saveSocialDb(db);
     res.json({ success: true, message: newMsg });
   });
@@ -5217,6 +6118,293 @@ Yêu cầu kịch bản video gồm:
       accountOverrides.delete(params.userId);
     }
   };
+
+  // ==========================================
+  // REAL-TIME VIDEO / AUDIO CALL SIGNALING & 15s RINGING TIMEOUT
+  // ==========================================
+  const RING_TIMEOUT_MS = 15000;
+  interface CallSessionRecord {
+    callId: string;
+    callerId: string;
+    callerName: string;
+    callerAvatar?: string;
+    calleeId: string;
+    calleeName: string;
+    calleeAvatar?: string;
+    roomType: "direct" | "group";
+    callType: "video" | "voice";
+    status: "ringing" | "accepted" | "declined" | "cancelled" | "timeout" | "ended";
+    createdAt: number;
+    expiresAt: number;
+    acceptedAt?: number;
+    endedAt?: number;
+    isBusyWaiting?: boolean;
+    offer?: any;
+    answer?: any;
+    callerCandidates: any[];
+    calleeCandidates: any[];
+    callerMedia: { isMuted: boolean; isVideoOff: boolean };
+    calleeMedia: { isMuted: boolean; isVideoOff: boolean };
+    chatMessages: Array<{ id: string; senderId: string; senderName: string; text: string; time: string }>;
+  }
+
+  const activeCallSessions = new Map<string, CallSessionRecord>();
+
+  const refreshCallRecord = (call: CallSessionRecord): CallSessionRecord => {
+    const now = Date.now();
+    if (call.status === "ringing" && now >= call.expiresAt) {
+      call.status = "timeout";
+      call.endedAt = now;
+    }
+    return call;
+  };
+
+  const isUserInActiveCall = (userId: string, userName?: string, excludeCallId?: string): boolean => {
+    const uid = String(userId || "").trim();
+    const uname = String(userName || "").trim().toLowerCase();
+    for (const c of activeCallSessions.values()) {
+      if (c.callId === excludeCallId) continue;
+      if (c.status !== "accepted") continue;
+      if (uid && (c.callerId === uid || c.calleeId === uid)) return true;
+      if (uname && (c.callerName.toLowerCase() === uname || c.calleeName.toLowerCase() === uname)) return true;
+    }
+    return false;
+  };
+
+  const cleanupOldCallSessions = () => {
+    const cutoff = Date.now() - 3600 * 1000;
+    for (const [id, c] of activeCallSessions.entries()) {
+      refreshCallRecord(c);
+      if (c.endedAt && c.endedAt < cutoff) {
+        activeCallSessions.delete(id);
+      }
+    }
+  };
+
+  // 1. Caller starts a call -> server sets 15s expiration window
+  app.post("/api/calls/start", (req, res) => {
+    cleanupOldCallSessions();
+    const {
+      callerId,
+      callerName,
+      callerAvatar,
+      calleeId,
+      calleeName,
+      calleeAvatar,
+      roomType = "direct",
+      callType = "video",
+      callerMedia,
+    } = req.body || {};
+
+    if (!callerId || !calleeId) {
+      return res.status(400).json({ success: false, error: "Thiếu callerId hoặc calleeId" });
+    }
+
+    // Cancel any existing ringing call from this caller
+    const now = Date.now();
+    for (const existing of activeCallSessions.values()) {
+      if (existing.callerId === callerId && existing.status === "ringing") {
+        existing.status = "cancelled";
+        existing.endedAt = now;
+      }
+    }
+
+    const callId = "call-" + now + "-" + Math.random().toString(36).substring(2, 8);
+    const isBusyWaiting =
+      roomType !== "group" && isUserInActiveCall(String(calleeId), String(calleeName || ""), callId);
+
+    const session: CallSessionRecord = {
+      callId,
+      callerId: String(callerId),
+      callerName: String(callerName || "Bạn học"),
+      callerAvatar: callerAvatar || "",
+      calleeId: String(calleeId),
+      calleeName: String(calleeName || "Người nhận"),
+      calleeAvatar: calleeAvatar || "",
+      roomType: roomType === "group" ? "group" : "direct",
+      callType: callType === "voice" ? "voice" : "video",
+      status: "ringing",
+      createdAt: now,
+      expiresAt: now + RING_TIMEOUT_MS,
+      isBusyWaiting,
+      callerCandidates: [],
+      calleeCandidates: [],
+      callerMedia: callerMedia || { isMuted: false, isVideoOff: callType === "voice" },
+      calleeMedia: { isMuted: false, isVideoOff: callType === "voice" },
+      chatMessages: [],
+    };
+    activeCallSessions.set(callId, session);
+    res.json({ success: true, call: session, remainingMs: RING_TIMEOUT_MS });
+  });
+
+  // 2. Callee polls for incoming ringing calls (supports Call Waiting even while in another call)
+  app.get("/api/calls/incoming", (req, res) => {
+    cleanupOldCallSessions();
+    const userId = String(req.query.userId || "").trim();
+    const userName = String(req.query.userName || "").trim().toLowerCase();
+    const groupIdsRaw = String(req.query.groupIds || "").trim();
+    const excludeCallId = String(req.query.excludeCallId || "").trim();
+    const groupIdSet = new Set(groupIdsRaw ? groupIdsRaw.split(",").map((s) => s.trim()).filter(Boolean) : []);
+
+    if (!userId && !userName) {
+      return res.json({ success: true, call: null, remainingMs: 0 });
+    }
+
+    const now = Date.now();
+    let incoming: CallSessionRecord | null = null;
+    for (const call of activeCallSessions.values()) {
+      refreshCallRecord(call);
+      if (call.status !== "ringing") continue;
+      if (excludeCallId && call.callId === excludeCallId) continue;
+      if (call.callerId === userId) continue;
+
+      const isDirectMatch =
+        call.roomType === "direct" &&
+        (call.calleeId === userId || (userName && call.calleeName.toLowerCase() === userName));
+      const isGroupMatch = call.roomType === "group" && groupIdSet.has(call.calleeId);
+
+      if (isDirectMatch || isGroupMatch) {
+        if (!incoming || call.createdAt > incoming.createdAt) {
+          incoming = call;
+        }
+      }
+    }
+
+    if (!incoming) {
+      return res.json({ success: true, call: null, remainingMs: 0 });
+    }
+    res.json({
+      success: true,
+      call: incoming,
+      remainingMs: Math.max(0, incoming.expiresAt - now),
+    });
+  });
+
+  // 3. Poll call status & WebRTC signaling state
+  app.get("/api/calls/:callId/status", (req, res) => {
+    const call = activeCallSessions.get(req.params.callId);
+    if (!call) {
+      return res.status(404).json({ success: false, error: "Không tìm thấy cuộc gọi" });
+    }
+    refreshCallRecord(call);
+    call.isBusyWaiting =
+      call.roomType === "direct" && isUserInActiveCall(call.calleeId, call.calleeName, call.callId);
+    res.json({
+      success: true,
+      call,
+      remainingMs: Math.max(0, call.expiresAt - Date.now()),
+    });
+  });
+
+  // 3b. Extend waiting/ringing time when caller chooses to keep waiting
+  app.post("/api/calls/:callId/extend", (req, res) => {
+    const call = activeCallSessions.get(req.params.callId);
+    if (!call) {
+      return res.status(404).json({ success: false, error: "Không tìm thấy cuộc gọi" });
+    }
+    refreshCallRecord(call);
+    if (call.status !== "ringing") {
+      return res.json({ success: false, status: call.status, call });
+    }
+    const extraSeconds = Math.max(5, Math.min(60, Number(req.body?.extraSeconds) || 15));
+    const now = Date.now();
+    call.expiresAt = Math.max(call.expiresAt, now) + extraSeconds * 1000;
+    res.json({
+      success: true,
+      call,
+      remainingMs: Math.max(0, call.expiresAt - now),
+    });
+  });
+
+  // 4. Callee accepts or declines call
+  app.post("/api/calls/:callId/respond", (req, res) => {
+    const call = activeCallSessions.get(req.params.callId);
+    if (!call) {
+      return res.status(404).json({ success: false, error: "Cuộc gọi không tồn tại hoặc đã hủy" });
+    }
+    refreshCallRecord(call);
+    if (call.status !== "ringing") {
+      return res.json({ success: false, status: call.status, call });
+    }
+    const { action, calleeAvatar, calleeName, calleeMedia } = req.body || {};
+    if (action === "accept") {
+      call.status = "accepted";
+      call.acceptedAt = Date.now();
+      if (calleeAvatar) call.calleeAvatar = calleeAvatar;
+      if (calleeName) call.calleeName = calleeName;
+      if (calleeMedia) call.calleeMedia = calleeMedia;
+    } else {
+      call.status = "declined";
+      call.endedAt = Date.now();
+    }
+    res.json({ success: true, call });
+  });
+
+  // 5. Exchange WebRTC SDP offer/answer, ICE candidates, media toggle states, and in-call messages
+  app.post("/api/calls/:callId/signal", (req, res) => {
+    const call = activeCallSessions.get(req.params.callId);
+    if (!call) {
+      return res.status(404).json({ success: false, error: "Không tìm thấy cuộc gọi" });
+    }
+    refreshCallRecord(call);
+    const { role, offer, answer, candidate, mediaState, chatMessage } = req.body || {};
+
+    if (offer) {
+      call.offer = offer;
+    }
+    if (answer) {
+      call.answer = answer;
+    }
+    if (candidate) {
+      if (role === "callee") {
+        call.calleeCandidates.push(candidate);
+      } else {
+        call.callerCandidates.push(candidate);
+      }
+    }
+    if (mediaState) {
+      if (role === "callee") {
+        call.calleeMedia = {
+          isMuted: !!mediaState.isMuted,
+          isVideoOff: !!mediaState.isVideoOff,
+        };
+      } else {
+        call.callerMedia = {
+          isMuted: !!mediaState.isMuted,
+          isVideoOff: !!mediaState.isVideoOff,
+        };
+      }
+    }
+    if (chatMessage && chatMessage.text) {
+      const exists = call.chatMessages.some((m) => m.id === chatMessage.id);
+      if (!exists) {
+        call.chatMessages.push({
+          id: chatMessage.id || "cmsg-" + Date.now(),
+          senderId: String(chatMessage.senderId || ""),
+          senderName: String(chatMessage.senderName || "Thành viên"),
+          text: String(chatMessage.text),
+          time: String(chatMessage.time || ""),
+        });
+      }
+    }
+
+    res.json({ success: true, call });
+  });
+
+  // 6. End or timeout call
+  app.post("/api/calls/:callId/end", (req, res) => {
+    const call = activeCallSessions.get(req.params.callId);
+    if (!call) {
+      return res.json({ success: true });
+    }
+    const reason = req.body?.reason;
+    if (call.status === "ringing" || call.status === "accepted") {
+      call.status =
+        reason === "timeout" || reason === "cancelled" || reason === "declined" ? reason : "ended";
+      call.endedAt = Date.now();
+    }
+    res.json({ success: true, call });
+  });
 
   // Determine production mode reliably
   const isProduction =

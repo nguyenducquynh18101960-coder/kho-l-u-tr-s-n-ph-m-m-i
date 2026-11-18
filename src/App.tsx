@@ -6,9 +6,11 @@ import { GenderType, STORAGE_KEY_USER_AVATAR } from './data/presetAvatars';
 import { SUBJECTS } from './data/subjects';
 import { useAutoUpdate } from './hooks/useAutoUpdate';
 
-// ChatGPT UI Components
+// Study Hub UI Components
 import { Header } from './components/chatgpt/Header';
-import { Sidebar } from './components/chatgpt/Sidebar';
+import { Sidebar, HubSpaceId, MainTabId, getSpaceFromTab } from './components/chatgpt/Sidebar';
+import { ContextPanel } from './components/chatgpt/ContextPanel';
+import { HistoryDrawer } from './components/chatgpt/HistoryDrawer';
 import { ChatView } from './components/chatgpt/ChatView';
 import { GroupChatStudio } from './components/chatgpt/GroupChatStudio';
 import { TeacherLounge } from './components/chatgpt/TeacherLounge';
@@ -21,6 +23,7 @@ import { OfflineIndicator } from './components/chatgpt/OfflineIndicator';
 import { AIVoicePlayerBar } from './components/chatgpt/AIVoicePlayerBar';
 import { MessageNotificationBanner } from './components/chatgpt/MessageNotificationBanner';
 import { LevelUpCelebrationOverlay } from './components/chatgpt/LevelUpCelebrationOverlay';
+import { IncomingCallModal } from './components/chatgpt/IncomingCallModal';
 
 // Modals & Device Helper
 import { getOrCreateDeviceId } from './components/chatgpt/Max10SecurityVerification';
@@ -153,13 +156,30 @@ export function App() {
   const [currentSubjectIndex, setCurrentSubjectIndex] = useState<number>(0);
   const currentSubject: SubjectInfo = SUBJECTS[currentSubjectIndex] || SUBJECTS[0];
 
-  // Navigation tab
-  const [activeTab, setActiveTab] = useState<
-    'chat' | 'group' | 'image' | 'video' | 'exam' | 'grade' | 'tips' | 'plan' | 'mindmap' | 'teacher' | 'control' | 'achievements' | 'schedule' | 'class_management'
-  >('chat');
+  // Navigation tab & Study Hub 4 spaces
+  const [activeTab, setActiveTabState] = useState<MainTabId>('chat');
+  const [activeSpace, setActiveSpace] = useState<HubSpaceId>('ai');
+  const [contextPanelOpen, setContextPanelOpen] = useState<boolean>(true);
 
-  // Sidebar toggle
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
+  const setActiveTab = (tab: MainTabId) => {
+    setActiveTabState(tab);
+    setActiveSpace(getSpaceFromTab(tab));
+  };
+
+  const handleSelectSpace = (space: HubSpaceId) => {
+    setActiveSpace(space);
+    setContextPanelOpen(true);
+    if (getSpaceFromTab(activeTab) !== space) {
+      if (space === 'ai') setActiveTabState('chat');
+      else if (space === 'community') setActiveTabState('group');
+      else if (space === 'practice') setActiveTabState('exam');
+      else setActiveTabState('schedule');
+    }
+  };
+
+  // Mobile nav drawer & History drawer toggles
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState<boolean>(false);
 
   // Chat Sessions
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
@@ -812,58 +832,106 @@ export function App() {
         isDark={isDark}
       />
 
-      {/* App Layout: Left Sidebar + Main Content (Hidden completely when in Fullscreen) */}
+      {/* Zone 1 (68px Nav Rail) & Zone 2 (240px Context Panel) - Hidden when in Fullscreen */}
       {!isChatFullscreen && (
-        <Sidebar
-          isOpen={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
-          isFullscreen={isChatFullscreen}
-          unreadGroupMessagesCount={unreadGroupMessagesCount}
-          sessions={sessions}
-          currentSessionId={currentSessionId}
-          onSelectSession={(id) => {
-            setCurrentSessionId(id);
-            setActiveTab('chat');
-          }}
-          onNewChat={handleNewChat}
-          onDeleteSession={handleDeleteSession}
-          selectedGrade={grade}
-          onSelectGrade={handleSelectGrade}
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          isDark={isDark}
-          onToggleTheme={() => setIsDark((prev) => !prev)}
-          onOpenOfferModal={() => setShowOfferModal(true)}
-          onOpenIntroModal={() => setShowIntroSplash(true)}
-          activeTheme={activeTheme}
-          onOpenThemeModal={() => setShowThemeModal(true)}
-          onOpenVoiceModal={() => setShowVoiceModal(true)}
-          userName={userName}
-          onOpenNameModal={() => setShowNameModal(true)}
-          currentUser={currentUser}
-          onOpenAuthModal={() => setShowAuthModal(true)}
-          userAvatar={userAvatar}
-          onOpenAvatarModal={() => setShowAvatarModal(true)}
-          onOpenStoreModal={() => setShowStoreModal(true)}
-          subscriptionPlan={subscriptionPlan}
-          onOpenPricingModal={handleOpenPricingModal}
-          isAdmin={isAdmin}
-          onOpenAchievementsModal={() => setShowAchievementsModal(true)}
-          onLogout={handleLogout}
-        />
+        <>
+          <Sidebar
+            isOpen={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
+            isFullscreen={isChatFullscreen}
+            unreadGroupMessagesCount={unreadGroupMessagesCount}
+            sessions={sessions}
+            currentSessionId={currentSessionId}
+            onSelectSession={(id) => {
+              setCurrentSessionId(id);
+              setActiveTab('chat');
+            }}
+            onNewChat={handleNewChat}
+            onDeleteSession={handleDeleteSession}
+            selectedGrade={grade}
+            onSelectGrade={handleSelectGrade}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            activeSpace={activeSpace}
+            onSelectSpace={handleSelectSpace}
+            isDark={isDark}
+            onToggleTheme={() => setIsDark((prev) => !prev)}
+            onOpenOfferModal={() => setShowOfferModal(true)}
+            onOpenIntroModal={() => setShowIntroSplash(true)}
+            activeTheme={activeTheme}
+            onOpenThemeModal={() => setShowThemeModal(true)}
+            onOpenVoiceModal={() => setShowVoiceModal(true)}
+            userName={userName}
+            onOpenNameModal={() => setShowNameModal(true)}
+            currentUser={currentUser}
+            onOpenAuthModal={() => setShowAuthModal(true)}
+            userAvatar={userAvatar}
+            onOpenAvatarModal={() => setShowAvatarModal(true)}
+            onOpenStoreModal={() => setShowStoreModal(true)}
+            subscriptionPlan={subscriptionPlan}
+            onOpenPricingModal={handleOpenPricingModal}
+            isAdmin={isAdmin}
+            onOpenAchievementsModal={() => setShowAchievementsModal(true)}
+            onOpenAdminNotifications={() => {
+              setActiveSpace('community');
+              setActiveTab('group');
+              try {
+                localStorage.setItem(
+                  'max10_target_chat_open',
+                  JSON.stringify({ type: 'direct', targetId: 'all_broadcast', timestamp: Date.now() })
+                );
+              } catch {}
+              setTimeout(() => {
+                window.dispatchEvent(
+                  new CustomEvent('max10_open_notifications_in_chat')
+                );
+              }, 30);
+            }}
+            hasAdminNotificationDot={Boolean(autoUpdateNotice) || unreadGroupMessagesCount > 0}
+            onLogout={handleLogout}
+          />
+
+          <ContextPanel
+            isOpen={contextPanelOpen}
+            onClose={() => setContextPanelOpen(false)}
+            activeTab={activeTab}
+            activeSpace={activeSpace}
+            setActiveTab={setActiveTab}
+            isDark={isDark}
+            sessions={sessions}
+            currentSessionId={currentSessionId}
+            onSelectSession={(id) => {
+              setCurrentSessionId(id);
+              setActiveTab('chat');
+            }}
+            onNewChat={handleNewChat}
+            onDeleteSession={handleDeleteSession}
+            currentUser={currentUser}
+            isAdmin={isAdmin}
+            subscriptionPlan={subscriptionPlan}
+            onOpenStoreModal={() => setShowStoreModal(true)}
+            onOpenPricingModal={handleOpenPricingModal}
+            onOpenOfferModal={() => setShowOfferModal(true)}
+            onOpenAchievementsModal={() => setShowAchievementsModal(true)}
+          />
+        </>
       )}
 
-      {/* Main App Column */}
+      {/* Zone 3: Main Workspace Column */}
       <div className={`relative flex flex-col flex-1 h-full min-w-0 overflow-hidden ${isChatFullscreen ? 'z-50' : 'z-10'}`}>
         {/* Top Header - Hidden in Fullscreen */}
         {!isChatFullscreen && (
           <Header
             onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+            onToggleContextPanel={() => setContextPanelOpen((prev) => !prev)}
+            isContextPanelOpen={contextPanelOpen}
             onNewChat={handleNewChat}
             selectedGrade={grade}
             onSelectGrade={handleSelectGrade}
             isDark={isDark}
+            onToggleTheme={() => setIsDark((prev) => !prev)}
             activeTab={activeTab}
+            activeSpace={activeSpace}
             onSelectTab={setActiveTab}
             onOpenOfferModal={() => setShowOfferModal(true)}
             onOpenIntroModal={() => setShowIntroSplash(true)}
@@ -880,6 +948,24 @@ export function App() {
             subscriptionPlan={subscriptionPlan}
             onOpenPricingModal={handleOpenPricingModal}
             onOpenAchievementsModal={() => setShowAchievementsModal(true)}
+            onOpenHistoryDrawer={() => setHistoryDrawerOpen(true)}
+            onOpenAdminNotifications={() => {
+              setActiveSpace('community');
+              setActiveTab('group');
+              try {
+                localStorage.setItem(
+                  'max10_target_chat_open',
+                  JSON.stringify({ type: 'direct', targetId: 'all_broadcast', timestamp: Date.now() })
+                );
+              } catch {}
+              setTimeout(() => {
+                window.dispatchEvent(
+                  new CustomEvent('max10_open_notifications_in_chat')
+                );
+              }, 30);
+            }}
+            historyCount={sessions.length}
+            onLogout={handleLogout}
           />
         )}
 
@@ -958,12 +1044,16 @@ export function App() {
               onOpenMindMap={() => setActiveTab('mindmap')}
               onOpenVideoStudio={() => setActiveTab('video')}
               onOpenControlCenter={isAdmin ? () => setActiveTab('control') : undefined}
+              onSelectTab={setActiveTab}
+              onOpenAchievementsModal={() => setShowAchievementsModal(true)}
               activeTheme={activeTheme}
               onSelectTheme={handleSelectTheme}
               onOpenThemeModal={() => setShowThemeModal(true)}
               voiceThemeEnabled={voiceThemeEnabled}
               onOpenVoiceModal={() => setShowVoiceModal(true)}
               userName={userName}
+              userAvatar={userAvatar}
+              currentUser={currentUser}
               onOpenNameModal={() => setShowNameModal(true)}
               onOpenOfferModal={() => setShowOfferModal(true)}
               onOpenIntroModal={() => setShowIntroSplash(true)}
@@ -977,6 +1067,7 @@ export function App() {
                 setIsChatFullscreen(nextVal);
                 if (nextVal) {
                   setSidebarOpen(false);
+                  setHistoryDrawerOpen(false);
                 }
               }}
             />
@@ -1006,6 +1097,7 @@ export function App() {
                 setActiveTab('chat');
               }}
               isFullscreen={isChatFullscreen}
+              hideInnerSidebar={contextPanelOpen && !isChatFullscreen}
               onToggleFullscreen={(val?: boolean) => {
                 const nextVal = typeof val === 'boolean' ? val : !isChatFullscreen;
                 setIsChatFullscreen(nextVal);
@@ -1016,6 +1108,11 @@ export function App() {
               onExitFullscreen={() => {
                 setIsChatFullscreen(false);
               }}
+              autoUpdateNotice={autoUpdateNotice}
+              onOpenOfferModal={() => setShowOfferModal(true)}
+              onOpenStoreModal={() => setShowStoreModal(true)}
+              onOpenPricingModal={() => handleOpenPricingModal()}
+              onOpenIntroModal={() => setShowIntroSplash(true)}
             />
           )}
 
@@ -1322,6 +1419,36 @@ export function App() {
         userName={currentUser?.name || userName}
         isDark={isDark}
         enabled={!isBotCrawler}
+      />
+
+      {/* 14. Slide-out Question History Drawer */}
+      {!isChatFullscreen && (
+        <HistoryDrawer
+          isOpen={historyDrawerOpen}
+          onClose={() => setHistoryDrawerOpen(false)}
+          sessions={sessions}
+          currentSessionId={currentSessionId}
+          onSelectSession={(id) => {
+            setCurrentSessionId(id);
+            setActiveTab('chat');
+          }}
+          onNewChat={handleNewChat}
+          onDeleteSession={handleDeleteSession}
+          isDark={isDark}
+        />
+      )}
+
+      {/* 15. Global Real-Time Incoming Call Overlay (Accept / Decline + Camera/Mic) */}
+      <IncomingCallModal
+        activeUserId={
+          currentUser
+            ? currentUser.id
+            : 'user-local-' + (userName || 'Bạn học').toLowerCase().replace(/\s+/g, '-')
+        }
+        activeUserName={currentUser ? currentUser.name : userName || 'Bạn học'}
+        activeUserAvatar={currentUser?.avatar || userAvatar}
+        isDark={isDark}
+        disabled={isBotCrawler}
       />
     </div>
   );

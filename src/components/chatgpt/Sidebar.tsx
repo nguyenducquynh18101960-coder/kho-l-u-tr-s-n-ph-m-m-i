@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Plus,
   Image as ImageIcon,
@@ -6,53 +6,81 @@ import {
   FileCheck2,
   Lightbulb,
   Calendar,
-  Search,
-  PanelLeftClose,
   MessageSquare,
-  Trash2,
   Sun,
   Moon,
   Sparkles,
-  Pin,
   GraduationCap,
-  Award,
-  Info,
   GitFork,
-  Palette,
-  Volume2,
-  PenLine,
   Video,
-  LogIn,
-  User,
   Users,
-  Globe,
-  Zap,
   Sliders,
   Trophy,
-  Flame,
-  LogOut,
-  Flower2,
+  Target,
+  Bell,
+  Bot,
+  LayoutGrid,
+  User,
+  X,
 } from 'lucide-react';
 import { GradeLevel, ChatSession } from '../../types';
 import { BackgroundTheme } from '../../types/theme';
-import { getUserInitials } from './UserNameModal';
 import { UserAccount } from '../../types/auth';
-import { PWAInstallButton } from './PWAInstallButton';
-import { DailyLoginStreakWidget } from './DailyLoginStreakWidget';
 import { getVisibleHolidays } from './HolidayGiftAnimationModal';
+import { getUserInitials } from './UserNameModal';
+
+export type MainTabId =
+  | 'chat'
+  | 'group'
+  | 'image'
+  | 'video'
+  | 'exam'
+  | 'grade'
+  | 'tips'
+  | 'plan'
+  | 'mindmap'
+  | 'teacher'
+  | 'control'
+  | 'achievements'
+  | 'schedule'
+  | 'class_management';
+
+export type HubSpaceId = 'ai' | 'community' | 'practice' | 'tools';
+
+export function getSpaceFromTab(tab: MainTabId): HubSpaceId {
+  if (tab === 'group') return 'community';
+  if (tab === 'exam' || tab === 'grade') return 'practice';
+  if (
+    tab === 'schedule' ||
+    tab === 'mindmap' ||
+    tab === 'tips' ||
+    tab === 'image' ||
+    tab === 'video' ||
+    tab === 'plan' ||
+    tab === 'teacher' ||
+    tab === 'achievements' ||
+    tab === 'class_management' ||
+    tab === 'control'
+  ) {
+    return 'tools';
+  }
+  return 'ai';
+}
 
 interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
-  sessions: ChatSession[];
-  currentSessionId: string;
-  onSelectSession: (id: string) => void;
+  sessions?: ChatSession[];
+  currentSessionId?: string;
+  onSelectSession?: (id: string) => void;
   onNewChat: () => void;
-  onDeleteSession: (id: string, e: React.MouseEvent) => void;
-  selectedGrade: GradeLevel;
-  onSelectGrade: (grade: GradeLevel) => void;
-  activeTab: 'chat' | 'group' | 'image' | 'video' | 'exam' | 'grade' | 'tips' | 'plan' | 'mindmap' | 'teacher' | 'control' | 'achievements' | 'schedule' | 'class_management';
-  setActiveTab: (tab: 'chat' | 'group' | 'image' | 'video' | 'exam' | 'grade' | 'tips' | 'plan' | 'mindmap' | 'teacher' | 'control' | 'achievements' | 'schedule' | 'class_management') => void;
+  onDeleteSession?: (id: string, e: React.MouseEvent) => void;
+  selectedGrade?: GradeLevel;
+  onSelectGrade?: (grade: GradeLevel) => void;
+  activeTab: MainTabId;
+  setActiveTab: (tab: MainTabId) => void;
+  activeSpace?: HubSpaceId;
+  onSelectSpace?: (space: HubSpaceId) => void;
   isDark: boolean;
   onToggleTheme: () => void;
   onOpenOfferModal: () => void;
@@ -73,677 +101,380 @@ interface SidebarProps {
   isFullscreen?: boolean;
   unreadGroupMessagesCount?: number;
   onOpenAchievementsModal?: () => void;
+  onOpenAdminNotifications?: () => void;
+  hasAdminNotificationDot?: boolean;
   onLogout?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
   onClose,
-  sessions,
-  currentSessionId,
-  onSelectSession,
   onNewChat,
-  onDeleteSession,
-  selectedGrade,
-  onSelectGrade,
   activeTab,
   setActiveTab,
+  activeSpace,
+  onSelectSpace,
   isDark,
   onToggleTheme,
   onOpenOfferModal,
-  onOpenIntroModal,
-  activeTheme,
-  onOpenThemeModal,
-  onOpenVoiceModal,
-  userName = 'Bạn học',
+  userName = 'Mạc Khánh Duy',
   onOpenNameModal,
   currentUser,
   onOpenAuthModal,
   userAvatar,
-  onOpenAvatarModal,
-  onOpenStoreModal,
-  subscriptionPlan = 'free',
-  onOpenPricingModal,
   isAdmin = false,
   isFullscreen = false,
   unreadGroupMessagesCount = 0,
-  onOpenAchievementsModal,
-  onLogout,
+  onOpenAdminNotifications,
+  hasAdminNotificationDot = true,
 }) => {
   if (isFullscreen) {
     return null;
   }
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showSearch, setShowSearch] = useState(false);
+  const currentSpace: HubSpaceId = activeSpace || getSpaceFromTab(activeTab);
+  const displayName =
+    currentUser?.name || (userName && userName !== 'Bạn học' ? userName : 'Mạc Khánh Duy');
+  const avatarSrc = currentUser?.avatar || userAvatar;
+  const showNotifDot =
+    hasAdminNotificationDot || getVisibleHolidays().length > 0 || unreadGroupMessagesCount > 0;
 
-  const filteredSessions = sessions.filter((s) =>
-    s.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const pinnedSessions = filteredSessions.filter((s) => s.isPinned);
-  const recentSessions = filteredSessions.filter((s) => !s.isPinned);
-
-  // User Requirement: "thanh chỗ từ hỏi bài & gia sư AI từ chỗ đấy đến tạo ảnh và poster AI thìw giữ nguyên còn điều khiển Max10 AI chỉ có quản trị viên mới có"
-  const tools = [
+  const railSpaces: Array<{
+    id: HubSpaceId;
+    label: string;
+    subtitle: string;
+    icon: React.FC<{ className?: string }>;
+    badgeCount?: number;
+    defaultTab: MainTabId;
+  }> = [
     {
-      id: 'chat' as const,
-      label: 'Hỏi bài & Gia sư AI',
-      icon: MessageSquare,
-      color: 'text-emerald-500',
+      id: 'ai',
+      label: 'Gia sư AI',
+      subtitle: 'Hỏi bài, giải chi tiết, sơ đồ tư duy',
+      icon: Bot,
+      defaultTab: 'chat',
     },
     {
-      id: 'achievements' as const,
-      label: 'Thành tích & Huy hiệu',
-      icon: Trophy,
-      color: 'text-amber-500',
-      badge: '🔥 10 ngày',
-      badgeColor: 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30',
-    },
-    {
-      id: 'exam' as const,
-      label: 'Luyện đề & Bảng Vàng',
-      icon: BookOpen,
-      color: 'text-blue-500',
-    },
-    {
-      id: 'schedule' as const,
-      label: 'Lịch học cá nhân',
-      icon: Calendar,
-      color: 'text-cyan-500',
-      badge: 'Mới',
-      badgeColor: 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30',
-    },
-    {
-      id: 'group' as const,
-      label: 'Nhóm học tập & AI',
+      id: 'community',
+      label: 'Cộng đồng & Chat',
+      subtitle: 'Nhóm học tập & Nhắn tin 1-1',
       icon: Users,
-      color: 'text-indigo-500',
-      badge: unreadGroupMessagesCount > 0 ? `${unreadGroupMessagesCount}` : undefined,
-      badgeColor: 'bg-rose-500 text-white animate-pulse shadow-xs',
+      badgeCount: unreadGroupMessagesCount,
+      defaultTab: 'group',
     },
     {
-      id: 'video' as const,
-      label: 'Tạo Video Người AI Nói',
-      icon: Video,
-      color: 'text-rose-500',
+      id: 'practice',
+      label: 'Kho Luyện Tập',
+      subtitle: 'Luyện đề, Chấm bài, Mini game, 5 Bước',
+      icon: BookOpen,
+      defaultTab: 'exam',
     },
     {
-      id: 'image' as const,
-      label: 'Tạo Poster & Ảnh AI',
-      icon: ImageIcon,
-      color: 'text-rose-500',
-      badge: '20/10',
+      id: 'tools',
+      label: 'Công cụ AI & Lịch học',
+      subtitle: 'Lịch học, Sơ đồ tư duy, Ảnh & Video AI',
+      icon: LayoutGrid,
+      defaultTab: 'schedule',
     },
-    {
-      id: 'teacher' as const,
-      label: 'Hỏi bài Thầy Cô',
-      icon: GraduationCap,
-      color: 'text-emerald-500',
-    },
-    // User Requirement: "Thêm một tab 'Quản lý Lớp học' trong sidebar chỉ hiển thị cho người dùng có vai trò là giáo viên. Tab này cho phép giáo viên chọn lớp (từ danh sách 6A1-9D6) và xem bảng điều khiển tổng hợp về danh sách học sinh, bài tập đã nộp, và tiến độ ôn luyện của từng học sinh trong lớp đó."
+  ];
+
+  const handleSpaceClick = (space: (typeof railSpaces)[number]) => {
+    if (onSelectSpace) {
+      onSelectSpace(space.id);
+    } else {
+      setActiveTab(space.defaultTab);
+    }
+    onClose();
+  };
+
+  const mobileSubTools: Array<{
+    id: MainTabId;
+    label: string;
+    icon: React.FC<{ className?: string }>;
+    accent: string;
+  }> = [
+    { id: 'chat', label: 'Gia sư AI', icon: MessageSquare, accent: 'text-emerald-500' },
+    { id: 'group', label: 'Cộng đồng & Chat', icon: Users, accent: 'text-teal-500' },
+    { id: 'exam', label: 'Luyện đề thi', icon: BookOpen, accent: 'text-emerald-500' },
+    { id: 'grade', label: 'Chấm bài AI', icon: FileCheck2, accent: 'text-sky-500' },
+    { id: 'schedule', label: 'Lịch học cá nhân', icon: Calendar, accent: 'text-emerald-500' },
+    { id: 'mindmap', label: 'Sơ đồ tư duy', icon: GitFork, accent: 'text-teal-500' },
+    { id: 'tips', label: 'Cảnh báo bẫy đề', icon: Lightbulb, accent: 'text-amber-500' },
+    { id: 'image', label: 'Vẽ ảnh AI', icon: ImageIcon, accent: 'text-sky-500' },
+    { id: 'video', label: 'Video bài giảng AI', icon: Video, accent: 'text-rose-500' },
+    { id: 'plan', label: 'Lộ trình ôn thi', icon: Target, accent: 'text-indigo-500' },
+    { id: 'teacher', label: 'Hỏi bài Thầy Cô', icon: GraduationCap, accent: 'text-emerald-500' },
+    { id: 'achievements', label: 'Thành tích & Huy hiệu', icon: Trophy, accent: 'text-amber-500' },
     ...((currentUser?.role === 'teacher' && currentUser?.isVerifiedTeacher !== false) || isAdmin
-      ? [
-          {
-            id: 'class_management' as const,
-            label: 'Quản lý Lớp học',
-            icon: Users,
-            color: 'text-violet-500',
-            badge: 'GV 6A1-9D6',
-            badgeColor: 'bg-violet-500/20 text-violet-700 dark:text-violet-300 border border-violet-500/30',
-          },
-        ]
+      ? [{ id: 'class_management' as const, label: 'Quản lý Lớp học', icon: Users, accent: 'text-violet-500' }]
       : []),
-    // User Requirement: "còn điều khiển Max10 AI chỉ có quản trị viên mới có"
     ...(isAdmin
-      ? [
-          {
-            id: 'control' as const,
-            label: 'Điều khiển Max10 AI',
-            icon: Sliders,
-            color: 'text-amber-500',
-            badge: 'Admin',
-          },
-        ]
+      ? [{ id: 'control' as const, label: 'Điều khiển Max10 AI', icon: Sliders, accent: 'text-amber-500' }]
       : []),
   ];
 
   return (
     <>
-      {/* Mobile Backdrop */}
-      {isOpen && (
-        <div
-          onClick={onClose}
-          className="fixed inset-0 bg-black/50 z-40 md:hidden backdrop-blur-xs transition-opacity"
-        />
-      )}
-
-      {/* Sidebar Container */}
+      {/* DESKTOP 68px FLUSH NAVIGATION RAIL */}
       <aside
-        className={`fixed md:static inset-y-0 left-0 z-50 flex flex-col w-[275px] shrink-0 transition-all duration-200 ease-in-out select-none backdrop-blur-xl ${
-          isOpen ? 'translate-x-0 flex' : '-translate-x-full md:hidden hidden'
-        } ${
+        className={`hidden md:flex flex-col items-center w-[68px] shrink-0 h-full border-r py-3.5 justify-between select-none z-30 transition-colors ${
           isDark
-            ? 'bg-[#0c1018]/95 text-slate-100 border-r border-white/[0.08] shadow-2xl shadow-black/40'
-            : 'bg-white/95 text-slate-800 border-r border-slate-200/80 shadow-xl shadow-slate-200/40'
+            ? 'bg-[#090d15] border-white/[0.08] text-slate-200'
+            : 'bg-white border-slate-200/85 text-slate-700'
         }`}
+        aria-label="Thanh điều hướng chính"
       >
-        {/* Top Header: Brand Identity */}
-        <div className="px-4 pt-4 pb-3 flex items-center justify-between border-b border-slate-200/60 dark:border-white/[0.06]">
-          <div
-            onClick={() => {
-              setActiveTab('chat');
-              onNewChat();
-            }}
-            className="flex items-center gap-2.5 cursor-pointer group min-w-0"
-            title="Max10 AI - Gia sư điểm 10 THCS"
-          >
-            {/* Unique Max10 Avatar with glowing ring */}
-            <div className="w-8 h-8 rounded-xl overflow-hidden p-0.5 relative shrink-0 group-hover:scale-105 transition-transform bg-gradient-to-tr from-emerald-500 to-teal-400 shadow-sm shadow-emerald-500/20">
+        {/* Top Brand + 4 Study Hub Spaces */}
+        <div className="flex flex-col items-center gap-2.5 w-full">
+          {/* Brand Emblem */}
+          <div className="relative group flex justify-center w-full">
+            <button
+              type="button"
+              onClick={() => {
+                if (onSelectSpace) onSelectSpace('ai');
+                setActiveTab('chat');
+                onNewChat();
+              }}
+              className="w-11 h-11 rounded-2xl overflow-hidden p-0.5 bg-gradient-to-tr from-emerald-600 to-teal-400 shadow-sm hover:scale-105 transition-transform cursor-pointer"
+              aria-label="Max10 AI - Gia sư điểm 10 THCS"
+            >
               <img
                 src="/max10-avatar.jpg"
-                alt="Ảnh đại diện Max10"
-                className="w-full h-full object-cover rounded-[9px]"
+                alt="Max10 AI"
+                className="w-full h-full object-cover rounded-[14px]"
                 referrerPolicy="no-referrer"
               />
-            </div>
-            <div className="min-w-0 flex-1">
-              <span className="font-extrabold text-[13px] tracking-tight text-slate-900 dark:text-white block leading-tight">
-                Max10 AI
-              </span>
-              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold tracking-wide block">
-                Gia sư điểm 10 THCS
-              </span>
+            </button>
+            <div className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 absolute left-full top-1/2 -translate-y-1/2 ml-3 px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-zinc-800 text-white text-xs font-bold whitespace-nowrap shadow-xl z-50 border border-white/10">
+              Max10 AI · Trang chủ
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setShowSearch(!showSearch)}
-              className="p-1.5 rounded-xl transition-all neu-btn text-slate-600 dark:text-zinc-400"
-              title="Tìm kiếm bài hỏi"
-            >
-              <Search className="w-4 h-4" />
-            </button>
+          <div
+            className={`w-8 h-px my-0.5 ${
+              isDark ? 'bg-white/[0.08]' : 'bg-slate-200/80'
+            }`}
+          />
 
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-xl transition-all neu-btn text-slate-600 dark:text-zinc-400 md:hidden"
-              title="Đóng thanh bên"
-            >
-              <PanelLeftClose className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
+          {/* 4 Primary Spaces */}
+          <nav className="flex flex-col items-center gap-2 w-full px-2">
+            {railSpaces.map((space) => {
+              const Icon = space.icon;
+              const isActive = currentSpace === space.id;
 
-        {/* Search Bar if expanded */}
-        {showSearch && (
-          <div className="px-3 pt-2">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm kiếm bài đã hỏi..."
-              className="w-full px-3.5 py-2 text-xs rounded-xl neu-pressed text-slate-900 dark:text-white placeholder-slate-400 outline-none"
-              autoFocus
-            />
-          </div>
-        )}
+              return (
+                <div key={space.id} className="relative group flex justify-center w-full">
+                  {/* Active Left Pill Marker (Discord-inspired indicator) */}
+                  {isActive && (
+                    <span className="absolute -left-2 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full bg-emerald-500" />
+                  )}
 
-        {/* New Question / Chat Action Button */}
-        <div className="p-3">
-          <button
-            onClick={() => {
-              setActiveTab('chat');
-              onNewChat();
-            }}
-            className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl neu-accent-btn font-extrabold text-xs group"
-          >
-            <div className="flex items-center gap-2">
-              <Plus className="w-4 h-4 stroke-[2.5]" />
-              <span>Đặt câu hỏi mới</span>
-            </div>
-            <Sparkles className="w-3.5 h-3.5 opacity-90 group-hover:rotate-12 transition-transform" />
-          </button>
-        </div>
-
-        {/* Scrollable Content: Tools & History (Fully scrollable from question tools down to bottom) */}
-        <div className="flex-1 overflow-y-auto overscroll-contain scroll-smooth px-3 space-y-3.5 text-xs pb-16">
-          {/* Section 1: Công Cụ Điểm 10 */}
-          <div>
-            {/* 5 Bước Điểm 10 Button Link */}
-            <button
-              onClick={onOpenOfferModal}
-              className="w-full mb-2 flex items-center justify-between p-2.5 rounded-2xl neu-btn text-xs font-bold text-emerald-800 dark:text-emerald-300"
-              title="Bấm để xem 5 bước học tập chuẩn Điểm 10"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-sm">🚀</span>
-                <span className="font-black tracking-tight">5 Bước Điểm 10</span>
-              </div>
-              <span className="text-[10px] px-2 py-0.5 rounded-full neu-pressed text-emerald-700 dark:text-emerald-300 font-extrabold">
-                Bấm xem
-              </span>
-            </button>
-
-            {/* Giới thiệu Max10 & Tác giả Mạc Khánh Duy */}
-            {onOpenIntroModal && (
-              <button
-                type="button"
-                onClick={onOpenIntroModal}
-                className="w-full mb-2 flex items-center justify-between p-2.5 rounded-2xl neu-btn text-xs font-bold text-slate-800 dark:text-zinc-200"
-                title="Giới thiệu Max10 AI, cách sử dụng và tác giả sáng lập Mạc Khánh Duy"
-              >
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                  <span className="font-bold tracking-tight">Giới thiệu Max10</span>
-                </div>
-                <span className="text-[10px] px-2 py-0.5 rounded-full neu-pressed text-amber-600 dark:text-amber-400 font-extrabold">
-                  Tác giả
-                </span>
-              </button>
-            )}
-
-            {/* Permanent Link Button */}
-            {onOpenStoreModal && (
-              <button
-                onClick={onOpenStoreModal}
-                className={`w-full mb-2.5 flex items-center justify-between px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
-                  isDark
-                    ? 'bg-zinc-850/90 border-zinc-700 text-emerald-300 hover:bg-zinc-800'
-                    : 'bg-white border-slate-200 text-emerald-800 hover:bg-slate-50 shadow-2xs'
-                }`}
-                title="Xem & Copy link xuất bản cố định 100% của Max10"
-              >
-                <div className="flex items-center gap-2 truncate">
-                  <Globe className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                  <span className="truncate">Link Xuất Bản Cố Định</span>
-                </div>
-                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold shrink-0">
-                  Không đổi link
-                </span>
-              </button>
-            )}
-
-            <div className="px-2 pb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
-              Công cụ học tập
-            </div>
-            <div className="space-y-0.5">
-              {tools.map((t) => {
-                const Icon = t.icon;
-                const isActive = activeTab === t.id;
-                return (
                   <button
-                    key={t.id}
-                    onClick={() => setActiveTab(t.id)}
-                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl transition-all ${
+                    type="button"
+                    onClick={() => handleSpaceClick(space)}
+                    className={`relative w-11 h-11 rounded-2xl flex items-center justify-center transition-all cursor-pointer ${
                       isActive
-                        ? isDark
-                          ? 'bg-zinc-800/90 text-white font-semibold'
-                          : 'bg-emerald-50/80 text-emerald-800 font-semibold border border-emerald-200/60'
+                        ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25'
                         : isDark
-                        ? 'text-zinc-300 hover:bg-zinc-850 hover:text-white'
-                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                        ? 'text-zinc-400 hover:bg-white/[0.07] hover:text-zinc-100'
+                        : 'text-slate-500 hover:bg-emerald-50 hover:text-emerald-700'
                     }`}
+                    aria-label={space.label}
                   >
-                    <div className="flex items-center gap-2.5 truncate">
-                      <Icon className={`w-4 h-4 shrink-0 ${t.color}`} />
-                      <span className="truncate">{t.label}</span>
-                    </div>
-                    {t.badge && (
-                      <span
-                        className={`text-[10px] px-1.5 py-0.2 rounded-full font-black shrink-0 ${
-                          t.badgeColor || 'neu-pressed text-rose-500'
-                        }`}
-                      >
-                        {t.badge}
+                    <Icon className="w-5 h-5" />
+                    {typeof space.badgeCount === 'number' && space.badgeCount > 0 && (
+                      <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-extrabold flex items-center justify-center shadow-xs tabular-nums">
+                        {space.badgeCount > 9 ? '9+' : space.badgeCount}
                       </span>
                     )}
                   </button>
-                );
-              })}
-            </div>
-          </div>
 
-          {/* Daily Login Streak: Shows consecutive study days and claims +50 XP bonus */}
-          <DailyLoginStreakWidget
-            isDark={isDark}
-            className="my-1.5"
-            onNavigateToAchievements={() => setActiveTab('achievements')}
-          />
-
-          {/* Section 2: Pinned / Important Questions */}
-          {pinnedSessions.length > 0 && (
-            <div>
-              <div className="px-2.5 pb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
-                <Pin className="w-3 h-3 text-amber-500" />
-                <span>Bài ghim quan trọng</span>
-              </div>
-              <div className="space-y-1">
-                {pinnedSessions.map((s) => {
-                  const isActive = activeTab === 'chat' && currentSessionId === s.id;
-                  return (
-                    <div
-                      key={s.id}
-                      onClick={() => {
-                        onSelectSession(s.id);
-                        setActiveTab('chat');
-                      }}
-                      className={`group flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer transition-all ${
-                        isActive
-                          ? 'neu-pressed text-emerald-600 dark:text-emerald-400 font-bold'
-                          : 'neu-btn text-slate-700 dark:text-zinc-300'
-                      }`}
-                    >
-                      <span className="truncate flex-1">{s.title}</span>
-                      <button
-                        onClick={(e) => onDeleteSession(s.id, e)}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:text-red-500 transition-opacity shrink-0"
-                        title="Xóa đoạn chat"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Section 3: Recent History */}
-          <div>
-            <div className="px-2.5 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
-              Bài hỏi gần đây
-            </div>
-            {recentSessions.length === 0 ? (
-              <p className="px-2.5 py-1 text-slate-400 text-[11px]">Chưa có bài hỏi nào.</p>
-            ) : (
-              <div className="space-y-1">
-                {recentSessions.map((s) => {
-                  const isActive = activeTab === 'chat' && currentSessionId === s.id;
-                  return (
-                    <div
-                      key={s.id}
-                      onClick={() => {
-                        onSelectSession(s.id);
-                        setActiveTab('chat');
-                      }}
-                      className={`group flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer transition-all ${
-                        isActive
-                          ? 'neu-pressed text-emerald-600 dark:text-emerald-400 font-bold'
-                          : 'neu-btn text-slate-700 dark:text-zinc-300'
-                      }`}
-                    >
-                      <span className="truncate flex-1">{s.title}</span>
-                      <button
-                        onClick={(e) => onDeleteSession(s.id, e)}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:text-red-500 transition-opacity shrink-0"
-                        title="Xóa"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                  {/* Hover Tooltip */}
+                  <div className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 absolute left-full top-1/2 -translate-y-1/2 ml-3 px-3 py-2 rounded-xl bg-slate-900 dark:bg-zinc-800 text-white shadow-xl z-50 border border-white/10 whitespace-nowrap">
+                    <div className="text-xs font-extrabold">{space.label}</div>
+                    <div className="text-[10px] text-slate-300 font-medium">{space.subtitle}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </nav>
         </div>
 
-        {/* Bottom Profile Area: Creator Signature & Theme Switcher */}
-        <div
-          className={`p-2.5 border-t text-xs ${
-            isDark ? 'border-zinc-800/80 bg-zinc-900/60' : 'border-slate-200/80 bg-slate-50/80'
-          }`}
-        >
-          {/* Install Max10 App / Store Publish Card */}
-          <PWAInstallButton variant="sidebar" onOpenStoreModal={onOpenStoreModal} />
-
-          {/* Account Login / User Profile */}
-          {onOpenAuthModal && (
-            <div
-              onClick={onOpenAuthModal}
-              className={`mb-2 p-2 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
-                currentUser
-                  ? isDark
-                    ? 'bg-blue-950/30 border-blue-900/50 hover:bg-blue-900/40'
-                    : 'bg-blue-50/70 border-blue-200 hover:bg-blue-100/80'
-                  : 'bg-gradient-to-r from-emerald-600/10 to-teal-600/10 border-emerald-500/30 hover:bg-emerald-500/20'
-              }`}
-              title={
-                currentUser
-                  ? `Đang đăng nhập: ${currentUser.name} (${currentUser.role === 'teacher' ? 'Thầy cô' : currentUser.role === 'admin' ? 'Quản trị' : 'Học sinh'})`
-                  : 'Đăng nhập Khách (Học sinh & Thầy cô)'
-              }
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                {currentUser?.avatar ? (
-                  <img
-                    src={currentUser.avatar}
-                    alt={currentUser.name}
-                    className="w-6 h-6 rounded-full object-cover shrink-0 border border-emerald-500/40"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-emerald-600 to-blue-600 text-white flex items-center justify-center shrink-0">
-                    <LogIn className="w-3 h-3" />
-                  </div>
-                )}
-                <div className="min-w-0 text-left">
-                  <p className="text-[11px] font-bold truncate text-slate-900 dark:text-zinc-100">
-                    {currentUser ? currentUser.name : 'Đăng nhập Max10'}
-                  </p>
-                  <p className="text-[9px] font-mono text-slate-500 dark:text-zinc-400 truncate">
-                    {currentUser
-                      ? `TK: ${currentUser.email || currentUser.id}`
-                      : 'Học sinh · Thầy cô giáo'}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span className={`text-[10px] font-extrabold ${
-                  currentUser?.role === 'teacher'
-                    ? 'text-indigo-600 dark:text-indigo-400'
-                    : 'text-emerald-600 dark:text-emerald-400'
-                }`}>
-                  {isAdmin ? 'Quản trị' : currentUser ? (currentUser.role === 'teacher' ? 'Thầy/Cô' : 'Học sinh') : 'Đăng nhập'}
-                </span>
-                {currentUser && onLogout && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onLogout();
-                    }}
-                    className="p-1 rounded-lg text-rose-500 hover:bg-rose-500/15 transition-colors cursor-pointer"
-                    title="Đăng xuất tài khoản"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Seasonal Holiday Gift Trigger: Automatically visible only during active holiday months and hidden after holiday passes */}
-          {(() => {
-            const visibleHolidays = getVisibleHolidays();
-            if (visibleHolidays.length === 0) return null;
-            const holidayLabels = visibleHolidays.map((h) => h.badgeText).join(' · ');
-            return (
-              <button
-                type="button"
-                onClick={() => window.dispatchEvent(new CustomEvent('max10_open_holiday_gift'))}
-                className={`w-full mb-2 p-2 rounded-xl border flex items-center justify-between text-xs font-bold transition-all cursor-pointer ${
-                  isDark
-                    ? 'bg-rose-950/20 border-rose-500/30 text-rose-300 hover:bg-rose-950/35'
-                    : 'bg-rose-50/70 border-rose-200 text-rose-700 hover:bg-rose-100/70'
-                }`}
-                title={`Hiệu ứng quay quà lễ: ${holidayLabels}`}
-              >
-                <span className="flex items-center gap-1.5 truncate">
-                  <Flower2 className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                  <span className="truncate">Quà Lễ: {holidayLabels}</span>
-                </span>
-                <span className="text-[10px] font-extrabold shrink-0">Mở quà</span>
-              </button>
-            );
-          })()}
-
-          {/* Upgrade Plan Button (User requirement: Gói Plus 100k, Gói Premium 500k) */}
-          {onOpenPricingModal && (
+        {/* Bottom Rail Actions: Notification Bell (Red Dot) + Light/Dark Toggle + Student Avatar */}
+        <div className="flex flex-col items-center gap-2 w-full px-2">
+          {/* Notification Bell with Red Dot */}
+          <div className="relative group flex justify-center w-full">
             <button
               type="button"
-              onClick={() => onOpenPricingModal()}
-              className={`w-full mb-2 p-2 rounded-xl border flex items-center justify-between text-xs font-bold transition-all cursor-pointer ${
-                subscriptionPlan === 'plus'
-                  ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                  : subscriptionPlan === 'premium'
-                  ? 'border-purple-500/50 bg-purple-500/10 text-purple-600 dark:text-purple-400'
-                  : isDark
-                  ? 'border-zinc-700 bg-zinc-800/80 text-zinc-300 hover:border-amber-500/50 hover:text-amber-400'
-                  : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-amber-400 hover:text-amber-700 shadow-2xs'
+              onClick={onOpenAdminNotifications || onOpenOfferModal}
+              className={`relative w-11 h-11 rounded-2xl flex items-center justify-center transition-all cursor-pointer ${
+                isDark
+                  ? 'text-zinc-300 hover:bg-white/[0.07] hover:text-emerald-400'
+                  : 'text-slate-600 hover:bg-emerald-50 hover:text-emerald-700'
               }`}
-              title="Mở bảng nâng cấp gói Plus & Premium"
+              aria-label="Thông báo từ Admin và Hệ thống"
             >
-              <div className="flex items-center gap-1.5 truncate">
-                <Zap className={`w-3.5 h-3.5 shrink-0 ${subscriptionPlan !== 'free' ? 'fill-current' : 'text-amber-500'}`} />
-                <span className="truncate">
-                  {subscriptionPlan === 'plus'
-                    ? 'Gói Plus (100k)'
-                    : subscriptionPlan === 'premium'
-                    ? 'Gói Premium (500k)'
-                    : '⚡ Nâng cấp gói VIP'}
-                </span>
-              </div>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-extrabold bg-black/5 dark:bg-white/10 uppercase shrink-0">
-                {subscriptionPlan === 'free' ? '0.1s tức thì' : 'Đang dùng'}
-              </span>
+              <Bell className="w-5 h-5" />
+              {showNotifDot && (
+                <span className="absolute top-2.5 right-2.5 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white dark:ring-[#090d15]" />
+              )}
             </button>
-          )}
-
-          {/* User Profile Card (Student / Teacher / Admin) */}
-          <div
-            className={`p-2 rounded-2xl border transition-all ${
-              isDark ? 'bg-zinc-900/60 border-white/5 hover:border-amber-500/30' : 'bg-white border-slate-200/90 shadow-2xs hover:border-amber-400'
-            }`}
-          >
-            <div
-              onClick={onOpenAvatarModal || onOpenNameModal || onOpenOfferModal}
-              className="flex items-center justify-between cursor-pointer"
-              title={
-                currentUser
-                  ? `${currentUser.role === 'teacher' ? 'Thầy/Cô' : currentUser.role === 'admin' ? 'Quản trị viên' : 'Học sinh'}: ${userName} · TK: ${currentUser.email || currentUser.id}`
-                  : `Khách: ${userName} (Bấm để thay ảnh đại diện & đổi tên gọi)`
-              }
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                {userAvatar ? (
-                  <img
-                    src={userAvatar}
-                    alt={userName}
-                    className="w-7 h-7 rounded-full object-cover shrink-0 border border-emerald-500/50 shadow-xs"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs uppercase">
-                    {getUserInitials(userName)}
-                  </div>
-                )}
-                <div className="text-left min-w-0">
-                  <p className="font-bold leading-tight text-[11px] text-slate-900 dark:text-white flex items-center gap-1 truncate">
-                    <span className="truncate">{currentUser?.name || userName}</span>
-                    <Award className="w-3 h-3 text-amber-500 shrink-0" />
-                  </p>
-                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-none mt-0.5 truncate">
-                    {currentUser?.role === 'teacher'
-                      ? `Thầy/Cô · ${currentUser.teachingSubject || 'Giáo viên'}${currentUser.homeroomClass ? ` (${currentUser.homeroomClass})` : ''}`
-                      : currentUser?.role === 'admin'
-                      ? 'Quản trị viên Max10 AI'
-                      : `Học sinh ${currentUser?.studentClass ? `Lớp ${currentUser.studentClass}` : selectedGrade} · Săn điểm 10`}
-                  </p>
-                  {currentUser?.email && (
-                    <p className="text-[9px] font-mono text-emerald-600 dark:text-emerald-400 leading-tight mt-0.5 truncate">
-                      {currentUser.email}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (onOpenAchievementsModal) onOpenAchievementsModal();
-                    else setActiveTab('achievements');
-                  }}
-                  className="p-1 rounded-lg text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 shrink-0 cursor-pointer"
-                  title="Mở Bảng Thành tích & Huy hiệu"
-                >
-                  <Trophy className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={onOpenAvatarModal || onOpenNameModal}
-                  className="p-1 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 shrink-0 cursor-pointer"
-                  title="Đổi ảnh đại diện & tên gọi"
-                >
-                  <PenLine className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Earned Badges Row displayed directly in student profile */}
-            <div
-              onClick={() => {
-                if (onOpenAchievementsModal) onOpenAchievementsModal();
-                else setActiveTab('achievements');
-              }}
-              className="mt-2 pt-2 border-t border-slate-100 dark:border-white/5 flex items-center gap-1.5 cursor-pointer group"
-              title="Xem chi tiết các huy hiệu đã đạt được"
-            >
-              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-[9px] font-black text-amber-700 dark:text-amber-400 shrink-0">
-                <Flame className="w-2.5 h-2.5 fill-current text-amber-500" />
-                <span>10 Ngày</span>
-              </div>
-              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-[9px] font-black text-blue-700 dark:text-blue-400 shrink-0">
-                <span>📐 Đại số</span>
-              </div>
-              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-[9px] font-black text-emerald-700 dark:text-emerald-400 shrink-0 truncate">
-                <span>🏆 7 Huy hiệu</span>
-              </div>
+            <div className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 absolute left-full top-1/2 -translate-y-1/2 ml-3 px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-zinc-800 text-white text-xs font-bold whitespace-nowrap shadow-xl z-50 border border-white/10">
+              Thông báo từ Admin &amp; Quà lễ
             </div>
           </div>
 
-          {/* Dark Mode / Light Mode Control */}
-          <div className="mt-1.5 px-0.5">
-            <div className="flex items-center justify-between px-1 pt-0.5">
-              <span className="text-[11px] text-slate-500 dark:text-zinc-400">Giao diện</span>
-              <button
-                onClick={onToggleTheme}
-                className={`p-1 px-2 rounded-lg border flex items-center gap-1.5 text-[11px] font-medium transition-colors ${
-                  isDark
-                    ? 'bg-zinc-800 border-zinc-700 text-amber-400 hover:bg-zinc-700'
-                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                {isDark ? (
-                  <>
-                    <Sun className="w-3 h-3 text-amber-400" />
-                    <span>Sáng</span>
-                  </>
-                ) : (
-                  <>
-                    <Moon className="w-3 h-3 text-indigo-500" />
-                    <span>Tối</span>
-                  </>
-                )}
-              </button>
+          {/* Theme Toggle */}
+          <div className="relative group flex justify-center w-full">
+            <button
+              type="button"
+              onClick={onToggleTheme}
+              className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-all cursor-pointer ${
+                isDark
+                  ? 'text-amber-400 hover:bg-white/[0.07]'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+              aria-label={isDark ? 'Chuyển sang giao diện Sáng' : 'Chuyển sang giao diện Tối'}
+            >
+              {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
+            <div className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 absolute left-full top-1/2 -translate-y-1/2 ml-3 px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-zinc-800 text-white text-xs font-bold whitespace-nowrap shadow-xl z-50 border border-white/10">
+              {isDark ? 'Chế độ Sáng' : 'Chế độ Tối'}
+            </div>
+          </div>
+
+          {/* Student Avatar (Mạc Khánh Duy) */}
+          <div className="relative group flex justify-center w-full pt-1">
+            <button
+              type="button"
+              onClick={onOpenNameModal || onOpenAuthModal}
+              className="relative w-10 h-10 rounded-full overflow-hidden border-2 border-emerald-500/60 hover:border-emerald-400 shadow-sm transition-transform hover:scale-105 cursor-pointer bg-emerald-600 text-white flex items-center justify-center font-extrabold text-xs"
+              aria-label={`Hồ sơ ${displayName}`}
+            >
+              {avatarSrc ? (
+                <img
+                  src={avatarSrc}
+                  alt={displayName}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <span>{displayName ? getUserInitials(displayName) : <User className="w-4 h-4" />}</span>
+              )}
+            </button>
+            <div className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 absolute left-full top-1/2 -translate-y-1/2 ml-3 px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-zinc-800 text-white text-xs font-bold whitespace-nowrap shadow-xl z-50 border border-white/10">
+              {displayName} · Hồ sơ học sinh
             </div>
           </div>
         </div>
       </aside>
+
+      {/* MOBILE DRAWER (< md) */}
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex md:hidden select-none">
+          <div
+            onClick={onClose}
+            className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs"
+          />
+          <aside
+            className={`relative z-10 w-[272px] h-full flex flex-col border-r p-3.5 justify-between overflow-y-auto ${
+              isDark
+                ? 'bg-[#0b1019] border-white/10 text-slate-100'
+                : 'bg-white border-slate-200 text-slate-800'
+            }`}
+          >
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl overflow-hidden p-0.5 bg-gradient-to-tr from-emerald-600 to-teal-400">
+                    <img
+                      src="/max10-avatar.jpg"
+                      alt="Max10 AI"
+                      className="w-full h-full object-cover rounded-[9px]"
+                    />
+                  </div>
+                  <div>
+                    <div className="text-sm font-black">Max10 AI</div>
+                    <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                      {displayName}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('chat');
+                  onNewChat();
+                  onClose();
+                }}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl bg-emerald-600 text-white font-bold text-xs shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Đặt câu hỏi mới</span>
+              </button>
+
+              <div className="space-y-1">
+                <div className="px-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
+                  Không gian học tập
+                </div>
+                {mobileSubTools.map((tool) => {
+                  const Icon = tool.icon;
+                  const active = activeTab === tool.id;
+                  return (
+                    <button
+                      key={tool.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveTab(tool.id);
+                        onClose();
+                      }}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                        active
+                          ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold'
+                          : 'hover:bg-slate-100 dark:hover:bg-zinc-800/70'
+                      }`}
+                    >
+                      <Icon className={`w-4 h-4 ${tool.accent}`} />
+                      <span>{tool.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-200 dark:border-white/10 mt-4 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenAdminNotifications?.();
+                  onClose();
+                }}
+                className="flex-1 px-3 py-2 rounded-xl bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center justify-center gap-1.5"
+              >
+                <Bell className="w-3.5 h-3.5" />
+                <span>Thông báo</span>
+              </button>
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-zinc-700 text-xs font-bold flex items-center gap-1.5"
+              >
+                {isDark ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-indigo-500" />}
+                <span>{isDark ? 'Sáng' : 'Tối'}</span>
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
     </>
   );
 };
