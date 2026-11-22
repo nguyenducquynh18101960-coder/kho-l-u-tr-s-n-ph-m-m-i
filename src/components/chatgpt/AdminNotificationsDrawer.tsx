@@ -156,6 +156,40 @@ export const AdminNotificationsDrawer: React.FC<AdminNotificationsDrawerProps> =
             </div>
           )}
 
+          {/* Always-Available XP Level-Up Spin Card */}
+          <div className="space-y-2">
+            <div className="px-1 text-[11px] font-extrabold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+              Vòng quay kinh nghiệm
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('max10_open_xp_spin'));
+                onClose();
+              }}
+              className={`w-full p-3.5 rounded-2xl border text-left flex items-center justify-between gap-3 transition-all cursor-pointer hover:-translate-y-0.5 ${
+                isDark
+                  ? 'bg-emerald-500/12 border-emerald-500/35 hover:border-emerald-400/60 text-emerald-200'
+                  : 'bg-emerald-50/95 border-emerald-200 hover:border-emerald-300 text-emerald-950'
+              }`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                  <Zap className="w-5 h-5 fill-current" />
+                </div>
+                <div className="min-w-0">
+                  <div className="font-extrabold text-xs truncate">
+                    Quay XP Lên Cấp
+                  </div>
+                  <div className="text-[11px] opacity-80 truncate">
+                    Tích lũy XP thăng cấp &amp; quay lễ theo tháng
+                  </div>
+                </div>
+              </div>
+              <ArrowRight className="w-4 h-4 text-emerald-500 shrink-0" />
+            </button>
+          </div>
+
           {/* Seasonal Holiday Gifts Section */}
           {visibleHolidays.length > 0 && (
             <div className="space-y-2">

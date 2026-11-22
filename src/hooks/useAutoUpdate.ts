@@ -4,8 +4,11 @@ import { formatAccurateTime } from '../utils/timeFormat';
 export interface SystemStatus {
   isUpdating: boolean;
   version: string;
+  updateCount?: number;
   publishedUrl: string;
   message: string;
+  lastUpdateTitle?: string;
+  lastUpdateMessage?: string;
   estimatedMinutes?: number;
   estimatedSeconds?: number;
   updatedAt?: number;
@@ -42,7 +45,7 @@ export function useAutoUpdate() {
             initialVersionRef.current = data.version;
           } else if (data.version && data.version !== initialVersionRef.current) {
             initialVersionRef.current = data.version;
-            // New version detected! Use the exact publish timestamp from server
+            // New version detected! Use the exact publish timestamp & dynamic changelog from server
             const publishTime =
               typeof data.lastPublishedAt === 'number' && data.lastPublishedAt > 0
                 ? data.lastPublishedAt
@@ -50,12 +53,16 @@ export function useAutoUpdate() {
                 ? data.updatedAt
                 : Date.now();
             const exactTimeStr = formatAccurateTime(publishTime, formatAccurateTime(Date.now()));
+            const versionTag = data.updateCount ? `#v${data.updateCount}` : data.version;
+            const dynamicAnnouncementContent =
+              data.lastUpdateMessage?.trim() ||
+              `📢 [CẬP NHẬT MỚI ${versionTag} • ${exactTimeStr}]\n🚀 Max10 AI vừa phát hành bản cập nhật mới (${versionTag}) với nhiều nâng cấp cho Gia sư AI, Cộng đồng, Đấu trường Thi đấu và Quay XP.\n⏰ Đã đồng bộ lúc ${exactTimeStr}!`;
 
             if (secondsUntilRefreshRef.current === null) {
               secondsUntilRefreshRef.current = 60;
               setSecondsUntilRefresh(60); // Đếm ngược chính xác 60 giây tự động tải lại
               setAutoUpdateNotice(
-                `🚀 Bản cập nhật mới đã được xuất bản lúc ${exactTimeStr}! Hệ thống tự động cập nhật chỉ sau 60 giây...`
+                `🚀 Bản cập nhật ${versionTag} đã được xuất bản lúc ${exactTimeStr}! Hệ thống tự động cập nhật chỉ sau 60 giây...`
               );
 
               // 1. Play audio chime if possible
@@ -79,11 +86,12 @@ export function useAutoUpdate() {
                 }
               } catch (e) {}
 
-              // 2. Browser push notification with exact publish time
+              // 2. Browser push notification with dynamic snippet
               if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
                 try {
-                  new Notification(`📢 Max10 AI vừa cập nhật lúc ${exactTimeStr}!`, {
-                    body: 'Quản trị viên Mạc Khánh Duy vừa phát hành bản cập nhật mới. Đã có tin nhắn thông báo tự động trong hộp thư của bạn!',
+                  const snippet = dynamicAnnouncementContent.split('\n').slice(0, 2).join(' — ');
+                  new Notification(`📢 Max10 AI vừa cập nhật ${versionTag} lúc ${exactTimeStr}!`, {
+                    body: snippet,
                     icon: '/max10-avatar.jpg',
                   });
                 } catch (e) {}
@@ -97,11 +105,10 @@ export function useAutoUpdate() {
                 const updateMsg = {
                   id: 'dm-admin-update-' + publishTime,
                   senderId: 'admin-mac-khanh-duy',
-                  senderName: 'Mạc Khánh Duy (Quản trị viên)',
-                  senderAvatar: 'https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy',
+                  senderName: 'Ban Quản Trị Max10',
+                  senderAvatar: '/max10-avatar.jpg',
                   recipientId: 'all_broadcast',
-                  content:
-                    '📢 [CẬP NHẬT MỚI TỪ MAX10 AI - PHIÊN BẢN STUDY HUB]\n🚀 Max10 AI vừa nâng cấp toàn diện giao diện & tính năng học tập thông minh:\n✨ Không gian Study Hub 3 vùng gọn gàng: Gia sư AI, Cộng đồng & Chat, Kho Luyện Tập (hỗ trợ làm đề Offline), Công cụ AI & Lịch học.\n🎥 Gọi Video & Thoại dùng Camera & Micro thật, tự động hiện ảnh đại diện khi tắt cam và hộp thoại nhận/từ chối cuộc gọi tức thì.\n💬 Nhắn tin, trả lời trích dẫn và gọi @Max10 AI giải bài ngay trong nhóm lẫn chat 1-1.\nChúc các bạn học tập hiệu quả và chinh phục Điểm 10!',
+                  content: dynamicAnnouncementContent,
                   timestamp: exactTimeStr,
                   createdAt: publishTime,
                   isAdminUpdate: true,

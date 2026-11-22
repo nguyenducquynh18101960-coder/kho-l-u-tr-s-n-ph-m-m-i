@@ -228,6 +228,7 @@ export interface GroupChatMessage {
     name?: string;
     size?: string;
   };
+  challengeId?: string;
 }
 
 export interface UserMuteRecord {
@@ -335,5 +336,63 @@ export interface DirectChatMessage {
     name?: string;
     size?: string;
   };
+  challengeId?: string;
 }
+
+export interface DuelQuestion {
+  id: string;
+  subject: string;
+  question: string;
+  options: string[];
+  correctIndex: number;
+  explanation: string;
+}
+
+export interface DuelChallenge {
+  id: string;
+  contextType: 'community' | 'group' | 'direct';
+  contextId: string;
+  contextName: string;
+  subject: string;
+  grade: string;
+  challengerId: string;
+  challengerName: string;
+  challengerAvatar?: string;
+  opponentId?: string;
+  opponentName?: string;
+  opponentAvatar?: string;
+  questions: DuelQuestion[];
+  challengerScore?: number;
+  challengerTimeMs?: number;
+  opponentScore?: number;
+  opponentTimeMs?: number;
+  winnerId?: string | 'draw';
+  winnerName?: string;
+  status: 'pending' | 'accepted' | 'completed';
+  createdAt: number;
+  completedAt?: number;
+}
+
+export interface PublicMemberProfile {
+  id: string;
+  name: string;
+  avatar?: string;
+  roleLabel: string;
+  roleType?: 'student' | 'teacher' | 'admin' | 'friend';
+  presenceStatus: UserPresenceStatus;
+  grade?: string;
+  studentClass?: string;
+  schoolName?: string;
+  teachingSubject?: string;
+  homeroomClass?: string;
+  level?: number;
+  levelTitle?: string;
+  xp?: number;
+  streak?: number;
+  duelWins?: number;
+  duelPlayed?: number;
+  bio?: string;
+  joinedAt?: string;
+}
+
 

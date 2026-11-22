@@ -33,6 +33,7 @@ export const AdminUpdateBar: React.FC<AdminUpdateBarProps> = ({
   const [isExpanded, setIsExpanded] = useState(false);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
+  const [customUpdateNote, setCustomUpdateNote] = useState('');
 
   // User requirement: "và cho nút cập nhật chỉ có tôi mới được xem trước bản của quản trị viên tôi ấn nút cập nhật thì nó sẽ cập nhật"
   if (!isOwner) {
@@ -42,13 +43,13 @@ export const AdminUpdateBar: React.FC<AdminUpdateBarProps> = ({
   const handlePublishUpdate = async () => {
     setUpdating(true);
     try {
+      const trimmedNote = customUpdateNote.trim();
       const res = await fetch('/api/system/publish-update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customMessage:
-            '📢 [CẬP NHẬT MỚI TỪ MAX10 AI - PHIÊN BẢN STUDY HUB]\n🚀 Max10 AI vừa nâng cấp toàn diện giao diện & tính năng học tập thông minh:\n✨ Không gian Study Hub 3 vùng gọn gàng: Gia sư AI, Cộng đồng & Chat, Kho Luyện Tập (hỗ trợ làm đề Offline), Công cụ AI & Lịch học.\n🎥 Gọi Video & Thoại dùng Camera & Micro thật, tự động hiện ảnh đại diện khi tắt cam và hộp thoại nhận/từ chối cuộc gọi tức thì.\n💬 Nhắn tin, trả lời trích dẫn và gọi @Max10 AI giải bài ngay trong nhóm lẫn chat 1-1.\nChúc các bạn học tập hiệu quả và chinh phục Điểm 10!',
-        }),
+        body: JSON.stringify(
+          trimmedNote ? { customMessage: trimmedNote } : {}
+        ),
       });
       const ct = (res.headers.get('content-type') || '').toLowerCase();
       if (!res.ok || !ct.includes('application/json')) {
@@ -58,11 +59,13 @@ export const AdminUpdateBar: React.FC<AdminUpdateBarProps> = ({
       if (data.success) {
         const publishedAt = data?.status?.lastPublishedAt || data?.publishedAt || Date.now();
         const exactTime = formatAccurateTime(publishedAt, formatAccurateTime(Date.now()));
+        const verLabel = data?.updateCount ? `#v${data.updateCount}` : 'mới';
+        setCustomUpdateNote('');
         setSuccessToast(true);
         setStatusMsg(
-          `🚀 ĐÃ CẬP NHẬT LÚC ${exactTime}! Thông báo cập nhật đã hiện lên trong tin nhắn của tất cả bạn học và thầy cô cùng âm thanh thông báo!`
+          `🚀 ĐÃ CẬP NHẬT BẢN ${verLabel} LÚC ${exactTime}! Tin nhắn cập nhật nội dung mới đã được gửi vào hộp thư của mọi người!`
         );
-        setTimeout(() => setSuccessToast(false), 5000);
+        setTimeout(() => setSuccessToast(false), 6000);
         if (onRefreshSystem) onRefreshSystem();
       }
     } catch (e) {
@@ -151,7 +154,7 @@ export const AdminUpdateBar: React.FC<AdminUpdateBarProps> = ({
               onClick={handlePublishUpdate}
               disabled={updating}
               className="flex items-center gap-1.5 px-4 py-1.5 rounded-2xl font-black text-xs text-white bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 shadow-[3px_3px_10px_rgba(16,185,129,0.4),-2px_-2px_6px_rgba(255,255,255,0.4)] hover:shadow-lg transition-all cursor-pointer active:scale-95 disabled:opacity-60"
-              title="Nhấn vào đây để áp dụng cập nhật cho toàn bộ người dùng"
+              title="Mỗi lần bấm sẽ phát hành một bản cập nhật mới với nội dung tin nhắn tự động thay đổi tương ứng"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${updating ? 'animate-spin' : ''}`} />
               <span>{updating ? 'Đang cập nhật...' : '🚀 CẬP NHẬT NGAY'}</span>
@@ -179,7 +182,7 @@ export const AdminUpdateBar: React.FC<AdminUpdateBarProps> = ({
               type="button"
               onClick={() => setIsExpanded(!isExpanded)}
               className="p-1.5 rounded-2xl neu-btn text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white"
-              title="Xem chi tiết thiết lập xuất bản"
+              title="Nhập ghi chú cập nhật riêng hoặc xem chi tiết"
             >
               {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
@@ -194,14 +197,24 @@ export const AdminUpdateBar: React.FC<AdminUpdateBarProps> = ({
           </div>
         )}
 
-        {/* Expandable Details */}
+        {/* Expandable Details + Optional Custom Update Note */}
         {isExpanded && (
-          <div className="mt-2.5 pt-2 border-t border-amber-300/40 dark:border-zinc-800 text-xs space-y-1.5 text-slate-600 dark:text-zinc-300 animate-in fade-in">
+          <div className="mt-2.5 pt-2.5 border-t border-amber-300/40 dark:border-zinc-800 text-xs space-y-2 text-slate-600 dark:text-zinc-300 animate-in fade-in">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={customUpdateNote}
+                onChange={(e) => setCustomUpdateNote(e.target.value)}
+                placeholder="Ghi chú nội dung thay đổi bản cập nhật này (để trống = hệ thống tự đổi nội dung mới mỗi lần cập nhật)..."
+                className={`flex-1 px-3 py-1.5 rounded-xl border text-xs outline-none ${
+                  isDark
+                    ? 'bg-zinc-900 border-zinc-700 text-white placeholder-zinc-500 focus:border-emerald-500'
+                    : 'bg-white border-slate-300 text-slate-800 placeholder-slate-400 focus:border-emerald-500'
+                }`}
+              />
+            </div>
             <p>
-              💡 <strong>Cơ chế cập nhật:</strong> Đã cập nhật rồi! Chỉ cần xuất bản là cập nhật ngay, <strong>không phải chờ 1 tiếng</strong> và <strong>không phải quay lại vào ngày hôm sau</strong>, hệ thống tự động đồng bộ <strong>chỉ sau 60 giây</strong> cho tất cả khách truy cập mà vẫn giữ nguyên liên kết cố định <code className="px-1.5 py-0.5 rounded bg-black/10 dark:bg-white/10 font-mono">https://max-ai-gia-s-i-m-10-thcs.ai.studio</code>.
-            </p>
-            <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-              Chế độ quản trị viên này chỉ được kích hoạt riêng cho tài khoản của bạn. Người ngoài không có quyền xem hay đổi liên kết.
+              💡 <strong>Cơ chế cập nhật tự động:</strong> Mỗi lần bấm <strong>CẬP NHẬT NGAY</strong>, hệ thống tự tăng phiên bản và thay đổi nội dung tin nhắn cập nhật gửi tới mọi người (hoặc dùng nội dung bạn tự nhập ở ô trên), đồng bộ <strong>chỉ sau 60 giây</strong> trên liên kết <code className="px-1.5 py-0.5 rounded bg-black/10 dark:bg-white/10 font-mono">https://max-ai-gia-s-i-m-10-thcs.ai.studio</code>.
             </p>
           </div>
         )}

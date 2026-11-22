@@ -22,11 +22,11 @@ import {
   LayoutGrid,
   User,
   X,
+  RotateCw,
 } from 'lucide-react';
 import { GradeLevel, ChatSession } from '../../types';
 import { BackgroundTheme } from '../../types/theme';
 import { UserAccount } from '../../types/auth';
-import { getVisibleHolidays } from './HolidayGiftAnimationModal';
 import { getUserInitials } from './UserNameModal';
 
 export type MainTabId =
@@ -43,13 +43,14 @@ export type MainTabId =
   | 'control'
   | 'achievements'
   | 'schedule'
-  | 'class_management';
+  | 'class_management'
+  | 'spin';
 
 export type HubSpaceId = 'ai' | 'community' | 'practice' | 'tools';
 
 export function getSpaceFromTab(tab: MainTabId): HubSpaceId {
   if (tab === 'group') return 'community';
-  if (tab === 'exam' || tab === 'grade') return 'practice';
+  if (tab === 'exam' || tab === 'grade' || tab === 'spin') return 'practice';
   if (
     tab === 'schedule' ||
     tab === 'mindmap' ||
@@ -117,7 +118,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isDark,
   onToggleTheme,
   onOpenOfferModal,
-  userName = 'Mạc Khánh Duy',
+  userName = 'Bạn học',
   onOpenNameModal,
   currentUser,
   onOpenAuthModal,
@@ -126,7 +127,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isFullscreen = false,
   unreadGroupMessagesCount = 0,
   onOpenAdminNotifications,
-  hasAdminNotificationDot = true,
+  hasAdminNotificationDot = false,
 }) => {
   if (isFullscreen) {
     return null;
@@ -134,10 +135,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const currentSpace: HubSpaceId = activeSpace || getSpaceFromTab(activeTab);
   const displayName =
-    currentUser?.name || (userName && userName !== 'Bạn học' ? userName : 'Mạc Khánh Duy');
+    currentUser?.name || (userName && userName !== 'Bạn học' ? userName : 'Bạn học');
   const avatarSrc = currentUser?.avatar || userAvatar;
-  const showNotifDot =
-    hasAdminNotificationDot || getVisibleHolidays().length > 0 || unreadGroupMessagesCount > 0;
+  const showNotifDot = Boolean(hasAdminNotificationDot);
 
   const railSpaces: Array<{
     id: HubSpaceId;
@@ -197,6 +197,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'group', label: 'Cộng đồng & Chat', icon: Users, accent: 'text-teal-500' },
     { id: 'exam', label: 'Luyện đề thi', icon: BookOpen, accent: 'text-emerald-500' },
     { id: 'grade', label: 'Chấm bài AI', icon: FileCheck2, accent: 'text-sky-500' },
+    { id: 'spin', label: 'Quay XP Lên Cấp', icon: RotateCw, accent: 'text-emerald-500' },
     { id: 'schedule', label: 'Lịch học cá nhân', icon: Calendar, accent: 'text-emerald-500' },
     { id: 'mindmap', label: 'Sơ đồ tư duy', icon: GitFork, accent: 'text-teal-500' },
     { id: 'tips', label: 'Cảnh báo bẫy đề', icon: Lightbulb, accent: 'text-amber-500' },
@@ -343,7 +344,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
 
-          {/* Student Avatar (Mạc Khánh Duy) */}
+          {/* Student Avatar */}
           <div className="relative group flex justify-center w-full pt-1">
             <button
               type="button"
@@ -458,10 +459,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onOpenAdminNotifications?.();
                   onClose();
                 }}
-                className="flex-1 px-3 py-2 rounded-xl bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center justify-center gap-1.5"
+                className="relative flex-1 px-3 py-2 rounded-xl bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center justify-center gap-1.5"
               >
                 <Bell className="w-3.5 h-3.5" />
                 <span>Thông báo</span>
+                {showNotifDot && (
+                  <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                )}
               </button>
               <button
                 type="button"

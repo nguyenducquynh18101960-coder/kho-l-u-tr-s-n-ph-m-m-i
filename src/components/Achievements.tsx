@@ -426,29 +426,40 @@ export const Achievements: React.FC<AchievementsProps> = ({
                 </div>
               </div>
 
-              {/* Daily Check-in Button */}
-              <button
-                type="button"
-                onClick={handleDailyCheckIn}
-                className={`px-5 py-3 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg active:scale-95 ${
-                  hasCheckedInToday
-                    ? 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-emerald-600/30'
-                    : 'bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white hover:brightness-110 shadow-amber-500/30 animate-bounce'
-                }`}
-                title="Bấm để điểm danh học tập hôm nay và tích lũy chuỗi ngày liên tiếp"
-              >
-                {hasCheckedInToday ? (
-                  <>
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Đã Điểm Danh Hôm Nay</span>
-                  </>
-                ) : (
-                  <>
-                    <Flame className="w-4 h-4 fill-current" />
-                    <span>Điểm Danh Nhận Chuỗi (+50 XP)</span>
-                  </>
-                )}
-              </button>
+              {/* Daily Check-in & XP Spin Buttons */}
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={handleDailyCheckIn}
+                  className={`px-5 py-3 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg active:scale-95 whitespace-nowrap ${
+                    hasCheckedInToday
+                      ? 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-emerald-600/30'
+                      : 'bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white hover:brightness-110 shadow-amber-500/30 animate-bounce'
+                  }`}
+                  title="Bấm để điểm danh học tập hôm nay và tích lũy chuỗi ngày liên tiếp"
+                >
+                  {hasCheckedInToday ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Đã Điểm Danh Hôm Nay</span>
+                    </>
+                  ) : (
+                    <>
+                      <Flame className="w-4 h-4 fill-current" />
+                      <span>Điểm Danh Nhận Chuỗi (+50 XP)</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('max10_open_xp_spin'))}
+                  className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 via-green-500 to-teal-500 hover:brightness-110 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md whitespace-nowrap"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Quay XP Lên Cấp</span>
+                </button>
+              </div>
             </div>
           </div>
 

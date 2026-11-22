@@ -31,8 +31,8 @@ const INTRO_SCRIPTS = [
   {
     id: 'identity',
     prefix: '',
-    text: 'Được sáng lập và xây dựng bởi tác giả Mạc Khánh Duy, Max10 AI ra đời nhằm giúp học sinh tự tin chinh phục Điểm 10 trọn năm học hoàn toàn miễn phí.',
-    highlight: 'Mạc Khánh Duy',
+    text: 'Max10 AI đồng hành cùng học sinh THCS chinh phục Điểm 10 trọn năm học với lộ trình học tập thông minh hoàn toàn miễn phí.',
+    highlight: 'Điểm 10',
   },
   {
     id: 'how_to_use',
@@ -325,7 +325,7 @@ export const Max10IntroSplash: React.FC<Max10IntroSplashProps> = ({
               </span>
             </div>
             <div className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
-              Tác giả sáng lập: <strong className="text-slate-800 dark:text-zinc-200">Mạc Khánh Duy</strong>
+              Hệ sinh thái học tập thông minh <strong className="text-slate-800 dark:text-zinc-200">Max10 Education</strong>
             </div>
           </div>
         </div>
@@ -429,7 +429,7 @@ export const Max10IntroSplash: React.FC<Max10IntroSplashProps> = ({
                 )}
               </p>
 
-              {/* Author Pill */}
+              {/* Platform Badge */}
               <div
                 className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border text-xs font-semibold shadow-2xs ${
                   isDark
@@ -439,9 +439,9 @@ export const Max10IntroSplash: React.FC<Max10IntroSplashProps> = ({
               >
                 <Award className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                 <span>
-                  Tác giả sáng lập:{' '}
+                  Nền tảng học tập{' '}
                   <strong className="font-extrabold text-slate-900 dark:text-white">
-                    Mạc Khánh Duy
+                    Max10 Education
                   </strong>{' '}
                   · THCS Điểm 10 · Miễn phí 100%
                 </span>

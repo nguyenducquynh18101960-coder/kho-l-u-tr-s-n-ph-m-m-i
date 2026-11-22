@@ -10,6 +10,8 @@ export interface UserAvatarWithStatusProps {
   isEditable?: boolean;
   onStatusChange?: (newStatus: UserPresenceStatus) => void;
   showStatusTooltip?: boolean;
+  onClick?: (e: React.MouseEvent) => void;
+  title?: string;
 }
 
 export const PRESENCE_STATUS_CONFIG: Record<
@@ -99,6 +101,8 @@ export const UserAvatarWithStatus: React.FC<UserAvatarWithStatusProps> = ({
   isEditable = false,
   onStatusChange,
   showStatusTooltip = true,
+  onClick,
+  title,
 }) => {
   const [showMenu, setShowMenu] = useState(false);
   const sizeConfig = SIZE_CLASSES[size];
@@ -124,7 +128,25 @@ export const UserAvatarWithStatus: React.FC<UserAvatarWithStatusProps> = ({
     <div className={`relative inline-block shrink-0 ${className}`}>
       {/* Avatar Container */}
       <div
-        className={`${sizeConfig.container} rounded-full overflow-hidden bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center border border-slate-200 dark:border-zinc-700 shadow-2xs select-none`}
+        role={onClick ? 'button' : undefined}
+        tabIndex={onClick ? 0 : undefined}
+        title={title || (onClick ? `Xem hồ sơ & Thi đấu cùng ${name}` : undefined)}
+        onClick={onClick}
+        onKeyDown={
+          onClick
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onClick(e as unknown as React.MouseEvent);
+                }
+              }
+            : undefined
+        }
+        className={`${sizeConfig.container} rounded-full overflow-hidden bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center border border-slate-200 dark:border-zinc-700 shadow-2xs select-none ${
+          onClick
+            ? 'cursor-pointer hover:ring-2 hover:ring-emerald-400/80 hover:scale-105 transition-all'
+            : ''
+        }`}
       >
         {src ? (
           <img

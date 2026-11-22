@@ -61,7 +61,7 @@ export const Header: React.FC<HeaderProps> = ({
                   Tự động giải mọi môn học
                 </span>
                 <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                  Tác giả: <strong>Duy 9D4 (học sinh Cô Thủy)</strong>
+                  <strong>Hệ sinh thái Gia sư AI THCS</strong>
                 </span>
               </div>
               <p className="text-xs text-slate-500 hidden sm:block mt-0.5">

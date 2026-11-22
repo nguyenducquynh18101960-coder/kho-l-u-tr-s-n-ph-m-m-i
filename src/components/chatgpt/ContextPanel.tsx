@@ -780,6 +780,24 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
 
           <button
             type="button"
+            onClick={() => setActiveTab('spin')}
+            className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl border text-left transition-colors cursor-pointer ${
+              activeTab === 'spin'
+                ? 'bg-emerald-600 border-emerald-500 text-white shadow-sm'
+                : isDark
+                ? 'bg-emerald-500/12 border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-300'
+                : 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100 text-emerald-900'
+            }`}
+          >
+            <Zap className="w-4 h-4 shrink-0 fill-current" />
+            <div className="min-w-0">
+              <div className="font-extrabold truncate">Quay XP Lên Cấp</div>
+              <div className="text-[10px] opacity-80 truncate">Nhận XP &amp; Quà lễ theo tháng</div>
+            </div>
+          </button>
+
+          <button
+            type="button"
             onClick={() => {
               setActiveTab('chat');
               setTimeout(() => {

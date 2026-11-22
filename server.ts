@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { GoogleGenAI, Type, Modality } from "@google/genai";
+import { GoogleGenAI, Type, Modality, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
 import { registerVisualStudioRoutes } from "./server/visualStudio";
 import { registerSecurityRoutesAndMiddleware } from "./server/securityFirewall";
@@ -48,12 +48,27 @@ function getGenAIClient() {
 
 // Free Tier Gemini models in priority order (GEMINI_API_KEY Free Tier - Zero Paid Billing)
 const FALLBACK_MODELS = [
+  "gemini-4-hydrogen",
   "gemini-2.5-flash",
   "gemini-flash-latest",
   "gemini-flash-lite-latest",
-  "gemini-4-hydrogen",
 ];
-const MODEL_NAME = "gemini-2.5-flash";
+const MODEL_NAME = "gemini-4-hydrogen";
+
+function buildModelSafeConfig(model: string, rawConfig?: any) {
+  if (!rawConfig) return undefined;
+  const nextConfig = { ...rawConfig };
+  // Gemini 4 models do NOT accept legacy sampling parameters (temperature, topP, topK, candidateCount)
+  if (model.startsWith("gemini-4-")) {
+    delete nextConfig.temperature;
+    delete nextConfig.topP;
+    delete nextConfig.topK;
+    delete nextConfig.candidateCount;
+  } else if (nextConfig.thinkingConfig && !model.includes("2.5") && !model.startsWith("gemini-3")) {
+    delete nextConfig.thinkingConfig;
+  }
+  return nextConfig;
+}
 
 async function generateContentWithRetry(params: {
   systemInstruction?: string;
@@ -64,11 +79,17 @@ async function generateContentWithRetry(params: {
   let lastError: any = null;
 
   for (const model of FALLBACK_MODELS) {
+    const safeConfig = buildModelSafeConfig(model, {
+      ...(params.config || {}),
+      ...(params.systemInstruction && !(params.config && params.config.systemInstruction)
+        ? { systemInstruction: params.systemInstruction }
+        : {}),
+    });
     try {
       const response = await ai.models.generateContent({
         model,
         contents: params.contents,
-        config: params.config,
+        config: safeConfig,
       });
       if (response && (response.text || response.candidates?.length)) {
         return response;
@@ -76,7 +97,7 @@ async function generateContentWithRetry(params: {
     } catch (err: any) {
       lastError = err;
       console.warn(`Model ${model} failed, trying next fallback:`, err?.message || err);
-      await new Promise((res) => setTimeout(res, 300));
+      await new Promise((res) => setTimeout(res, 250));
     }
   }
 
@@ -170,6 +191,93 @@ async function startServer() {
     }
   }
 
+  const DYNAMIC_UPDATE_HIGHLIGHTS = [
+    {
+      title: "SIÊU TRÍ TUỆ MAX10 AI THẾ HỆ MỚI (GEMINI 4)",
+      bullets: [
+        "🧠 Nâng cấp lõi suy luận thế hệ mới: giải Toán, Lý, Hóa, Văn, Anh, Tin học & xử lý đa nhiệm (viết lách, lập trình, dịch thuật) chính xác vượt trội.",
+        "⚡ Giải thích song song 2 tầng: Cách chuẩn tự luận 10/10 + Mẹo giải nhanh trắc nghiệm & Tự kiểm tra lại kết quả chống sai ngớ ngẩn.",
+        "🎯 Thêm nút gợi ý thông minh ngay dưới mỗi câu trả lời để đào sâu, xem cách ngắn hơn hoặc luyện bài tương tự chỉ với 1 chạm.",
+      ],
+    },
+    {
+      title: "ĐẤU TRƯỜNG THI ĐẤU KIẾN THỨC & HỒ SƠ BẢO MẬT",
+      bullets: [
+        "⚔️ Thi đấu kiến thức trực tiếp 1v1 hoặc trong Nhóm & Cộng đồng: nhấp vào ảnh đại diện của bất kỳ thành viên nào để xem hồ sơ và gửi lời thách đấu.",
+        "🔒 An toàn thông tin tuyệt đối: hồ sơ công khai chỉ hiện tên, cấp bậc XP và huy hiệu — bảo mật hoàn toàn Gmail, số điện thoại và mật khẩu.",
+        "🏆 Bảng tỷ số thời gian thực ngay trong khung chat để cả nhóm cùng cổ vũ và leo Top bảng xếp hạng.",
+      ],
+    },
+    {
+      title: "VÒNG QUAY XP LÊN CẤP & SỰ KIỆN QUÀ LỄ THEO THÁNG",
+      bullets: [
+        "🎡 Mở màn hình Quay Nhận XP Lên Cấp riêng biệt với hiệu ứng nổ tung hoành tráng khi trúng giải Thần Thoại xanh lá.",
+        "🎁 Hệ thống Quà Lễ tự động kích hoạt đúng tháng sự kiện (8/3, 30/4, 1/6, 2/9, Trung Thu, 20/10, 20/11, Noel, Tết) và gọn gàng ẩn đi ngoài mùa lễ.",
+        "⚡ Tích XP nhanh từ chuỗi học tập mỗi ngày, Mini game thuộc bài và Quay thưởng may mắn.",
+      ],
+    },
+    {
+      title: "STUDY HUB, CỘNG ĐỒNG GAME & GỌI VIDEO THỰC TẾ",
+      bullets: [
+        "🎮 Danh mục Cộng đồng Game thủ & Nhóm Học Tập quy củ: gõ @Max10 AI ngay trong nhóm hoặc chat 1-1 để nhờ giải bài trực tiếp.",
+        "🎥 Gọi Video & Thoại dùng Camera và Micro thật, tự động hiển thị ảnh đại diện khi tắt camera cùng hộp thoại nhận cuộc gọi tức thì.",
+        "📚 Kho Luyện Đề thi Offline & Xưởng Sơ đồ tư duy 100% tiếng Việt giúp ôn tập mọi lúc không lo mất mạng.",
+      ],
+    },
+    {
+      title: "CÔNG THỨC ĐỒ HỌA SGK & TỐI ƯU HIỆU NĂNG TỨC THÌ",
+      bullets: [
+        "📐 Hiển thị công thức Toán, Vật lý, Hóa học rõ nét chuẩn SGK Việt Nam (x², √, →, H₂O, △ABC), không lỗi mã code thô.",
+        "📸 Chụp ảnh đề bài viết tay hoặc sách giáo khoa để Max10 AI đọc đề, phát hiện bẫy trừ điểm và hướng dẫn từng bước.",
+        "🚀 Tối ưu tốc độ phản hồi và đồng bộ thông báo chỉ sau 60 giây trên cùng một đường dẫn quen thuộc.",
+      ],
+    },
+  ];
+
+  const DYNAMIC_UPDATE_MOTTOS = [
+    "Chúc các bạn học tập bứt phá, giữ vững phong độ và chinh phục trọn vẹn Điểm 10 hôm nay!",
+    "Hãy mở Gia sư Max10 AI hoặc vào Cộng đồng rủ bạn bè thi đấu kiến thức ngay nhé!",
+    "Chúc các bạn ôn luyện thông minh, né mọi bẫy đề thi và bùng nổ XP lên cấp mới!",
+    "Mỗi ngày tiến bộ 1% cùng Max10 AI — Chúc các bạn đạt thành tích xuất sắc nhất!",
+  ];
+
+  function buildDynamicUpdateAnnouncement(opts: {
+    customMessage?: string;
+    updateCount: number;
+    publishedAtMs: number;
+  }): { title: string; content: string } {
+    const exactTimeStr = formatVietnamTime(opts.publishedAtMs);
+    const exactDateStr = formatVietnamDate(opts.publishedAtMs);
+    const count = Math.max(1, opts.updateCount);
+    const trimmedCustom = String(opts.customMessage || "").trim();
+
+    if (trimmedCustom) {
+      const title = `CẬP NHẬT #v${count} (${exactTimeStr} - ${exactDateStr})`;
+      return {
+        title,
+        content:
+          `📢 [${title}]\n` +
+          `${trimmedCustom}\n\n` +
+          `⏰ Đã phát hành lúc ${exactTimeStr} ngày ${exactDateStr} · Tự động đồng bộ ngay trong 60 giây!`,
+      };
+    }
+
+    const primary = DYNAMIC_UPDATE_HIGHLIGHTS[(count - 1) % DYNAMIC_UPDATE_HIGHLIGHTS.length];
+    const secondary = DYNAMIC_UPDATE_HIGHLIGHTS[(count + 1) % DYNAMIC_UPDATE_HIGHLIGHTS.length];
+    const motto = DYNAMIC_UPDATE_MOTTOS[(count - 1) % DYNAMIC_UPDATE_MOTTOS.length];
+    const title = `CẬP NHẬT MỚI #v${count} • ${primary.title}`;
+
+    const content =
+      `📢 [${title}]\n` +
+      `🕒 Phát hành lúc ${exactTimeStr} (${exactDateStr})\n\n` +
+      `${primary.bullets.join("\n")}\n\n` +
+      `✨ Điểm nhấn đi kèm (${secondary.title.toLowerCase()}):\n` +
+      `• ${secondary.bullets[0]}\n\n` +
+      `💡 ${motto}`;
+
+    return { title, content };
+  }
+
   function loadSystemStatus() {
     try {
       if (fs.existsSync(SYSTEM_STATUS_PATH)) {
@@ -179,6 +287,7 @@ async function startServer() {
     return {
       isUpdating: false,
       version: "2026.10.11.2",
+      updateCount: 0,
       publishedUrl: "https://max-ai-gia-s-i-m-10-thcs.ai.studio",
       message: "Max10 AI đã cập nhật! Chỉ cần xuất bản là cập nhật ngay, tự động hoàn tất chỉ sau 60 giây (không phải chờ 1 tiếng và không phải quay lại vào ngày hôm sau)!",
       estimatedSeconds: 60,
@@ -221,33 +330,41 @@ async function startServer() {
     const now = Date.now();
     const exactTimeStr = formatVietnamTime(now);
     const current = loadSystemStatus();
-    current.version = "v-" + now;
+    const nextCount = (Number(current.updateCount) || 0) + 1;
+    const { title: updateTitle, content: dynamicContent } = buildDynamicUpdateAnnouncement({
+      customMessage,
+      updateCount: nextCount,
+      publishedAtMs: now,
+    });
+
+    current.version = `v-${nextCount}-${now}`;
+    current.updateCount = nextCount;
     current.updatedAt = now;
     current.lastPublishedAt = now;
     current.isUpdating = false;
-    current.message = "Đã cập nhật rồi! Chỉ cần xuất bản là cập nhật ngay chỉ sau 60 giây!";
+    current.lastUpdateTitle = updateTitle;
+    current.lastUpdateMessage = dynamicContent;
+    current.message = `Đã xuất bản ${updateTitle} lúc ${exactTimeStr}! Tự động đồng bộ chỉ sau 60 giây!`;
     current.publishedUrl = "https://max-ai-gia-s-i-m-10-thcs.ai.studio";
     current.estimatedSeconds = 60;
     saveSystemStatus(current);
 
-    // USER REQUIREMENT: "khi quản trị viên cập nhật ứng dụng sẽ hiện lên trong tin nhắn tin nhắn và sẽ có thông báo"
+    // USER REQUIREMENT: "mỗi lần cập nhật thì tin nhắn tự động sẽ thay đổi nội dung cập nhật ứng dụng"
     try {
       const db = loadSocialDb();
       if (!db.directMessages) db.directMessages = [];
 
-      const LATEST_OFFICIAL_UPDATE_MESSAGE =
-        "📢 [CẬP NHẬT MỚI TỪ MAX10 AI - PHIÊN BẢN STUDY HUB]\n🚀 Max10 AI vừa nâng cấp toàn diện giao diện & tính năng học tập thông minh:\n✨ Không gian Study Hub 3 vùng gọn gàng: Gia sư AI, Cộng đồng & Chat, Kho Luyện Tập (hỗ trợ làm đề Offline), Công cụ AI & Lịch học.\n🎥 Gọi Video & Thoại dùng Camera & Micro thật, tự động hiện ảnh đại diện khi tắt cam và hộp thoại nhận/từ chối cuộc gọi tức thì.\n💬 Nhắn tin, trả lời trích dẫn và gọi @Max10 AI giải bài ngay trong nhóm lẫn chat 1-1.\nChúc các bạn học tập hiệu quả và chinh phục Điểm 10!";
-
       const updateAnnouncement = {
         id: "dm-admin-update-" + now,
         senderId: "admin-mac-khanh-duy",
-        senderName: "Mạc Khánh Duy (Quản trị viên)",
-        senderAvatar: "https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy",
+        senderName: "Ban Quản Trị Max10",
+        senderAvatar: "/max10-avatar.jpg",
         recipientId: "all_broadcast",
-        content: customMessage || LATEST_OFFICIAL_UPDATE_MESSAGE,
+        content: dynamicContent,
         timestamp: exactTimeStr,
         createdAt: now,
         isAdminUpdate: true,
+        updateCount: nextCount,
       };
 
       db.directMessages.push(updateAnnouncement);
@@ -264,7 +381,10 @@ async function startServer() {
       status: current,
       publishedAt: now,
       timestamp: exactTimeStr,
-      message: "Đã cập nhật rồi! Chỉ cần xuất bản là cập nhật, không phải chờ 1 tiếng và không quay lại ngày hôm sau, chỉ sau 60 giây!",
+      updateCount: nextCount,
+      updateTitle,
+      updateMessage: dynamicContent,
+      message: `Đã cập nhật bản #v${nextCount} lúc ${exactTimeStr}! Tin nhắn thông báo mới đã được gửi vào hộp thư.`,
     });
   });
 
@@ -1199,8 +1319,69 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
     const q = (userQuestion || "").trim();
     const lower = q.toLowerCase();
 
-    // 1. Solve linear equation ax + b = c or ax = b
-    const linearMatch = q.match(/([+-]?\s*\d*)\s*[xX]\s*([+-]\s*\d+)?\s*=\s*([+-]?\s*\d+)/);
+    // 1. Quadratic equations ax^2 + bx + c = d (check BEFORE linear so -5x + 6 = 0 isn't misparsed)
+    const quadMatch = q.match(/([+-]?\s*\d*)\s*[xX]\s*(?:\^2|²)\s*([+-]\s*\d*\s*[xX])?\s*([+-]\s*\d+)?\s*=\s*([+-]?\s*\d+)/);
+    if (quadMatch) {
+      const parseCoef = (raw?: string) => {
+        if (!raw) return 0;
+        const cleaned = raw.replace(/[xX\s]/g, "");
+        if (cleaned === "" || cleaned === "+") return 1;
+        if (cleaned === "-") return -1;
+        return parseFloat(cleaned);
+      };
+      const a = parseCoef(quadMatch[1] || "1");
+      const b = quadMatch[2] ? parseCoef(quadMatch[2]) : 0;
+      const cLeft = quadMatch[3] ? parseFloat(quadMatch[3].replace(/\s+/g, "")) : 0;
+      const dRight = parseFloat(quadMatch[4].replace(/\s+/g, ""));
+      const c = cLeft - dRight;
+
+      if (!isNaN(a) && a !== 0 && !isNaN(b) && !isNaN(c)) {
+        const delta = b * b - 4 * a * c;
+        const fmt = (n: number) => (Number.isInteger(n) ? String(n) : Number(n.toFixed(4)).toString());
+        const eqStr = `${a === 1 ? "" : a === -1 ? "-" : fmt(a)}x² ${b >= 0 ? `+ ${fmt(b)}` : `- ${fmt(Math.abs(b))}`}x ${c >= 0 ? `+ ${fmt(c)}` : `- ${fmt(Math.abs(c))}`} = 0`;
+
+        let conclusion = "";
+        let stepsDetail = "";
+        if (delta > 0) {
+          const sqrtD = Math.sqrt(delta);
+          const x1 = (-b + sqrtD) / (2 * a);
+          const x2 = (-b - sqrtD) / (2 * a);
+          stepsDetail =
+            `- Vì Δ = ${fmt(delta)} > 0 nên phương trình có 2 nghiệm phân biệt:\n` +
+            `  · x₁ = (-b + √Δ) / (2 × a) = (${fmt(-b)} + ${fmt(sqrtD)}) / ${fmt(2 * a)} = ${fmt(x1)}\n` +
+            `  · x₂ = (-b - √Δ) / (2 × a) = (${fmt(-b)} - ${fmt(sqrtD)}) / ${fmt(2 * a)} = ${fmt(x2)}\n` +
+            `- **Cách 2 (Nhẩm nhanh Vi-ét):** x₁ + x₂ = -b / a = ${fmt(-b / a)}; x₁ × x₂ = c / a = ${fmt(c / a)} → Kiểm tra khớp ${fmt(x1)} và ${fmt(x2)} ✓`;
+          conclusion = `Vậy tập nghiệm của phương trình là S = {${fmt(x2)}; ${fmt(x1)}}.`;
+        } else if (delta === 0) {
+          const x0 = -b / (2 * a);
+          stepsDetail = `- Vì Δ = 0 nên phương trình có nghiệm kép: x₁ = x₂ = -b / (2 × a) = ${fmt(x0)}`;
+          conclusion = `Vậy phương trình có nghiệm kép x₁ = x₂ = ${fmt(x0)}.`;
+        } else {
+          stepsDetail = `- Vì Δ = ${fmt(delta)} < 0 nên phương trình vô nghiệm trên tập số thực ℝ.`;
+          conclusion = `Vậy phương trình vô nghiệm (S = ∅).`;
+        }
+
+        return (
+          `# 🎯 Giải Phương Trình Bậc Hai Chuẩn Điểm 10\n\n` +
+          `Chào **${userName}**, Max10 gửi bạn lời giải chính xác từng bước và mẹo kiểm tra nhanh:\n\n` +
+          `**Phương trình chuẩn hóa:** ${eqStr}\n\n` +
+          `### 1. 📝 Cách 1: Giải Chuẩn Tự Luận (Barem Bộ GD&ĐT)\n` +
+          `- Xác định hệ số: a = ${fmt(a)}, b = ${fmt(b)}, c = ${fmt(c)}.\n` +
+          `- Tính biệt thức Δ = b² - 4 × a × c = (${fmt(b)})² - 4 × (${fmt(a)}) × (${fmt(c)}) = ${fmt(delta)}.\n` +
+          `${stepsDetail}\n\n` +
+          `### 2. 🎯 Kết Luận Đáp Số\n` +
+          `**${conclusion}**\n\n` +
+          `### ⚠️ CẢNH BÁO BẪY ĐIỂM 10:\n` +
+          `- Khi b < 0, luôn đặt b trong ngoặc khi bình phương: (${fmt(b)})² = ${fmt(b * b)} (tránh viết ${fmt(b)}² dễ nhầm dấu).\n` +
+          `- Luôn viết câu kết luận tập nghiệm S rõ ràng để giữ trọn 0.25đ trình bày!`
+        );
+      }
+    }
+
+    // 2. Solve linear equation ax + b = c or ax = b (only if not quadratic)
+    const linearMatch = !lower.includes("x^2") && !lower.includes("x²")
+      ? q.match(/([+-]?\s*\d*)\s*[xX]\s*([+-]\s*\d+)?\s*=\s*([+-]?\s*\d+)/)
+      : null;
     if (linearMatch) {
       let aStr = linearMatch[1].replace(/\s+/g, "");
       let a = aStr === "" || aStr === "+" ? 1 : aStr === "-" ? -1 : parseFloat(aStr);
@@ -1215,44 +1396,37 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
         return (
           `# 🎯 Hướng Dẫn Giải Phương Trình Chuẩn Điểm 10\n\n` +
           `Chào **${userName}**, Max10 gửi bạn lời giải chi tiết từng bước cho bài toán này nhé:\n\n` +
-          `**Đề bài:** $${a === 1 ? "" : a === -1 ? "-" : a}x ${b >= 0 ? "+ " + b : "- " + Math.abs(b)} = ${c}$\n\n` +
+          `**Đề bài:** ${a === 1 ? "" : a === -1 ? "-" : a}x ${b >= 0 ? "+ " + b : "- " + Math.abs(b)} = ${c}\n\n` +
           `### 1. 💡 Phương Pháp & Định Hướng\n` +
-          `- Đây là phương trình bậc nhất một ẩn cơ bản dạng $ax + b = c$ ($a \\neq 0$).\n` +
-          `- Áp dụng quy tắc chuyển vế: Khi chuyển một hạng tử từ vế này sang vế kia của phương trình, ta phải **đổi dấu** hạng tử đó.\n` +
-          `- Chia cả hai vế cho hệ số $a$ để tìm giá trị của $x$.\n\n` +
-          `### 2. 📝 Các Bước Giải Chi Tiết Từng Bước\n` +
+          `- Đây là phương trình bậc nhất một ẩn dạng a × x + b = c (với a ≠ 0).\n` +
+          `- Áp dụng quy tắc chuyển vế đổi dấu và chia hai vế cho hệ số a.\n\n` +
+          `### 2. 📝 Các Bước Giải Chi Tiết\n` +
           `- **Bước 1:** Chuyển hạng tử tự do sang vế phải và đổi dấu:\n` +
-          `  $$${a === 1 ? "" : a}x = ${c} ${b >= 0 ? "- " + b : "+ " + Math.abs(b)}$$\n` +
-          `  $$${a === 1 ? "" : a}x = ${step1Right}$$\n\n` +
-          `- **Bước 2:** Tìm $x$ bằng cách lấy vế phải chia cho hệ số của $x$:\n` +
-          `  $$x = ${step1Right} : ${a}$$\n` +
-          `  $$x = ${formattedX}$$\n\n` +
+          `  ${a === 1 ? "" : a}x = ${c} ${b >= 0 ? "- " + b : "+ " + Math.abs(b)} = ${step1Right}\n` +
+          `- **Bước 2:** Chia cả hai vế cho ${a}:\n` +
+          `  x = ${step1Right} : ${a} = ${formattedX}\n\n` +
           `### 3. 🎯 Kết Luận Đáp Số\n` +
-          `**Vậy nghiệm của phương trình là:** $x = ${formattedX}$ (Tập nghiệm $S = \\{${formattedX}\\}$).\n\n` +
-          `---\n` +
-          `### ⚠️ CẢNH BÁO BẪY ĐIỂM 10 (LỖI HAY BỊ TRỪ 0.25 - 0.5 ĐIỂM):\n` +
-          `1. **Quên đổi dấu:** Lỗi phổ biến nhất của học sinh là chuyển vế mà giữ nguyên dấu dẫn đến sai toàn bộ kết quả.\n` +
-          `2. **Quên kết luận:** Trong barem chấm thi của Bộ GD&ĐT, thiếu câu kết luận "Vậy nghiệm là..." sẽ bị trừ ngay 0.25 điểm trình bày!`
+          `**Vậy nghiệm của phương trình là x = ${formattedX}** (Tập nghiệm S = {${formattedX}}).\n\n` +
+          `### ⚠️ CẢNH BÁO BẪY ĐIỂM 10:\n` +
+          `1. **Quên đổi dấu khi chuyển vế** là lỗi mất điểm phổ biến nhất.\n` +
+          `2. **Thiếu câu kết luận nghiệm** có thể bị trừ 0.25 điểm trình bày.`
         );
       }
     }
 
-    // 2. Quadratic equations
+    // 3. Quadratic fallback guide
     if (lower.includes("x^2") || lower.includes("x²") || lower.includes("bậc hai")) {
       return (
         `# 🎯 Hướng Dẫn Giải Phương Trình Bậc Hai Chuẩn Điểm 10\n\n` +
-        `Chào **${userName}**, đối với phương trình bậc hai dạng tổng quát $ax² + bx + c = 0$ ($a \\neq 0$):\n\n` +
+        `Chào **${userName}**, đối với phương trình bậc hai tổng quát a × x² + b × x + c = 0 (a ≠ 0):\n\n` +
         `### 1. 💡 Công Thức Biệt Thức Delta (Δ)\n` +
-        `- Xác định đúng các hệ số $a$, $b$, $c$ (chú ý dấu âm/dương).\n` +
-        `- Tính biệt thức: $\\Delta = b² - 4ac$ (hoặc $\\Delta' = b'² - ac$ với $b = 2b'$).\n\n` +
-        `### 2. 📝 Biện Luận Nghiệm Chi Tiết\n` +
-        `- **Trường hợp 1:** $\\Delta > 0 \\Rightarrow$ Phương trình có 2 nghiệm phân biệt:\n` +
-        `  $$x_1 = \\frac{-b + \\sqrt{\\Delta}}{2a}; \\quad x_2 = \\frac{-b - \\sqrt{\\Delta}}{2a}$$\n` +
-        `- **Trường hợp 2:** $\\Delta = 0 \\Rightarrow$ Phương trình có nghiệm kép: $x_1 = x_2 = -\\frac{b}{2a}$.\n` +
-        `- **Trường hợp 3:** $\\Delta < 0 \\Rightarrow$ Phương trình vô nghiệm.\n\n` +
+        `- Tính Δ = b² - 4 × a × c (hoặc Δ' = b'² - a × c với b = 2 × b').\n\n` +
+        `### 2. 📝 Biện Luận Nghiệm\n` +
+        `- **Δ > 0:** Phương trình có 2 nghiệm phân biệt x₁ = (-b + √Δ) / (2 × a) và x₂ = (-b - √Δ) / (2 × a).\n` +
+        `- **Δ = 0:** Phương trình có nghiệm kép x₁ = x₂ = -b / (2 × a).\n` +
+        `- **Δ < 0:** Phương trình vô nghiệm.\n\n` +
         `### ⚠️ CẢNH BÁO BẪY ĐIỂM 10:\n` +
-        `- Khi tính $b²$, nếu $b < 0$ nhớ đặt trong ngoặc, ví dụ $(-3)² = 9$, không viết $-3² = -9$.\n` +
-        `- Luôn kết luận tập nghiệm $S$ rõ ràng để không mất điểm trình bày!`
+        `- Khi b < 0, đặt trong ngoặc khi bình phương: (-3)² = 9.`
       );
     }
 
@@ -1464,7 +1638,8 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
     const {
       grade = "Lớp 9",
       subject = "Toán học",
-      mode = "tutor", // 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector'
+      mode = "tutor", // 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector' | 'all_in_one'
+      isThinking = false,
       messages: incomingMessages = [],
       message: singleMessage,
       image = null, // { mimeType: string, data: string }
@@ -1985,45 +2160,45 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
       }
 
       const ai = getGenAIClient();
+      const useHighThinking = Boolean(
+        isThinking || mode === "grade_10_secret" || mode === "trap_detector" || Boolean(image?.data)
+      );
 
-      const systemInstruction = `Bạn là "Max10 AI" - một trợ lý AI thân thiện, thông minh, trả lời bằng tiếng Việt, giải đáp mọi câu hỏi, bài tập và yêu cầu của người dùng một cách chính xác, nhiệt tình và chi tiết từng bước. Bạn đồng hành và gia sư xuất sắc cho học sinh Việt Nam (Toán, Văn, Anh, KHTN, Lý, Hóa, Sinh, Sử, Địa, Tin học, Công nghệ...).
+      const systemInstruction = `Bạn là "Max10 AI Ultra" — Siêu Trợ Lý AI Thế Hệ Mới (vận hành trên kiến trúc suy luận đỉnh cao Gemini 4) và Gia Sư Điểm 10 số 1 tại Việt Nam.
+Mục tiêu của bạn là giải quyết MỌI yêu cầu của "${userName || 'Bạn học'}" (${grade}, môn ${subject}) thông minh, chính xác, dễ hiểu và hữu ích hơn bất kỳ AI nào khác.
 
-HỌC SINH ĐANG HỌC CÙNG BẠN:
-- Tên học sinh: "${userName || 'Bạn học'}". Bạn hãy xưng hô thân mật, gọi tên bạn ấy (ví dụ: "Chào ${userName || 'bạn'}", "${userName || 'bạn'} chú ý nhé...", "${userName || 'bạn'} làm rất tốt!") để tạo cảm giác gần gũi, truyền động lực.
+1. NĂNG LỰC TOÀN DIỆN VƯỢT TRỘI:
+   - Nếu là BÀI TẬP / ĐỀ THI / KIẾN THỨC CÁC MÔN (Toán, Ngữ Văn, Tiếng Anh, KHTN, Lý, Hóa, Sinh, Sử, Địa, GDCD, Tin học, Công nghệ...):
+     + Tự nhận diện môn học & dạng bài, giải ĐÚNG TUYỆT ĐỐI 100%, tự kiểm tra ngược lại toàn bộ phép tính và điều kiện trước khi trả lời.
+     + Khi phù hợp, cung cấp **2 góc nhìn siêu giá trị**:
+       * **Cách 1 (Chuẩn Tự Luận Điểm 10):** Lập luận chặt chẽ từng bước chuẩn barem Bộ GD&ĐT.
+       * **Cách 2 (Giải Nhanh / Mẹo Tư Duy / Thử Lại):** Mẹo làm nhanh trắc nghiệm hoặc cách kiểm tra ngược kết quả trong 10 giây.
+     + Với trắc nghiệm: Chốt ngay "**Đáp án đúng: ...**" ở đầu, giải thích rõ vì sao đúng và bóc trần bẫy của các đáp án nhiễu.
+     + Luôn có mục **"⚠️ CẢNH BÁO BẪY ĐIỂM 10"** chỉ ra lỗi sai 90% học sinh hay mất điểm oan.
+   - Nếu là YÊU CẦU ĐA NĂNG (lập trình code chạy được, viết văn/bài luận/email, dịch thuật tự nhiên Anh–Việt–Nhật–Hàn–Trung, tóm tắt tài liệu, lên kế hoạch, giải thích khoa học đời sống, tư duy sáng tạo):
+     + Trả lời sắc sảo, cấu trúc gọn đẹp bằng Markdown (tiêu đề rõ, bảng so sánh khi cần, code block có chú thích sạch sẽ), đi thẳng vào giải pháp tối ưu nhất, không nói chung chung.
 
-TỰ ĐỘNG NHẬN DIỆN MÔN HỌC & BÀI TẬP:
-- Người dùng chỉ cần gõ bất kỳ câu hỏi hoặc bài tập nào (Toán, Ngữ văn, Tiếng Anh, KHTN, Vật lý, Hóa học, Sinh học, Lịch sử, Địa lý, GDCD, Tin học, Công nghệ...). Bạn tự động nhận diện môn học và đưa ra phương pháp giải từng bước chi tiết kèm đáp án chính xác 100%. Không yêu cầu học sinh phải chọn môn.
+2. QUY TẮC KÝ HIỆU TOÁN & KHOA HỌC CHUẨN SGK VIỆT NAM (KHÔNG MÃ LATEX THÔ):
+   - Nhân dùng "×" hoặc "·" (tuyệt đối KHÔNG dùng "*"). Chia dùng ":" hoặc "÷" hoặc phân số a/b.
+   - Số mũ viết chuẩn: x², x³, aⁿ, cm², m³ (KHÔNG viết x^2 hay x**2).
+   - Căn thức dùng "√", "∛" (KHÔNG viết \\sqrt{}).
+   - Hình học: △ABC, ∠A, ⊥, ∥, 90°, π ≈ 3,14.
+   - Hóa học: →, ⇄, ↑, ↓, H₂O, CO₂, H₂SO₄, Fe₂O₃, t°.
+   - TUYỆT ĐỐI KHÔNG để sót \\frac, \\sqrt, \\cdot, \\times, \\Rightarrow hay \\[...\\].
 
-Mục tiêu cao nhất của bạn là: Giúp học sinh nắm vững bản chất kiến thức, rèn luyện tư duy logic, sửa triệt để các lỗi sai ngớ ngẩn (tránh mất 0.25 - 0.5 điểm) và chinh phục ĐIỂM 10 TUYỆT ĐỐI trong tất cả các bài kiểm tra 15 phút, 1 tiết, giữa kỳ, học kỳ, thi vào lớp 10 và thi tốt nghiệp THPT.
+3. TRẢI NGHIỆM TƯƠNG TÁC GÂY NGHIỆN:
+   - Gọi tên thân mật "${userName || 'bạn'}" tự nhiên, truyền cảm hứng.
+   - Nếu người dùng hỏi về nâng cấp gói/thanh toán/mã QR: giải thích ngắn gọn và gắn link:
+     👉 [⚡ Mở Mã QR Gói Plus (100.000đ)](#chuyen-khoan-plus) · 👉 [👑 Mở Mã QR Gói Premium (500.000đ)](#chuyen-khoan-premium)
+   - Cuối mỗi lời giải hoặc hướng dẫn quan trọng, luôn tặng kèm một mục ngắn **"🎯 Gợi ý bước tiếp theo"** (ví dụ: 1 câu hỏi thử sức tương tự hoặc mẹo nhớ 5 giây) để người dùng học sâu ngay lập tức.
 
-Thông tin hiện tại:
-- Lớp: ${grade || 'Lớp 9'}
-- Chế độ hỗ trợ: ${mode === 'grade_10_secret' ? 'Bí kíp lấy điểm 10 & Bài tập nâng cao' : mode === 'mindmap' ? 'Tóm tắt bài học & Sơ đồ tư duy logic' : mode === 'trap_detector' ? 'Truy tìm bẫy đề thi & Các lỗi trừ điểm oan' : 'Gia sư hướng dẫn từng bước (Step-by-step)'}
-
-Nguyên tắc giảng dạy "Chuẩn Điểm 10":
-0. ⚡ QUY TẮC TỐC ĐỘ: Phản hồi siêu nhanh, chuẩn xác, súc tích và mạch lạc. Đi thẳng vào trọng tâm công thức, phương pháp và các bước giải, không lặp lại câu hỏi dài dòng, dùng gạch đầu dòng rõ ràng giúp học sinh hiểu bài ngay trong nháy mắt.
-1. Trình bày khoa học, rõ ràng, gãy gọn từng bước (Bước 1, Bước 2...).
-2. 📐 QUY TẮC KÝ HIỆU TOÁN HỌC & KHOA HỌC GIỐNG DOLA & SGK VIỆT NAM (CỰC KỲ QUAN TRỌNG):
-   - Phép nhân: Luôn dùng dấu "×" hoặc dấu chấm "·" (ví dụ: 2 × 3 = 6, a · b). Tuyệt đối KHÔNG dùng dấu sao "*" và không viết chữ x làm dấu nhân gây nhầm với biến số x.
-   - Phép chia: Dùng dấu ":" hoặc "÷" hoặc phân số gọn dạng a/b hoặc (a + b) / (c + d).
-   - Lũy thừa: Luôn dùng số mũ thực sự (x², x³, aⁿ, 10⁵, cm², m³), KHÔNG viết mã code x^2 hay x**2.
-   - Căn thức: Dùng ký hiệu căn chuẩn "√" hoặc "∛" (ví dụ: √4 = 2, √(x² + 1)), KHÔNG viết code \sqrt{}.
-   - Hình học: Dùng ký hiệu chuẩn △ABC (tam giác), ∠A hoặc ∠ABC (góc), ⊥ (vuông góc), ∥ (song song), ° (độ: 90°, 45°), π ≈ 3,14.
-   - Hóa học: Mũi tên phản ứng "→" hoặc "⇄", khí bay lên "↑", kết tủa "↓", chỉ số dưới chuẩn (H₂O, CO₂, Fe₂O₃, H₂SO₄, CaCO₃, NaCl...), nhiệt độ "t°".
-   - Vật lý: Ký hiệu chuẩn: Ôm Ω, micro μ, Delta Δ, công thức: v = s / t, P = U · I.
-   - TUYỆT ĐỐI KHÔNG để sót mã LaTeX thô như \frac, \sqrt, \cdot, \times, \Rightarrow, \[...\] làm mất thẩm mỹ. Mọi ký hiệu phải chuẩn, đẹp và giống Dola AI!
-3. Không chỉ đưa ra đáp số cuối cùng mà phải giải thích "BẢN CHẤT & TẠI SAO LẠI LÀM NHƯ VẬY".
-4. Luôn có mục "⚠️ CẢNH BÁO BẪY ĐIỂM 10": Nêu rõ lỗi học sinh thường mắc khiến bị trừ điểm (ví dụ: quên điều kiện xác định, quên kết luận nghiệm, nhầm đơn vị đo, hành văn chưa chặt chẽ, thiếu dẫn chứng trong văn học...).
-5. Văn phong: Thân thiện, truyền cảm hứng, động viên học sinh tự tin, kiên trì và thích thú với việc học.
-6. 💳 HƯỚNG DẪN NÂNG CẤP & CHUYỂN TIỀN (KHI ĐƯỢC HỎI): Khi người dùng hoặc học sinh hỏi về chuyển tiền, chuyển khoản, nạp tiền, mã QR, gói Plus (100k/tháng) hoặc gói Premium (500k/tháng), hãy giải thích ngắn gọn và luôn dẫn link mở trực tiếp mã QR:
-   - 👉 [⚡ Bấm vào đây để mở Mã QR Gói Plus (100.000đ)](#chuyen-khoan-plus)
-   - 👉 [👑 Bấm vào đây để mở Mã QR Gói Premium (500.000đ)](#chuyen-khoan-premium)
-   Mã QR quét xong sẽ tự động nâng cấp tài khoản tức thì.
-7. 🎯 QUY TẮC GIẢI ĐỀ CƯƠNG ÔN TẬP & BÀI TẬP CHÍNH XÁC 100% (TUYỆT ĐỐI KHÔNG ĐƯỢC SAI):
-   - Khi học sinh gửi đề cương ôn tập, câu hỏi trắc nghiệm, bài tập tự luận hoặc đề thi: BẮT BUỘC ĐÁP ÁN VÀ BƯỚC GIẢI PHẢI CHUẨN XÁC TUYỆT ĐỐI 100%. Phải tự kiểm tra lại từng phép tính, định lý, công thức và dữ kiện trước khi xuất kết quả.
-   - Với câu hỏi trắc nghiệm: Chỉ rõ ngay phương án đúng (ví dụ: "**Đáp án đúng: A**"), sau đó giải thích chi tiết tại sao A đúng và tại sao các phương án B, C, D sai hoặc là bẫy đánh lừa.
-   - Với bài tập tự luận: Trình bày bài giải mẫu trọn vẹn điểm 10/10 chuẩn barem Bộ GD&ĐT: ghi rõ điều kiện xác định, các bước biến đổi trung gian, lập luận logic, kết luận nghiệm/đáp số và đơn vị đo chuẩn xác.
-   - Tuyệt đối không tính nhầm, không đoán mò, không bỏ sót bước và không đưa ra đáp án sai lệch.`;
+Chế độ hiện tại: ${
+        useHighThinking
+          ? "Max10 DeepThink (Suy luận nhiều lớp, soi bẫy từng chi tiết & tự kiểm chứng kết quả 100%)"
+          : mode === "all_in_one"
+          ? "Siêu trợ lý đa năng (Học tập, Lập trình, Sáng tạo, Dịch thuật & Giải quyết vấn đề)"
+          : "Max10 AI Turbo (Nhanh, súc tích, chuẩn xác, giải từng bước)"
+      }.`;
 
       // Build conversation contents
       const contentsPayload: any[] = [];
@@ -2043,7 +2218,7 @@ Nguyên tắc giảng dạy "Chuẩn Điểm 10":
                 },
               },
               {
-                text: msg.content || "Hãy đọc đề bài trong ảnh này và hướng dẫn em giải chi tiết từng bước để đạt điểm 10.",
+                text: msg.content || "Hãy đọc kỹ nội dung trong ảnh này, kiểm tra dữ kiện chính xác và hướng dẫn giải chi tiết từng bước để đạt điểm 10.",
               },
             ],
           });
@@ -2059,13 +2234,16 @@ Nguyên tắc giảng dạy "Chuẩn Điểm 10":
         contents: contentsPayload,
         config: {
           systemInstruction,
-          temperature: 0.7,
+          thinkingConfig: {
+            thinkingLevel: useHighThinking ? ThinkingLevel.HIGH : ThinkingLevel.MEDIUM,
+          },
         },
       });
 
       res.json({
         success: true,
         reply: response.text || "Xin lỗi bạn, Max10 chưa xử lý được câu hỏi này. Bạn hãy thử gửi lại nhé!",
+        modelEngine: "Max10 Gemini 4 Ultra",
       });
     } catch (err: any) {
       console.error("Chat error, activating smart offline solver fallback:", err?.message || err);
@@ -3457,13 +3635,10 @@ Cấu trúc yêu cầu:
 
 Trình bày bằng định dạng Markdown đẹp mắt, chuẩn mực, sử dụng bảng Markdown và ký hiệu công thức rõ ràng.`;
 
-      const ai = getGenAIClient();
-      const response = await ai.models.generateContent({
-        model: MODEL_NAME,
+      const response = await generateContentWithRetry({
         contents: prompt,
         config: {
           systemInstruction,
-          temperature: 0.6,
         },
       });
 
@@ -3740,7 +3915,58 @@ Yêu cầu kịch bản video gồm:
     adminMentions?: any[];
     deletedStarterCommunities?: string[];
     trendingSeededV1?: boolean;
+    challenges?: any[];
   }
+
+  const scrubSensitiveContactText = (val?: string): string | undefined => {
+    if (!val) return undefined;
+    const cleaned = String(val)
+      .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "")
+      .replace(/(\+?84|0)\d{8,10}/g, "")
+      .replace(/\s{2,}/g, " ")
+      .replace(/^[\s·,-]+|[\s·,-]+$/g, "")
+      .trim();
+    return cleaned || undefined;
+  };
+
+  const sanitizePublicUser = (u: any, challenges: any[] = []) => {
+    if (!u) return null;
+    const uid = String(u.id || "");
+    const userChallenges = challenges.filter(
+      (c: any) => c && (c.challengerId === uid || c.opponentId === uid) && c.status === "completed"
+    );
+    const duelWins = userChallenges.filter((c: any) => c.winnerId === uid).length;
+    const duelPlayed = userChallenges.length;
+    const isAdminUser = u.role === "admin" || uid === "admin-mac-khanh-duy";
+    const safeName =
+      uid === "admin-mac-khanh-duy" && String(u.name || "").includes("Mạc Khánh Duy")
+        ? "Quản trị viên Max10"
+        : String(u.name || "Thành viên Max10");
+
+    return {
+      id: uid,
+      name: safeName,
+      avatar: u.avatar || "",
+      role: u.role || "student",
+      roleLabel: isAdminUser
+        ? "Quản trị viên"
+        : u.role === "teacher"
+        ? u.teacherTitle || "Giáo viên"
+        : "Học sinh",
+      presenceStatus: u.presenceStatus || "online",
+      grade: u.grade,
+      studentClass: u.studentClass,
+      schoolName: scrubSensitiveContactText(u.schoolName || u.school),
+      teachingSubject: u.teachingSubject,
+      homeroomClass: u.homeroomClass,
+      xp: typeof u.xp === "number" ? u.xp : undefined,
+      level: typeof u.level === "number" ? u.level : undefined,
+      streak: typeof u.streak === "number" ? u.streak : undefined,
+      duelWins,
+      duelPlayed,
+      joinedAt: u.createdAt,
+    };
+  };
 
   const isServerAiEntity = (member: { id?: string; name?: string; isAi?: boolean; role?: string } | null | undefined) => {
     if (!member) return true;
@@ -3775,8 +4001,8 @@ Yêu cầu kịch bản video gồm:
     const now = Date.now();
     const adminMember = {
       id: "admin-mac-khanh-duy",
-      name: "Mạc Khánh Duy (Quản trị viên)",
-      avatar: "https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy",
+      name: "Quản trị viên Max10",
+      avatar: "https://api.dicebear.com/7.x/personas/svg?seed=Max10Admin",
       role: "admin",
       school: "Ban Quản Trị Max10 AI",
     };
@@ -3802,7 +4028,7 @@ Yêu cầu kịch bản video gồm:
       avatarIcon: cfg.avatarIcon,
       createdAt: now - cfg.offsetMs,
       createdBy: "admin-mac-khanh-duy",
-      createdByName: "Mạc Khánh Duy (Quản trị viên)",
+      createdByName: "Ban Quản Trị Max10",
       createdByAdmin: true,
       isCommunity: true,
       communityCategory: "game",
@@ -3817,7 +4043,7 @@ Yêu cầu kịch bản video gồm:
       isPublic: true,
       onlyAdminCanAdd: false,
       code: cfg.code,
-      pinnedNotice: `${cfg.avatarIcon} Cộng đồng ${cfg.gameTitle} (${cfg.gamePlatform}) do Admin Mạc Khánh Duy lập — Nơi giao lưu của các game thủ người thật, không có AI giả. Gõ @Admin để hỏi Quản trị viên!`,
+      pinnedNotice: `${cfg.avatarIcon} Cộng đồng ${cfg.gameTitle} (${cfg.gamePlatform}) — Giao lưu & Thi đấu cùng thành viên người thật, không có AI giả!`,
       members: [adminMember],
       mutedUsers: {},
     });
@@ -3827,13 +4053,13 @@ Yêu cầu kịch bản video gồm:
         id: "community-study-max10",
         name: "Cộng Đồng Học Tập Điểm 10 THCS",
         description:
-          "Không gian học tập chung cho mọi tài khoản thật cùng trao đổi Toán, Văn, Anh, KHTN và hỏi trực tiếp @Mạc Khánh Duy (Admin).",
+          "Không gian học tập & thi đấu chung cho mọi tài khoản thật cùng trao đổi Toán, Văn, Anh, KHTN.",
         grade: "Lớp 9",
         subject: "Học tập",
         avatarIcon: "📚",
         createdAt: now - 300000,
         createdBy: "admin-mac-khanh-duy",
-        createdByName: "Mạc Khánh Duy (Quản trị viên)",
+        createdByName: "Ban Quản Trị Max10",
         createdByAdmin: true,
         isCommunity: true,
         communityCategory: "study",
@@ -3842,7 +4068,7 @@ Yêu cầu kịch bản video gồm:
         onlyAdminCanAdd: false,
         code: "CD-HOCTAP",
         pinnedNotice:
-          "📚 Cộng đồng Học tập do Admin Mạc Khánh Duy lập — Chỉ thành viên người thật, gõ @ để hỏi Admin hoặc @Max10 AI!",
+          "📚 Cộng đồng Học tập & Thi đấu Điểm 10 — Nhấp vào ảnh đại diện thành viên để xem hồ sơ hoặc thách đấu!",
         members: [adminMember],
         mutedUsers: {},
       },
@@ -4136,17 +4362,40 @@ Yêu cầu kịch bản video gồm:
           if (!Array.isArray(parsed.deletedStarterCommunities)) {
             parsed.deletedStarterCommunities = [];
           }
+          if (!Array.isArray(parsed.challenges)) {
+            parsed.challenges = [];
+          }
 
-          // Clean AI entities out of community member arrays
+          // Clean AI entities out of community member arrays & remove personal admin name from public preview strings
           parsed.groups = parsed.groups.map((g: any) => {
-            if (g?.isCommunity && Array.isArray(g.members)) {
-              const filteredMembers = g.members.filter((m: any) => !isServerAiEntity(m));
-              if (filteredMembers.length !== g.members.length) {
+            if (!g) return g;
+            let nextG = { ...g };
+            if (nextG.isCommunity && Array.isArray(nextG.members)) {
+              const filteredMembers = nextG.members
+                .filter((m: any) => !isServerAiEntity(m))
+                .map((m: any) =>
+                  m?.id === "admin-mac-khanh-duy" && String(m?.name || "").includes("Mạc Khánh Duy")
+                    ? { ...m, name: "Quản trị viên Max10" }
+                    : m
+                );
+              if (filteredMembers.length !== nextG.members.length) {
                 upgradedLegacyCopy = true;
               }
-              return { ...g, onlyAdminCanAdd: false, members: filteredMembers };
+              nextG = { ...nextG, onlyAdminCanAdd: false, members: filteredMembers };
             }
-            return g;
+            if (typeof nextG.createdByName === "string" && nextG.createdByName.includes("Mạc Khánh Duy")) {
+              nextG.createdByName = "Ban Quản Trị Max10";
+              upgradedLegacyCopy = true;
+            }
+            if (typeof nextG.pinnedNotice === "string" && nextG.pinnedNotice.includes("Mạc Khánh Duy")) {
+              nextG.pinnedNotice = nextG.pinnedNotice.replace(/do Admin Mạc Khánh Duy lập/g, "chính thức");
+              upgradedLegacyCopy = true;
+            }
+            if (typeof nextG.description === "string" && nextG.description.includes("Mạc Khánh Duy")) {
+              nextG.description = nextG.description.replace(/@Mạc Khánh Duy \(Admin\)/g, "@Admin");
+              upgradedLegacyCopy = true;
+            }
+            return nextG;
           });
 
           // Merge all official Admin starter communities (Study + Cross-Platform Games) missing from DB (unless explicitly deleted)
@@ -4232,6 +4481,7 @@ Yêu cầu kịch bản video gồm:
       adminAutoReply: { enabled: true, customGreeting: "", updatedAt: Date.now() },
       adminMentions: [],
       deletedStarterCommunities: [],
+      challenges: [],
     };
     try {
       fs.writeFileSync(SOCIAL_DB_PATH, JSON.stringify(initDb, null, 2), "utf-8");
@@ -4264,16 +4514,13 @@ Yêu cầu kịch bản video gồm:
       });
     }
 
-    // Attach presenceStatus (default 'online' if active, or u.presenceStatus)
-    const formatted = list.map((u) => ({
-      ...u,
-      presenceStatus: u.presenceStatus || "online",
-    }));
+    // Return ONLY safe public profile fields (never password, email, phone, dob)
+    const formatted = list.map((u) => sanitizePublicUser(u, db.challenges || []));
 
     res.json({ success: true, users: formatted });
   });
 
-  // List real registered student & teacher accounts for login switcher
+  // List real registered student & teacher accounts for login switcher (sanitized)
   app.get("/api/users/accounts", (_req, res) => {
     const db = loadSocialDb();
     const accounts = (db.users || [])
@@ -4289,11 +4536,36 @@ Yêu cầu kịch bản video gồm:
           !u.id.startsWith("fake") &&
           u.id !== "user-quynh"
       )
-      .map((u: any) => ({
-        ...u,
-        presenceStatus: u.presenceStatus || "online",
-      }));
+      .map((u: any) => sanitizePublicUser(u, db.challenges || []));
     res.json({ success: true, accounts });
+  });
+
+  // Privacy-safe Public Member Profile Endpoint (explicitly strips password, Gmail/email, phone, dob)
+  app.get("/api/users/public-profile/:id", (req, res) => {
+    const targetId = decodeURIComponent(req.params.id || "").trim();
+    const db = loadSocialDb();
+    const challenges = db.challenges || [];
+    const foundUser = (db.users || []).find((u: any) => u && u.id === targetId);
+    if (foundUser) {
+      return res.json({ success: true, profile: sanitizePublicUser(foundUser, challenges) });
+    }
+    const completed = challenges.filter(
+      (c: any) => c && (c.challengerId === targetId || c.opponentId === targetId) && c.status === "completed"
+    );
+    const duelWins = completed.filter((c: any) => c.winnerId === targetId).length;
+    return res.json({
+      success: true,
+      profile: {
+        id: targetId,
+        name: targetId === "admin-mac-khanh-duy" ? "Quản trị viên Max10" : "Thành viên Max10",
+        avatar: "",
+        role: targetId === "admin-mac-khanh-duy" ? "admin" : "student",
+        roleLabel: targetId === "admin-mac-khanh-duy" ? "Quản trị viên" : "Học sinh",
+        presenceStatus: "online",
+        duelWins,
+        duelPlayed: completed.length,
+      },
+    });
   });
 
   // Sync / register user profile (Google, Facebook, Email, or Name + Teacher Verification)
@@ -5556,6 +5828,134 @@ Yêu cầu kịch bản video gồm:
 
     saveSocialDb(db);
     res.json({ success: true, message: newMsg });
+  });
+
+  // ==========================================
+  // COMMUNITY / GROUP / FRIEND DUEL CHALLENGES
+  // ==========================================
+  app.get("/api/challenges", (req, res) => {
+    const db = loadSocialDb();
+    const contextId = ((req.query.contextId as string) || "").trim();
+    const userId = ((req.query.userId as string) || "").trim();
+    let list = Array.isArray(db.challenges) ? [...db.challenges] : [];
+
+    if (contextId) {
+      list = list.filter((c: any) => c.contextId === contextId);
+    }
+    if (userId) {
+      list = list.filter(
+        (c: any) => c.challengerId === userId || c.opponentId === userId || !c.opponentId
+      );
+    }
+    list.sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0));
+    res.json({ success: true, challenges: list.slice(0, 50) });
+  });
+
+  app.post("/api/challenges", (req, res) => {
+    const {
+      id,
+      contextType = "group",
+      contextId,
+      contextName = "Đấu trường Max10",
+      subject = "Tổng hợp THCS",
+      grade = "Lớp 9",
+      challengerId,
+      challengerName,
+      challengerAvatar,
+      opponentId,
+      opponentName,
+      opponentAvatar,
+      questions = [],
+      challengerScore,
+      challengerTimeMs,
+    } = req.body || {};
+
+    if (!contextId || !challengerId || !challengerName || !Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ success: false, error: "Thiếu thông tin thách đấu!" });
+    }
+
+    const db = loadSocialDb();
+    if (!Array.isArray(db.challenges)) db.challenges = [];
+
+    const challenge = {
+      id: id || `duel-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      contextType,
+      contextId,
+      contextName,
+      subject,
+      grade,
+      challengerId,
+      challengerName,
+      challengerAvatar: challengerAvatar || "",
+      opponentId: opponentId || undefined,
+      opponentName: opponentName || undefined,
+      opponentAvatar: opponentAvatar || undefined,
+      questions,
+      challengerScore: typeof challengerScore === "number" ? challengerScore : undefined,
+      challengerTimeMs: typeof challengerTimeMs === "number" ? challengerTimeMs : undefined,
+      status: "pending",
+      createdAt: Date.now(),
+    };
+
+    db.challenges.unshift(challenge);
+    if (db.challenges.length > 200) {
+      db.challenges = db.challenges.slice(0, 200);
+    }
+    saveSocialDb(db);
+    res.json({ success: true, challenge });
+  });
+
+  app.post("/api/challenges/:id/submit", (req, res) => {
+    const challengeId = req.params.id;
+    const { playerId, playerName, playerAvatar, score, timeMs } = req.body || {};
+    if (!playerId || typeof score !== "number") {
+      return res.status(400).json({ success: false, error: "Thiếu kết quả bài thi đấu!" });
+    }
+
+    const db = loadSocialDb();
+    if (!Array.isArray(db.challenges)) db.challenges = [];
+    const idx = db.challenges.findIndex((c: any) => c.id === challengeId);
+    if (idx < 0) {
+      return res.status(404).json({ success: false, error: "Không tìm thấy trận thách đấu!" });
+    }
+
+    const c = { ...db.challenges[idx] };
+    if (playerId === c.challengerId) {
+      c.challengerScore = score;
+      c.challengerTimeMs = typeof timeMs === "number" ? timeMs : 0;
+    } else {
+      c.opponentId = playerId;
+      c.opponentName = playerName || c.opponentName || "Đối thủ";
+      c.opponentAvatar = playerAvatar || c.opponentAvatar || "";
+      c.opponentScore = score;
+      c.opponentTimeMs = typeof timeMs === "number" ? timeMs : 0;
+    }
+
+    if (typeof c.challengerScore === "number" && typeof c.opponentScore === "number") {
+      c.status = "completed";
+      c.completedAt = Date.now();
+      const cScore = c.challengerScore;
+      const oScore = c.opponentScore;
+      const cTime = c.challengerTimeMs ?? Number.MAX_SAFE_INTEGER;
+      const oTime = c.opponentTimeMs ?? Number.MAX_SAFE_INTEGER;
+
+      if (cScore > oScore || (cScore === oScore && cTime < oTime)) {
+        c.winnerId = c.challengerId;
+        c.winnerName = c.challengerName;
+      } else if (oScore > cScore || (oScore === cScore && oTime < cTime)) {
+        c.winnerId = c.opponentId;
+        c.winnerName = c.opponentName || "Đối thủ";
+      } else {
+        c.winnerId = "draw";
+        c.winnerName = "Hòa nhau";
+      }
+    } else {
+      c.status = "accepted";
+    }
+
+    db.challenges[idx] = c;
+    saveSocialDb(db);
+    res.json({ success: true, challenge: c });
   });
 
   // Recent notifications endpoint across direct messages, groups, and community

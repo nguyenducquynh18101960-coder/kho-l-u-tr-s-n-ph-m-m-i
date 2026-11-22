@@ -16,13 +16,13 @@ import {
   Smartphone,
   PenLine,
   PanelLeft,
+  RotateCw,
 } from 'lucide-react';
 import { GradeLevel } from '../../types';
 import { BackgroundTheme } from '../../types/theme';
 import { UserAccount } from '../../types/auth';
 import { loadStudentAchievements, StudentAchievementStats } from '../../data/initialAchievements';
 import { calculateLevel, formatLevelLabel, MAX_LEVEL } from '../../types/achievements';
-import { getVisibleHolidays } from './HolidayGiftAnimationModal';
 import { getUserInitials } from './UserNameModal';
 import { MainTabId, HubSpaceId, getSpaceFromTab } from './Sidebar';
 
@@ -55,6 +55,7 @@ interface HeaderProps {
   onOpenAchievementsModal?: () => void;
   onOpenHistoryDrawer?: () => void;
   onOpenAdminNotifications?: () => void;
+  hasUnreadNotifications?: boolean;
   historyCount?: number;
   onLogout?: () => void;
 }
@@ -93,6 +94,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenPricingModal,
   onOpenAchievementsModal,
   onOpenAdminNotifications,
+  hasUnreadNotifications = false,
   onLogout,
 }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -133,8 +135,7 @@ export const Header: React.FC<HeaderProps> = ({
   const unlockedBadges = achievementStats.badges.filter((b) => b.isUnlocked).length;
   const displayBadges = unlockedBadges >= 7 ? unlockedBadges : 7;
 
-  const hasHolidayNotification = getVisibleHolidays().length > 0;
-  const displayName = currentUser?.name || (userName && userName !== 'Bạn học' ? userName : 'Mạc Khánh Duy');
+  const displayName = currentUser?.name || (userName && userName !== 'Bạn học' ? userName : 'Bạn học');
 
   return (
     <header
@@ -159,7 +160,7 @@ export const Header: React.FC<HeaderProps> = ({
           <Menu className="w-4 h-4" />
         </button>
 
-        {onToggleContextPanel && (
+        {onToggleContextPanel && activeTab !== 'group' && (
           <button
             type="button"
             onClick={onToggleContextPanel}
@@ -234,6 +235,23 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </button>
 
+        {/* Màn hình quay XP Lên Cấp */}
+        <button
+          type="button"
+          onClick={() => onSelectTab('spin')}
+          className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            activeTab === 'spin'
+              ? 'bg-emerald-600 border-emerald-500 text-white shadow-sm'
+              : isDark
+              ? 'bg-emerald-500/12 border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-300'
+              : 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100 text-emerald-800'
+          }`}
+          title="Mở Màn Hình Quay XP Lên Cấp"
+        >
+          <RotateCw className="w-3.5 h-3.5 shrink-0" />
+          <span className="hidden sm:inline">Quay XP Lên Cấp</span>
+        </button>
+
         {/* Thông báo từ Admin Slide-Out Drawer Trigger */}
         <button
           type="button"
@@ -247,11 +265,9 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <Bell className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
           <span className="hidden sm:inline">Thông báo từ Admin</span>
-          <span
-            className={`w-2 h-2 rounded-full shrink-0 ${
-              hasHolidayNotification ? 'bg-rose-500' : 'bg-emerald-500'
-            }`}
-          />
+          {hasUnreadNotifications && (
+            <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+          )}
         </button>
 
         {/* Compact Profile Dropdown */}

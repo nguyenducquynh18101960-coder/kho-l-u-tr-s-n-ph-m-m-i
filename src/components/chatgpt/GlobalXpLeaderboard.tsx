@@ -148,17 +148,28 @@ export const GlobalXpLeaderboard: React.FC<GlobalXpLeaderboardProps> = ({
           </div>
         </div>
 
-        {onOpenMiniGame && (
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={onOpenMiniGame}
-            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+            onClick={() => window.dispatchEvent(new CustomEvent('max10_open_xp_spin'))}
+            className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-sm transition-all flex items-center gap-1.5 shrink-0 cursor-pointer whitespace-nowrap"
           >
-            <Gamepad2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Cày thêm XP</span>
-            <ArrowRight className="w-3 h-3" />
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Quay XP</span>
           </button>
-        )}
+
+          {onOpenMiniGame && (
+            <button
+              type="button"
+              onClick={onOpenMiniGame}
+              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1.5 shrink-0 cursor-pointer whitespace-nowrap"
+            >
+              <Gamepad2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Cày thêm XP</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* LEADERBOARD LIST */}

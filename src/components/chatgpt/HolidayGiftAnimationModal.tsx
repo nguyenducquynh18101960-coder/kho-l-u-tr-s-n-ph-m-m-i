@@ -1,12 +1,23 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { X, Gift, Sparkles, Flower2, Check, RotateCw, Crown, Trophy, Volume2 } from 'lucide-react';
+import { X, Gift, Sparkles, Flower2, Check, RotateCw, Crown, Trophy } from 'lucide-react';
 import { celebrateMilestone, launchCanvasFireworks, launchGoldenStarBurst } from '../../utils/confettiFireworks';
 import { soundEffects } from '../../utils/soundEffects';
 import { loadStudentAchievements, saveStudentAchievements } from '../../data/initialAchievements';
 import { calculateLevel, formatLevelLabel } from '../../types/achievements';
 import ronaldoSiuStadiumImg from '../../assets/images/ronaldo_siu_stadium_1794918922903.jpg';
 
-export type HolidayId = 'tet' | '08_03' | '20_10' | 'halloween' | '20_11' | 'noel';
+export type HolidayId =
+  | 'tet'
+  | '14_02'
+  | '08_03'
+  | '30_04'
+  | '01_06'
+  | '02_09'
+  | 'trung_thu'
+  | '20_10'
+  | 'halloween'
+  | '20_11'
+  | 'noel';
 export type GiftRarity = 'mythic' | 'legendary' | 'super_rare' | 'rare' | 'common';
 
 export interface RarityTierConfig {
@@ -27,11 +38,11 @@ export const RARITY_TIERS: RarityTierConfig[] = [
     label: 'Thần Thoại',
     rateLabel: '0,5%',
     weight: 0.5,
-    cardBorder: 'border-rose-500',
-    cardBg: 'from-rose-600/25 via-amber-500/25 to-fuchsia-600/25',
-    badgeClass: 'bg-gradient-to-r from-rose-600 via-amber-500 to-fuchsia-600 text-white',
-    textClass: 'text-rose-500 dark:text-rose-400',
-    glowClass: 'shadow-[0_0_25px_rgba(244,63,94,0.45)]',
+    cardBorder: 'border-emerald-500',
+    cardBg: 'from-emerald-500/25 via-green-500/20 to-lime-400/25',
+    badgeClass: 'bg-gradient-to-r from-emerald-500 via-green-500 to-lime-400 text-slate-950',
+    textClass: 'text-emerald-600 dark:text-emerald-400',
+    glowClass: 'shadow-[0_0_28px_rgba(34,197,94,0.55)]',
   },
   {
     id: 'legendary',
@@ -71,10 +82,10 @@ export const RARITY_TIERS: RarityTierConfig[] = [
     label: 'Bình Thường',
     rateLabel: '70%',
     weight: 70,
-    cardBorder: 'border-emerald-500/60',
-    cardBg: 'from-emerald-500/10 to-slate-500/10',
-    badgeClass: 'bg-emerald-600 text-white',
-    textClass: 'text-emerald-600 dark:text-emerald-400',
+    cardBorder: 'border-slate-400/70 dark:border-zinc-600',
+    cardBg: 'from-slate-500/15 to-zinc-500/10',
+    badgeClass: 'bg-slate-600 text-white',
+    textClass: 'text-slate-600 dark:text-zinc-300',
     glowClass: '',
   },
 ];
@@ -187,6 +198,66 @@ export const HOLIDAY_CONFIGS: Record<HolidayId, HolidayConfig> = {
     accentGradient: 'from-emerald-600 via-red-600 to-amber-500',
     badgeText: 'Giáng Sinh / Noel',
     itemCategoryLabel: 'Quà Tặng Giáng Sinh',
+  },
+  trung_thu: {
+    id: 'trung_thu',
+    dateLabel: 'Rằm 15/8 Âm Lịch',
+    title: 'Vui Hội Trăng Rằm — Tết Trung Thu',
+    subtitle: 'Đêm hội đèn lồng ông sao lung linh, chị Hằng chú Cuội và bánh nướng bánh dẻo sum vầy',
+    greetingTeacher: 'Kính chúc Thầy/Cô một mùa Tết Trung Thu đoàn viên, ấm áp và tràn ngập tiếng cười!',
+    greetingStudent: 'Chúc bạn đón Tết Trung Thu thật rực rỡ với đèn ông sao lung linh và thật nhiều bánh ngon!',
+    petals: ['🏮', '🌕', '🐇', '🥮', '⭐', '✨'],
+    accentGradient: 'from-amber-500 via-orange-500 to-indigo-700',
+    badgeText: 'Tết Trung Thu',
+    itemCategoryLabel: 'Đèn Lồng & Bánh Trung Thu',
+  },
+  '14_02': {
+    id: '14_02',
+    dateLabel: '14 / 02',
+    title: 'Ngày Lễ Yêu Thương & Tình Bạn 14/2',
+    subtitle: 'Trao gửi thiệp chúc mừng, sô-cô-la ngọt ngào và những bông hồng rực rỡ',
+    greetingTeacher: 'Kính chúc Thầy/Cô luôn tràn đầy nhiệt huyết, yêu thương và hạnh phúc!',
+    greetingStudent: 'Chúc bạn có một ngày 14/2 thật ấm áp bên gia đình, thầy cô và những người bạn thân!',
+    petals: ['💝', '🍫', '🌹', '💌', '🎀', '✨'],
+    accentGradient: 'from-rose-500 via-pink-500 to-red-500',
+    badgeText: 'Lễ 14/2',
+    itemCategoryLabel: 'Sô-cô-la & Thiệp 14/2',
+  },
+  '30_04': {
+    id: '30_04',
+    dateLabel: '30/04 & 01/05',
+    title: 'Chào Mừng Đại Lễ 30/4 & Quốc Tế Lao Động 1/5',
+    subtitle: 'Tự hào non sông thống nhất — rực rỡ cờ hoa chào mừng ngày hội lớn của dân tộc',
+    greetingTeacher: 'Kính chúc Thầy/Cô kỳ nghỉ lễ 30/4 - 1/5 thật nhiều sức khỏe, niềm vui và bình an!',
+    greetingStudent: 'Chúc bạn kỳ nghỉ lễ 30/4 - 1/5 thật ý nghĩa, nạp đầy năng lượng bứt phá học tập!',
+    petals: ['🇻🇳', '⭐', '🎆', '🕊️', '🎉', '✨'],
+    accentGradient: 'from-red-600 via-rose-600 to-amber-500',
+    badgeText: 'Đại lễ 30/4 - 1/5',
+    itemCategoryLabel: 'Kỷ Niệm Chương 30/4',
+  },
+  '01_06': {
+    id: '01_06',
+    dateLabel: '01 / 06',
+    title: 'Chúc Mừng Ngày Quốc Tế Thiếu Nhi 1/6',
+    subtitle: 'Ngày hội tuổi thơ ngập tràn sắc màu, bóng bay rực rỡ và quà tặng bất ngờ',
+    greetingTeacher: 'Chúc Thầy/Cô luôn giữ mãi nụ cười tươi trẻ và niềm vui đồng hành cùng các em học sinh!',
+    greetingStudent: 'Chúc bạn ngày 1/6 thật vui nhộn, rạng rỡ tiếng cười và mở được nhiều quà xịn!',
+    petals: ['🎈', '🧸', '🍭', '🎨', '🎉', '✨'],
+    accentGradient: 'from-sky-500 via-cyan-500 to-emerald-500',
+    badgeText: 'Quốc tế Thiếu nhi 1/6',
+    itemCategoryLabel: 'Quà Tuổi Thơ 1/6',
+  },
+  '02_09': {
+    id: '02_09',
+    dateLabel: '02 / 09',
+    title: 'Chào Mừng Ngày Quốc Khánh Việt Nam 2/9',
+    subtitle: 'Tự hào Tổ quốc Việt Nam — cờ đỏ sao vàng rực sáng bầu trời mùa thu lịch sử',
+    greetingTeacher: 'Kính chúc Thầy/Cô một kỳ nghỉ Quốc Khánh 2/9 trang trọng, bình an và hạnh phúc!',
+    greetingStudent: 'Chúc bạn ngày Quốc Khánh 2/9 thật tự hào, tràn đầy năng lượng cho năm học mới!',
+    petals: ['🇻🇳', '⭐', '🎇', '🪷', '🎉', '✨'],
+    accentGradient: 'from-red-600 via-red-500 to-yellow-500',
+    badgeText: 'Quốc Khánh 2/9',
+    itemCategoryLabel: 'Huy Hiệu Quốc Khánh 2/9',
   },
 };
 
@@ -798,6 +869,250 @@ export const HOLIDAY_GIFT_POOLS: Record<HolidayId, HolidayGiftItem[]> = {
       description: 'Chiếc bánh quy hình người gừng nướng vàng ươm thơm vị quế mật ong.',
     },
   ],
+  trung_thu: [
+    {
+      id: 'tt-mythic-moon-palace',
+      name: 'Cung Trăng Ngọc Ngà Thần Thoại',
+      icon: '🌕',
+      type: 'festive',
+      rarity: 'mythic',
+      xpBonus: 2000,
+      description: 'Bảo vật Thần Thoại Đêm Rằm (0,5%) — Ánh trăng rằm tháng 8 tỏa sáng rực rỡ cùng chị Hằng!',
+    },
+    {
+      id: 'tt-mythic-jade-rabbit',
+      name: 'Thỏ Ngọc Bạch Kim Cung Trăng',
+      icon: '🐇',
+      type: 'item',
+      rarity: 'mythic',
+      xpBonus: 2000,
+      description: 'Linh vật Thỏ Ngọc huyền thoại mang lại bình an, trí tuệ và may mắn trọn vẹn.',
+    },
+    {
+      id: 'tt-legendary-star-lantern',
+      name: 'Đèn Ông Sao Khổng Lồ Rước Đèn',
+      icon: '🏮',
+      type: 'festive',
+      rarity: 'legendary',
+      xpBonus: 800,
+      description: 'Chiếc đèn ông sao năm cánh truyền thống lung linh suốt đêm hội rước đèn.',
+    },
+    {
+      id: 'tt-super-lion-dance',
+      name: 'Đầu Lân Sư Rồng Múa Hội',
+      icon: '🦁',
+      type: 'festive',
+      rarity: 'super_rare',
+      xpBonus: 450,
+      description: 'Tiếng trống múa lân rộn ràng mang không khí tưng bừng khắp phố phường.',
+    },
+    {
+      id: 'tt-rare-mooncake',
+      name: 'Hộp Bánh Trung Thu Thập Cẩm',
+      icon: '🥮',
+      type: 'festive',
+      rarity: 'rare',
+      xpBonus: 250,
+      description: 'Hộp bánh nướng, bánh dẻo thơm ngon gắn kết tình thân đêm phá cỗ.',
+    },
+    {
+      id: 'tt-common-carp-lantern',
+      name: 'Đèn Cá Chép Vượt Vũ Môn',
+      icon: '🎏',
+      type: 'item',
+      rarity: 'common',
+      xpBonus: 150,
+      description: 'Chiếc đèn lồng cá chép rực rỡ cổ vũ tinh thần học tập vượt khó.',
+    },
+  ],
+  '14_02': [
+    {
+      id: '1402-mythic-crystal-heart',
+      name: 'Trái Tim Pha Lê Vĩnh Cửu',
+      icon: '💎',
+      type: 'item',
+      rarity: 'mythic',
+      xpBonus: 2000,
+      description: 'Bảo vật Thần Thoại 14/2 (0,5%) — Biểu tượng của tình thân ái, sẻ chia và tri ân.',
+    },
+    {
+      id: '1402-legendary-rose-bouquet',
+      name: 'Bó Hồng Nhung Ngàn Cánh',
+      icon: '💐',
+      type: 'flower',
+      rarity: 'legendary',
+      xpBonus: 800,
+      description: 'Bó hoa hồng thắm gửi tặng thầy cô, gia đình và bạn bè trân quý.',
+    },
+    {
+      id: '1402-super-chocolate',
+      name: 'Hộp Sô-cô-la Hoàng Gia',
+      icon: '🍫',
+      type: 'festive',
+      rarity: 'super_rare',
+      xpBonus: 450,
+      description: 'Hộp sô-cô-la ngọt ngào mang lại năng lượng vui vẻ cả ngày dài.',
+    },
+    {
+      id: '1402-rare-ribbon',
+      name: 'Hộp Quà Thắt Nơ Hồng',
+      icon: '🎁',
+      type: 'item',
+      rarity: 'rare',
+      xpBonus: 250,
+      description: 'Món quà nhỏ xinh gói trọn niềm vui bất ngờ ngày 14/2.',
+    },
+    {
+      id: '1402-common-card',
+      name: 'Thiệp Chúc Mừng Ấm Áp',
+      icon: '💌',
+      type: 'item',
+      rarity: 'common',
+      xpBonus: 150,
+      description: 'Tấm thiệp viết tay gửi gắm lời chúc an lành tới người thân yêu.',
+    },
+  ],
+  '30_04': [
+    {
+      id: '3004-mythic-victory-star',
+      name: 'Sao Vàng Thống Nhất Non Sông',
+      icon: '⭐',
+      type: 'festive',
+      rarity: 'mythic',
+      xpBonus: 2000,
+      description: 'Bảo vật Thần Thoại 30/4 - 1/5 (0,5%) — Ngôi sao vàng rực sáng tinh thần tự hào dân tộc!',
+    },
+    {
+      id: '3004-legendary-peace-dove',
+      name: 'Chim Bồ Câu Hòa Bình Vàng',
+      icon: '🕊️',
+      type: 'item',
+      rarity: 'legendary',
+      xpBonus: 800,
+      description: 'Biểu tượng hòa bình, khát vọng vươn lên và tinh thần đoàn kết.',
+    },
+    {
+      id: '3004-super-fireworks',
+      name: 'Pháo Hoa Đại Lễ 30/4',
+      icon: '🎆',
+      type: 'festive',
+      rarity: 'super_rare',
+      xpBonus: 450,
+      description: 'Màn pháo hoa rực rỡ chào mừng ngày hội non sông thống nhất.',
+    },
+    {
+      id: '3004-rare-flag',
+      name: 'Lá Cờ Đỏ Sao Vàng Kiêu Hãnh',
+      icon: '🚩',
+      type: 'festive',
+      rarity: 'rare',
+      xpBonus: 250,
+      description: 'Lá cờ tung bay phấp phới trong không khí đại lễ 30/4 - 1/5.',
+    },
+    {
+      id: '3004-common-badge',
+      name: 'Huy Hiệu Kỷ Niệm 30/4',
+      icon: '🎖️',
+      type: 'item',
+      rarity: 'common',
+      xpBonus: 150,
+      description: 'Kỷ niệm chương nhỏ trang trọng lưu giữ dấu ấn lịch sử.',
+    },
+  ],
+  '01_06': [
+    {
+      id: '0106-mythic-rainbow-crown',
+      name: 'Vương Miện Cầu Vồng Tuổi Thơ',
+      icon: '🌈',
+      type: 'item',
+      rarity: 'mythic',
+      xpBonus: 2000,
+      description: 'Bảo vật Thần Thoại 1/6 (0,5%) — Tỏa sáng bảy sắc cầu vồng cùng niềm vui vô tận!',
+    },
+    {
+      id: '0106-legendary-teddy',
+      name: 'Gấu Bông Khổng Lồ Siêu Dễ Thương',
+      icon: '🧸',
+      type: 'item',
+      rarity: 'legendary',
+      xpBonus: 800,
+      description: 'Chú gấu bông mềm mại đồng hành cùng tuổi học trò đầy ắp kỷ niệm.',
+    },
+    {
+      id: '0106-super-palette',
+      name: 'Hộp Màu Sáng Tạo 1/6',
+      icon: '🎨',
+      type: 'item',
+      rarity: 'super_rare',
+      xpBonus: 450,
+      description: 'Bộ màu vẽ rực rỡ khơi nguồn trí tưởng tượng bay cao bay xa.',
+    },
+    {
+      id: '0106-rare-balloon',
+      name: 'Chùm Bóng Bay Lễ Hội',
+      icon: '🎈',
+      type: 'festive',
+      rarity: 'rare',
+      xpBonus: 250,
+      description: 'Chùm bóng bay đủ màu sắc tung bay rộn ràng ngày 1/6.',
+    },
+    {
+      id: '0106-common-lollipop',
+      name: 'Kẹo Mút Cầu Vồng Ngọt Ngào',
+      icon: '🍭',
+      type: 'festive',
+      rarity: 'common',
+      xpBonus: 150,
+      description: 'Chiếc kẹo mút nhiều tầng ngọt lịm ngày Quốc tế Thiếu nhi.',
+    },
+  ],
+  '02_09': [
+    {
+      id: '0209-mythic-golden-lotus',
+      name: 'Quốc Hoa Sen Vàng Rực Sáng',
+      icon: '🪷',
+      type: 'flower',
+      rarity: 'mythic',
+      xpBonus: 2000,
+      description: 'Bảo vật Thần Thoại Quốc Khánh 2/9 (0,5%) — Đóa sen vàng cao quý biểu tượng tâm hồn Việt Nam!',
+    },
+    {
+      id: '0209-legendary-sun-star',
+      name: 'Ngôi Sao Độc Lập Lấp Lánh',
+      icon: '🌟',
+      type: 'festive',
+      rarity: 'legendary',
+      xpBonus: 800,
+      description: 'Ánh sao vàng rực rỡ chào mừng ngày Tết Độc Lập 2/9.',
+    },
+    {
+      id: '0209-super-fireworks',
+      name: 'Pháo Hoa Mừng Tết Độc Lập',
+      icon: '🎇',
+      type: 'festive',
+      rarity: 'super_rare',
+      xpBonus: 450,
+      description: 'Bầu trời rực sáng sắc pháo hoa đêm 2/9 lịch sử.',
+    },
+    {
+      id: '0209-rare-drum',
+      name: 'Trống Đồng Lạc Hồng Thu Nhỏ',
+      icon: '🥁',
+      type: 'item',
+      rarity: 'rare',
+      xpBonus: 250,
+      description: 'Biểu tượng văn hóa ngàn năm văn hiến của dân tộc Việt Nam.',
+    },
+    {
+      id: '0209-common-ribbon',
+      name: 'Ruy Băng Đỏ Chúc Mừng 2/9',
+      icon: '🎗️',
+      type: 'festive',
+      rarity: 'common',
+      xpBonus: 150,
+      description: 'Dải ruy băng kỷ niệm ngày Quốc Khánh trang trọng.',
+    },
+  ],
 };
 
 // Exact Mùng 1 Tết Nguyên Đán solar dates (2024 - 2035)
@@ -816,40 +1131,58 @@ const LUNAR_TET_FIRST_DAY: Record<number, { month: number; day: number }> = {
   2035: { month: 2, day: 8 },
 };
 
+// Exact Rằm Tháng 8 Âm Lịch (Tết Trung Thu) solar dates (2024 - 2035)
+const LUNAR_TRUNG_THU_DAY: Record<number, { month: number; day: number }> = {
+  2024: { month: 9, day: 17 },
+  2025: { month: 10, day: 6 },
+  2026: { month: 9, day: 25 },
+  2027: { month: 9, day: 15 },
+  2028: { month: 10, day: 3 },
+  2029: { month: 9, day: 22 },
+  2030: { month: 9, day: 12 },
+  2031: { month: 10, day: 1 },
+  2032: { month: 9, day: 19 },
+  2033: { month: 9, day: 8 },
+  2034: { month: 9, day: 27 },
+  2035: { month: 9, day: 16 },
+};
+
 function isTetVisible(date: Date): { visible: boolean; isExactToday: boolean } {
   const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
   const tetInfo = LUNAR_TET_FIRST_DAY[year];
-  const todayMidnight = new Date(year, date.getMonth(), date.getDate()).getTime();
 
   if (tetInfo) {
-    const tetStart = new Date(year, tetInfo.month - 1, tetInfo.day);
-    // Visible from the 1st day of the solar month containing Tết (or 15 days before Mùng 1 Tết if early Feb) through Mùng 5 Tết (+4 days)
-    const monthStart = new Date(year, tetInfo.month - 1, 1).getTime();
-    const preTetStart = tetStart.getTime() - 15 * 24 * 60 * 60 * 1000;
-    const windowStart = Math.min(monthStart, preTetStart);
-    const windowEnd = tetStart.getTime() + 4 * 24 * 60 * 60 * 1000; // through Mùng 5 Tết
-
-    const isExactToday =
-      todayMidnight >= tetStart.getTime() &&
-      todayMidnight <= tetStart.getTime() + 2 * 24 * 60 * 60 * 1000; // Mùng 1 - Mùng 3 Tết
-
     return {
-      visible: todayMidnight >= windowStart && todayMidnight <= windowEnd,
-      isExactToday,
+      visible: month === tetInfo.month,
+      isExactToday: month === tetInfo.month && day >= tetInfo.day && day <= tetInfo.day + 2,
     };
   }
 
-  // Fallback for years outside lookup table: Jan 15 - Feb 20
-  const m = date.getMonth() + 1;
-  const d = date.getDate();
-  const visible = (m === 1 && d >= 15) || (m === 2 && d <= 20);
-  return { visible, isExactToday: false };
+  return { visible: month === 1 || month === 2, isExactToday: false };
+}
+
+function isTrungThuVisible(date: Date): { visible: boolean; isExactToday: boolean } {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const ttInfo = LUNAR_TRUNG_THU_DAY[year];
+
+  if (ttInfo) {
+    return {
+      visible: month === ttInfo.month,
+      isExactToday: month === ttInfo.month && day === ttInfo.day,
+    };
+  }
+
+  return { visible: month === 9, isExactToday: false };
 }
 
 /**
  * Visibility rules per user requirement:
- * - Shows ONLY when the month of that holiday arrives and BEFORE/ON the holiday date.
- * - Automatically hides as soon as the holiday date has passed!
+ * - Shows ONLY during the calendar month of that holiday!
+ * - Hidden completely in all other months.
  */
 export function isHolidayVisible(holidayId: HolidayId, date: Date = new Date()): boolean {
   const month = date.getMonth() + 1;
@@ -858,23 +1191,45 @@ export function isHolidayVisible(holidayId: HolidayId, date: Date = new Date()):
   switch (holidayId) {
     case 'tet':
       return isTetVisible(date).visible;
+    case '14_02':
+      return month === 2;
     case '08_03':
-      return month === 3 && day <= 8;
+      return month === 3;
+    case '30_04':
+      return month === 4 || (month === 5 && day <= 2);
+    case '01_06':
+      return month === 6;
+    case '02_09':
+      return month === 9;
+    case 'trung_thu':
+      return isTrungThuVisible(date).visible;
     case '20_10':
-      return month === 10 && day <= 20;
+      return month === 10;
     case 'halloween':
-      return month === 10 && day <= 31;
+      return month === 10;
     case '20_11':
-      return month === 11 && day <= 20;
+      return month === 11;
     case 'noel':
-      return month === 12 && day <= 25;
+      return month === 12;
     default:
       return false;
   }
 }
 
 export function getVisibleHolidays(date: Date = new Date()): HolidayConfig[] {
-  const order: HolidayId[] = ['tet', '08_03', '20_10', 'halloween', '20_11', 'noel'];
+  const order: HolidayId[] = [
+    'tet',
+    '14_02',
+    '08_03',
+    '30_04',
+    '01_06',
+    '02_09',
+    'trung_thu',
+    '20_10',
+    'halloween',
+    '20_11',
+    'noel',
+  ];
   return order
     .filter((id) => isHolidayVisible(id, date))
     .map((id) => HOLIDAY_CONFIGS[id]);
@@ -884,7 +1239,12 @@ export function detectActiveHoliday(date: Date = new Date()): HolidayConfig | nu
   const month = date.getMonth() + 1;
   const day = date.getDate();
   if (isTetVisible(date).isExactToday) return HOLIDAY_CONFIGS.tet;
+  if (month === 2 && day === 14) return HOLIDAY_CONFIGS['14_02'];
   if (month === 3 && day === 8) return HOLIDAY_CONFIGS['08_03'];
+  if ((month === 4 && day === 30) || (month === 5 && day === 1)) return HOLIDAY_CONFIGS['30_04'];
+  if (month === 6 && day === 1) return HOLIDAY_CONFIGS['01_06'];
+  if (month === 9 && day === 2) return HOLIDAY_CONFIGS['02_09'];
+  if (isTrungThuVisible(date).isExactToday) return HOLIDAY_CONFIGS.trung_thu;
   if (month === 10 && day === 20) return HOLIDAY_CONFIGS['20_10'];
   if (month === 10 && day === 31) return HOLIDAY_CONFIGS.halloween;
   if (month === 11 && day === 20) return HOLIDAY_CONFIGS['20_11'];
@@ -931,6 +1291,15 @@ export function loadReceivedHolidayGifts(): ReceivedHolidayGiftRecord[] {
   } catch {
     return [];
   }
+}
+
+export function saveReceivedHolidayGiftRecords(newRecords: ReceivedHolidayGiftRecord[]) {
+  try {
+    const existing = loadReceivedHolidayGifts();
+    const merged = [...newRecords, ...existing].slice(0, 50);
+    localStorage.setItem(STORAGE_KEY_RECEIVED_GIFTS, JSON.stringify(merged));
+    window.dispatchEvent(new CustomEvent('max10_holiday_gifts_updated'));
+  } catch {}
 }
 
 interface HolidayGiftAnimationModalProps {
@@ -1212,7 +1581,7 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
         celebrateMilestone();
         launchCanvasFireworks(5500);
         launchGoldenStarBurst();
-        soundEffects.playRonaldoSiuCelebration();
+        soundEffects.playBadgeUnlocked();
 
         [900, 1800, 2800, 3800].forEach((ms) => {
           const bt = window.setTimeout(() => {
@@ -1374,28 +1743,50 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
             </div>
           )}
 
-          {/* Interactive Gift Box / Spinning Reel Stage */}
+          {/* Interactive Gift Box / Always-Visible Gacha Reel Stage */}
           {phase === 'ready' ? (
-            <div className="py-4 flex flex-col items-center justify-center space-y-4">
-              <button
-                type="button"
-                onClick={handleOpenAndSpin}
-                className="group relative w-28 h-28 rounded-3xl bg-gradient-to-br from-rose-500/15 via-amber-500/15 to-pink-500/15 border-2 border-dashed border-rose-400/60 flex flex-col items-center justify-center cursor-pointer transition-transform hover:scale-105 active:scale-95"
+            <div className="py-2 flex flex-col items-center justify-center space-y-4">
+              {/* Live Holiday Gacha Reel Preview (always visible before spinning) */}
+              <div
+                className={`relative w-full h-32 rounded-2xl border-2 overflow-hidden flex items-center ${
+                  isDark ? 'bg-slate-950 border-emerald-500/50' : 'bg-slate-900 border-emerald-400'
+                }`}
               >
-                <span className="text-5xl animate-holiday-gift select-none">🎁</span>
-                <Sparkles className="w-5 h-5 text-amber-500 absolute -top-2 -right-2" />
-              </button>
+                <div className="absolute left-1/2 top-0 bottom-0 -translate-x-1/2 w-1 bg-emerald-400 z-20 shadow-[0_0_12px_rgba(52,211,153,0.9)]" />
+                <div className="absolute left-1/2 top-0 -translate-x-1/2 w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-t-[10px] border-t-emerald-400 z-20" />
+                <div className="absolute left-1/2 bottom-0 -translate-x-1/2 w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-b-[10px] border-b-emerald-400 z-20" />
+
+                <div
+                  className="flex items-center h-full"
+                  style={{ paddingLeft: 'calc(50% - 48px)' }}
+                >
+                  {(HOLIDAY_GIFT_POOLS[selectedHolidayId] || []).map((item, idx) => {
+                    const tier = RARITY_MAP[item.rarity];
+                    return (
+                      <div
+                        key={`${item.id}-${idx}`}
+                        style={{ width: '96px', marginRight: '8px' }}
+                        className={`shrink-0 h-24 rounded-xl border-2 ${tier.cardBorder} bg-gradient-to-b ${tier.cardBg} bg-slate-900 flex flex-col items-center justify-center p-1.5 text-center select-none`}
+                      >
+                        <span className="text-3xl mb-1">{item.icon}</span>
+                        <span className="text-[10px] font-bold text-white line-clamp-1">{item.name}</span>
+                        <span className={`text-[9px] font-black ${tier.textClass}`}>{tier.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
 
               <button
                 type="button"
                 onClick={handleOpenAndSpin}
-                className={`px-6 py-3 rounded-2xl bg-gradient-to-r ${holiday.accentGradient} text-white font-black text-xs sm:text-sm shadow-lg hover:brightness-105 transition-all flex items-center gap-2 cursor-pointer`}
+                className={`px-6 py-3 rounded-2xl bg-gradient-to-r ${holiday.accentGradient} text-white font-black text-xs sm:text-sm shadow-lg hover:brightness-105 transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap`}
               >
                 <Gift className="w-4 h-4" />
                 <span>Mở Hộp Quà {holiday.badgeText} &amp; Quay Thưởng</span>
               </button>
 
-              <div className="text-xs font-bold text-slate-500 dark:text-zinc-400">
+              <div className="text-xs font-bold text-slate-500 dark:text-zinc-400 tabular-nums">
                 Số lần đã quay: <strong className="text-amber-500 font-black">{spinCount} lượt</strong>
               </div>
             </div>
@@ -1449,7 +1840,7 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
               <div className="space-y-3">
                 {/* RONALDO "SIUUUUU" STADIUM & GRASS PITCH MYTHIC CELEBRATION STAGE */}
                 {drawnGift.rarity === 'mythic' && showRonaldoSiu && (
-                  <div className="relative overflow-hidden rounded-2xl border-2 border-amber-400 bg-slate-950 text-white shadow-[0_0_45px_rgba(245,158,11,0.65)] animate-cr7-stadium">
+                  <div className="relative overflow-hidden rounded-2xl border-2 border-emerald-400 bg-slate-950 text-white shadow-[0_0_45px_rgba(34,197,94,0.6)] animate-cr7-stadium">
                     {/* Real Stadium Scene with Cristiano Ronaldo's Face, #7 Jersey & Grass Pitch */}
                     <div className="relative h-56 sm:h-64 w-full overflow-hidden">
                       <img
@@ -1461,20 +1852,20 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
 
                       {/* Stadium Floodlight Beams */}
                       <div
-                        className="pointer-events-none absolute -top-12 left-6 w-28 h-56 bg-gradient-to-b from-white/45 via-amber-200/15 to-transparent blur-xl origin-top animate-floodlight"
+                        className="pointer-events-none absolute -top-12 left-6 w-28 h-56 bg-gradient-to-b from-white/45 via-emerald-200/20 to-transparent blur-xl origin-top animate-floodlight"
                         aria-hidden="true"
                       />
                       <div
-                        className="pointer-events-none absolute -top-12 right-6 w-28 h-56 bg-gradient-to-b from-white/45 via-emerald-200/15 to-transparent blur-xl origin-top animate-floodlight"
+                        className="pointer-events-none absolute -top-12 right-6 w-28 h-56 bg-gradient-to-b from-white/45 via-lime-200/20 to-transparent blur-xl origin-top animate-floodlight"
                         style={{ animationDelay: '1.1s' }}
                         aria-hidden="true"
                       />
 
                       {/* Shockwave Rings around Ronaldo */}
                       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                        <div className="w-40 h-40 rounded-full border-2 border-amber-400/70 animate-cr7-shockwave" />
+                        <div className="w-40 h-40 rounded-full border-2 border-emerald-400/75 animate-cr7-shockwave" />
                         <div
-                          className="w-40 h-40 rounded-full border-2 border-emerald-400/60 animate-cr7-shockwave"
+                          className="w-40 h-40 rounded-full border-2 border-lime-400/65 animate-cr7-shockwave"
                           style={{ animationDelay: '0.55s' }}
                         />
                       </div>
@@ -1482,22 +1873,12 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
                       {/* Gradient Scrim for Crisp Text Contrast */}
                       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-emerald-950 via-black/30 to-black/55" />
 
-                      {/* Top Mythic Badge + Replay SIUUUU Sound Button */}
+                      {/* Top Mythic Badge */}
                       <div className="absolute top-3 left-3 right-3 z-20 flex flex-wrap items-center justify-between gap-2">
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-amber-400 to-rose-500 text-slate-950 text-[11px] font-black uppercase tracking-wider shadow-lg">
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-emerald-400 via-green-400 to-lime-300 text-slate-950 text-[11px] font-black uppercase tracking-wider shadow-lg">
                           <Trophy className="w-3.5 h-3.5" />
-                          <span>⚽ ĐỒ THẦN THOẠI 0,5% · RONALDO SIUUUU</span>
+                          <span>⚽ CHÚC MỪNG TRÚNG THẦN THOẠI 0,5%!</span>
                         </div>
-
-                        <button
-                          type="button"
-                          onClick={() => soundEffects.playRonaldoSiuCelebration()}
-                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/65 hover:bg-black/85 border border-amber-400/60 text-amber-300 text-[11px] font-extrabold backdrop-blur-sm transition-all cursor-pointer shadow-md"
-                          title="Phát lại tiếng Ronaldo SIUUUU trên sân cỏ"
-                        >
-                          <Volume2 className="w-3.5 h-3.5" />
-                          <span>Nghe lại SIUUUU!</span>
-                        </button>
                       </div>
 
                       {/* Giant SIUUUUU Typography Overlay */}
@@ -1533,26 +1914,7 @@ export const HolidayGiftAnimationModal: React.FC<HolidayGiftAnimationModalProps>
                   </div>
                 )}
 
-                {/* Compact Replay Celebration Trigger after initial 6.8s showcase settles */}
-                {drawnGift.rarity === 'mythic' && !showRonaldoSiu && (
-                  <div className="flex items-center justify-center">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowRonaldoSiu(true);
-                        celebrateMilestone();
-                        launchGoldenStarBurst();
-                        soundEffects.playRonaldoSiuCelebration();
-                        const t = window.setTimeout(() => setShowRonaldoSiu(false), 6800);
-                        spinTimersRef.current.push(t);
-                      }}
-                      className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gradient-to-r from-emerald-600 to-amber-500 text-white text-xs font-black shadow-md hover:brightness-105 transition-all cursor-pointer"
-                    >
-                      <Volume2 className="w-3.5 h-3.5" />
-                      <span>⚽ Xem &amp; Nghe lại Ronaldo SIUUUU trên sân cỏ!</span>
-                    </button>
-                  </div>
-                )}
+                {/* Mythic celebration triggers automatically when spun */}
 
                 <div
                   className={`p-5 rounded-2xl border-2 text-center space-y-3 animate-in zoom-in-95 duration-300 bg-gradient-to-br ${rarityConfig.cardBg} ${rarityConfig.cardBorder} ${rarityConfig.glowClass}`}

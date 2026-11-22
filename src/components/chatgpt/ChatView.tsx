@@ -73,7 +73,8 @@ interface ChatViewProps {
   onSendMessage: (
     text: string,
     image?: { data: string; mimeType: string; previewUrl: string } | null,
-    isThinking?: boolean
+    isThinking?: boolean,
+    mode?: 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector' | 'all_in_one'
   ) => void;
   onRegenerate: () => void;
   isDark: boolean;
@@ -145,7 +146,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [isListening, setIsListening] = useState(false);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState<'gpt4o' | 'o3mini' | 'studio'>('gpt4o');
+  const [selectedModel, setSelectedModel] = useState<'ultra' | 'deepthink' | 'allinone' | 'studio'>('ultra');
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [feedbackGiven, setFeedbackGiven] = useState<Record<string, 'up' | 'down'>>({});
   const [localIsFullscreen, setLocalIsFullscreen] = useState(false);
@@ -436,7 +437,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
       soundEffects.playMissionComplete();
     }
 
-    onSendMessage(input.trim(), attachedImage, deepThinking);
+    const activeModePayload =
+      selectedModel === 'deepthink' || deepThinking
+        ? 'grade_10_secret'
+        : selectedModel === 'allinone'
+        ? 'all_in_one'
+        : 'tutor';
+    onSendMessage(input.trim(), attachedImage, deepThinking || selectedModel === 'deepthink', activeModePayload);
     setInput('');
     setAttachedImage(null);
     if (textareaRef.current) {
@@ -460,11 +467,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
     { id: 'anh', label: 'Anh', prompt: '[Tiếng Anh] Giải thích ngữ pháp & sửa câu: ', icon: BookOpen },
     { id: 'khtn', label: 'KHTN', prompt: '[KHTN] Giải bài tập & giải thích hiện tượng: ', icon: FlaskConical },
     { id: 'su_dia', label: 'Sử & Địa', prompt: '[Lịch sử & Địa lý] Tóm tắt trọng tâm: ', icon: Compass },
+    { id: 'all_in_one', label: 'Đa năng AI', prompt: '[Đa năng] Hỗ trợ lập trình, viết bài, dịch thuật hoặc tóm tắt: ', icon: Sparkles },
   ];
 
   // Derived student metrics for Welcome Dashboard Card
   const studentDisplayName =
-    currentUser?.name || (userName && userName !== 'Bạn học' ? userName : 'Mạc Khánh Duy');
+    currentUser?.name || (userName && userName !== 'Bạn học' ? userName : 'Bạn học');
   const studentClassLabel = currentUser?.studentClass
     ? `Lớp ${currentUser.studentClass}`
     : grade;
@@ -590,11 +598,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
           >
             <Bot className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
             <span>
-              {selectedModel === 'o3mini'
-                ? 'Max10 O3-Mini (Bẫy Điểm 10)'
+              {selectedModel === 'deepthink'
+                ? 'Max10 DeepThink (Soi Bẫy 10/10)'
+                : selectedModel === 'allinone'
+                ? 'Max10 Đa Năng (Code · Dịch · Viết)'
                 : selectedModel === 'studio'
                 ? 'Max10 Studio (Ảnh & Video AI)'
-                : 'Max10 AI (Gia sư Điểm 10)'}
+                : 'Max10 AI Ultra (Thế Hệ Mới)'}
             </span>
             <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           </button>
@@ -613,27 +623,27 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 }`}
               >
                 <div className="px-2.5 py-1.5 text-[11px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider">
-                  Chế độ Gia sư AI
+                  Chế độ Max10 AI Thế Hệ Mới
                 </div>
 
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedModel('gpt4o');
+                    setSelectedModel('ultra');
                     setDeepThinking(false);
                     setShowModelDropdown(false);
                   }}
                   className={`w-full p-2.5 rounded-xl text-left transition-colors flex items-start gap-2.5 cursor-pointer ${
-                    selectedModel === 'gpt4o'
+                    selectedModel === 'ultra'
                       ? 'bg-emerald-500/12 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-bold'
                       : 'hover:bg-black/5 dark:hover:bg-white/5'
                   }`}
                 >
                   <Bot className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
                   <div>
-                    <div className="font-bold">Max10 AI (Gia sư Điểm 10)</div>
+                    <div className="font-bold">Max10 AI Ultra (Gia sư &amp; Trợ lý)</div>
                     <p className="text-[11px] opacity-80 mt-0.5">
-                      Giải bài tập từng bước chuẩn barem SGK THCS.
+                      Giải 2 cách (Tự luận + Mẹo nhanh), siêu nhanh &amp; chuẩn xác 100%.
                     </p>
                   </div>
                 </button>
@@ -641,21 +651,43 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedModel('o3mini');
+                    setSelectedModel('deepthink');
                     setDeepThinking(true);
                     setShowModelDropdown(false);
                   }}
                   className={`w-full p-2.5 rounded-xl text-left transition-colors flex items-start gap-2.5 mt-1 cursor-pointer ${
-                    selectedModel === 'o3mini'
+                    selectedModel === 'deepthink'
                       ? 'bg-amber-500/12 border border-amber-500/30 text-amber-700 dark:text-amber-300 font-bold'
                       : 'hover:bg-black/5 dark:hover:bg-white/5'
                   }`}
                 >
                   <Brain className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
                   <div>
-                    <div className="font-bold">Max10 O3-Mini (Suy Luận Sâu)</div>
+                    <div className="font-bold">Max10 DeepThink (Suy Luận Sâu)</div>
                     <p className="text-[11px] opacity-80 mt-0.5">
-                      Quét bẫy đề thi nâng cao và bài phân loại học sinh giỏi.
+                      Tự kiểm chứng đa tầng, quét mọi bẫy đề thi HSG &amp; câu 9–10 điểm.
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedModel('allinone');
+                    setDeepThinking(false);
+                    setShowModelDropdown(false);
+                  }}
+                  className={`w-full p-2.5 rounded-xl text-left transition-colors flex items-start gap-2.5 mt-1 cursor-pointer ${
+                    selectedModel === 'allinone'
+                      ? 'bg-sky-500/12 border border-sky-500/30 text-sky-700 dark:text-sky-300 font-bold'
+                      : 'hover:bg-black/5 dark:hover:bg-white/5'
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4 text-sky-500 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold">Max10 Đa Năng (Code · Dịch · Viết)</div>
+                    <p className="text-[11px] opacity-80 mt-0.5">
+                      Viết code, dịch thuật mượt mà, soạn văn &amp; tóm tắt mọi chủ đề.
                     </p>
                   </div>
                 </button>
@@ -786,8 +818,23 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Quick Primary Actions: Mini game thuộc bài + 5 Bước Điểm 10 */}
+                  {/* Quick Primary Actions: Quay XP Lên Cấp + Mini game thuộc bài + 5 Bước Điểm 10 */}
                   <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onSelectTab) {
+                          onSelectTab('spin');
+                        } else {
+                          window.dispatchEvent(new CustomEvent('max10_open_xp_spin'));
+                        }
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 via-green-600 to-teal-600 hover:brightness-110 text-white font-bold text-xs sm:text-sm shadow-sm shadow-emerald-600/25 hover:-translate-y-0.5 transition-all cursor-pointer whitespace-nowrap"
+                    >
+                      <Zap className="w-4 h-4 shrink-0 fill-current" />
+                      <span>Quay XP Lên Cấp</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => {
@@ -803,7 +850,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     <button
                       type="button"
                       onClick={onOpenOfferModal || onOpenNameModal}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm shadow-sm shadow-emerald-600/25 hover:-translate-y-0.5 transition-all cursor-pointer whitespace-nowrap"
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white font-bold text-xs sm:text-sm shadow-sm hover:-translate-y-0.5 transition-all cursor-pointer whitespace-nowrap"
                     >
                       <Sparkles className="w-4 h-4 shrink-0" />
                       <span>5 Bước Điểm 10</span>
@@ -1419,6 +1466,48 @@ export const ChatView: React.FC<ChatViewProps> = ({
                             <span>Mini game thuộc bài</span>
                           </button>
                         </div>
+
+                        {!loading && (
+                          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                            {[
+                              {
+                                label: '⚡ Giải cách ngắn gọn hơn',
+                                prompt: 'Hãy tóm tắt lại câu trả lời vừa rồi theo cách ngắn gọn, dễ nhớ và mẹo làm nhanh nhất có thể.',
+                                deep: false,
+                              },
+                              {
+                                label: '🎯 Ra 1 bài tương tự để tự luyện',
+                                prompt: 'Hãy ra cho mình 1 bài tập tương tự (chưa hiện đáp án ngay, hoặc gợi ý hướng làm) để mình tự luyện rồi chấm giúp mình.',
+                                deep: false,
+                              },
+                              {
+                                label: '⚠️ Soi kỹ bẫy hay mất điểm',
+                                prompt: 'Hãy kiểm tra thật kỹ lại các bước và chỉ rõ mọi bẫy dễ mất điểm oan nhất của dạng bài vừa rồi.',
+                                deep: true,
+                              },
+                            ].map((chip) => (
+                              <button
+                                key={chip.label}
+                                type="button"
+                                onClick={() =>
+                                  onSendMessage(
+                                    chip.prompt,
+                                    null,
+                                    chip.deep,
+                                    chip.deep ? 'trap_detector' : 'tutor'
+                                  )
+                                }
+                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-colors cursor-pointer ${
+                                  isDark
+                                    ? 'bg-white/[0.04] hover:bg-emerald-500/15 border-white/10 hover:border-emerald-500/40 text-zinc-300 hover:text-emerald-300'
+                                    : 'bg-slate-50 hover:bg-emerald-50 border-slate-200 hover:border-emerald-300 text-slate-600 hover:text-emerald-700'
+                                }`}
+                              >
+                                {chip.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
 
                         {subscriptionPlan === 'free' && onOpenPricingModal && (
                           <div className="mt-3.5 p-3 sm:p-3.5 rounded-2xl border border-amber-500/30 bg-amber-500/8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">

@@ -50,6 +50,8 @@ import { PersonalSchedule } from './components/PersonalSchedule';
 import { ClassManagement } from './components/chatgpt/ClassManagement';
 import { BirthdaySurpriseModal } from './components/chatgpt/BirthdaySurpriseModal';
 import { HolidayGiftAnimationModal, detectActiveHoliday, getVisibleHolidays, HolidayId } from './components/chatgpt/HolidayGiftAnimationModal';
+import { XpSpinModal } from './components/chatgpt/XpSpinModal';
+import { XpSpinScreen } from './components/chatgpt/XpSpinScreen';
 import { STORAGE_KEY_USER_DOB } from './types/auth';
 import { loadStudentAchievements, saveStudentAchievements } from './data/initialAchievements';
 import { calculateLevel } from './types/achievements';
@@ -223,6 +225,73 @@ export function App() {
   // User Requirement: "với lại khi phóng to thì ẩn cả chỗ đặt câu hỏi mới từ chô Max10 AI-Gia Sư điểm 10 THCS ấn luôn"
   const [isChatFullscreen, setIsChatFullscreen] = useState<boolean>(false);
   const [unreadGroupMessagesCount, setUnreadGroupMessagesCount] = useState<number>(0);
+  const [latestIncomingNotifId, setLatestIncomingNotifId] = useState<string>('');
+  const [seenNotificationSignature, setSeenNotificationSignature] = useState<string>(() => {
+    try {
+      return localStorage.getItem('max10_seen_notification_signature_v1') || '';
+    } catch {
+      return '';
+    }
+  });
+
+  const currentNotificationSignature = useMemo(() => {
+    const monthKey = new Date().getMonth() + 1;
+    const holidayIds = getVisibleHolidays()
+      .map((h) => h.id)
+      .join(',');
+    const statusVersion = autoUpdateStatus?.version || 'init';
+    const publishedAt = autoUpdateStatus?.lastPublishedAt || 0;
+    const noticeFlag = autoUpdateNotice ? '1' : '0';
+    return `${statusVersion}|${publishedAt}|m${monthKey}:${holidayIds}|n${noticeFlag}|${latestIncomingNotifId}`;
+  }, [
+    autoUpdateStatus?.version,
+    autoUpdateStatus?.lastPublishedAt,
+    autoUpdateNotice,
+    latestIncomingNotifId,
+  ]);
+
+  const hasUnreadAdminNotifications = useMemo(() => {
+    if (unreadGroupMessagesCount > 0) return true;
+    return Boolean(
+      currentNotificationSignature &&
+        currentNotificationSignature !== seenNotificationSignature
+    );
+  }, [
+    unreadGroupMessagesCount,
+    currentNotificationSignature,
+    seenNotificationSignature,
+  ]);
+
+  const markNotificationsAsSeen = () => {
+    setSeenNotificationSignature(currentNotificationSignature);
+    setUnreadGroupMessagesCount(0);
+    try {
+      localStorage.setItem(
+        'max10_seen_notification_signature_v1',
+        currentNotificationSignature
+      );
+    } catch {}
+  };
+
+  useEffect(() => {
+    const onNewAdminMsg = (e: Event) => {
+      const detail = (e as CustomEvent<{ id?: string }>).detail;
+      if (detail?.id) {
+        setLatestIncomingNotifId(detail.id);
+      }
+    };
+    const onNotifViewed = () => {
+      markNotificationsAsSeen();
+    };
+    window.addEventListener('max10:admin-message', onNewAdminMsg);
+    window.addEventListener('max10_notifications_viewed', onNotifViewed);
+    window.addEventListener('max10_open_notifications_in_chat', onNotifViewed);
+    return () => {
+      window.removeEventListener('max10:admin-message', onNewAdminMsg);
+      window.removeEventListener('max10_notifications_viewed', onNotifViewed);
+      window.removeEventListener('max10_open_notifications_in_chat', onNotifViewed);
+    };
+  }, [currentNotificationSignature]);
 
   const [showOfferModal, setShowOfferModal] = useState<boolean>(false);
   const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
@@ -236,6 +305,7 @@ export function App() {
   const [showHolidayGiftModal, setShowHolidayGiftModal] = useState<boolean>(false);
   const [holidayGiftInitialId, setHolidayGiftInitialId] = useState<HolidayId | undefined>(undefined);
   const [isExactHolidayToday, setIsExactHolidayToday] = useState<boolean>(false);
+  const [showXpSpinModal, setShowXpSpinModal] = useState<boolean>(false);
   const [pricingInitialState, setPricingInitialState] = useState<{
     initialPlan?: 'plus' | 'premium';
     initialStep?: 'plans' | 'checkout';
@@ -349,7 +419,8 @@ export function App() {
   const handleSendMessage = async (
     text: string,
     image?: { data: string; mimeType: string; previewUrl: string } | null,
-    isThinking?: boolean
+    isThinking?: boolean,
+    mode?: 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector' | 'all_in_one'
   ) => {
     if ((!text || !text.trim()) && !image) return;
 
@@ -372,6 +443,7 @@ export function App() {
         body: JSON.stringify({
           grade,
           subject: currentSubject.name,
+          mode: mode || (isThinking ? 'grade_10_secret' : 'tutor'),
           messages: currentMsgs.map((m) => ({
             role: m.role,
             content: m.content,
@@ -559,10 +631,15 @@ export function App() {
       setIsExactHolidayToday(Boolean(detectActiveHoliday(today)));
       setShowHolidayGiftModal(true);
     };
+    const handleOpenXpSpin = () => {
+      setShowXpSpinModal(true);
+    };
     window.addEventListener('max10_open_holiday_gift', handleOpenHolidayEvent);
+    window.addEventListener('max10_open_xp_spin', handleOpenXpSpin);
     return () => {
       clearInterval(timer);
       window.removeEventListener('max10_open_holiday_gift', handleOpenHolidayEvent);
+      window.removeEventListener('max10_open_xp_spin', handleOpenXpSpin);
     };
   }, []);
 
@@ -819,8 +896,11 @@ export function App() {
 
       {/* Real-time Message Notification Banner for groups, community, friends */}
       <MessageNotificationBanner
-        currentUserId={currentUser?.id || 'admin-mac-khanh-duy'}
-        currentUserName={userName || 'Mạc Khánh Duy'}
+        currentUserId={
+          currentUser?.id ||
+          'user-local-' + (userName || 'Bạn học').toLowerCase().replace(/\s+/g, '-')
+        }
+        currentUserName={currentUser?.name || userName || 'Bạn học'}
         activeTab={activeTab}
         onOpenConversation={(type, targetId) => {
           setActiveTab('group');
@@ -873,6 +953,7 @@ export function App() {
             isAdmin={isAdmin}
             onOpenAchievementsModal={() => setShowAchievementsModal(true)}
             onOpenAdminNotifications={() => {
+              markNotificationsAsSeen();
               setActiveSpace('community');
               setActiveTab('group');
               try {
@@ -887,12 +968,12 @@ export function App() {
                 );
               }, 30);
             }}
-            hasAdminNotificationDot={Boolean(autoUpdateNotice) || unreadGroupMessagesCount > 0}
+            hasAdminNotificationDot={hasUnreadAdminNotifications}
             onLogout={handleLogout}
           />
 
           <ContextPanel
-            isOpen={contextPanelOpen}
+            isOpen={contextPanelOpen && activeTab !== 'group'}
             onClose={() => setContextPanelOpen(false)}
             activeTab={activeTab}
             activeSpace={activeSpace}
@@ -950,6 +1031,7 @@ export function App() {
             onOpenAchievementsModal={() => setShowAchievementsModal(true)}
             onOpenHistoryDrawer={() => setHistoryDrawerOpen(true)}
             onOpenAdminNotifications={() => {
+              markNotificationsAsSeen();
               setActiveSpace('community');
               setActiveTab('group');
               try {
@@ -964,6 +1046,7 @@ export function App() {
                 );
               }, 30);
             }}
+            hasUnreadNotifications={hasUnreadAdminNotifications}
             historyCount={sessions.length}
             onLogout={handleLogout}
           />
@@ -1097,7 +1180,7 @@ export function App() {
                 setActiveTab('chat');
               }}
               isFullscreen={isChatFullscreen}
-              hideInnerSidebar={contextPanelOpen && !isChatFullscreen}
+              hideInnerSidebar={false}
               onToggleFullscreen={(val?: boolean) => {
                 const nextVal = typeof val === 'boolean' ? val : !isChatFullscreen;
                 setIsChatFullscreen(nextVal);
@@ -1262,6 +1345,16 @@ export function App() {
               />
             </div>
           )}
+          {activeTab === 'spin' && (
+            <div className="h-full w-full overflow-y-auto">
+              <XpSpinScreen
+                variant="page"
+                isDark={isDark}
+                userName={currentUser?.name || userName}
+                onNavigateToTab={setActiveTab}
+              />
+            </div>
+          )}
         </main>
       </div>
 
@@ -1412,6 +1505,14 @@ export function App() {
         isDark={isDark}
         initialHolidayId={holidayGiftInitialId}
         isExactHolidayToday={isExactHolidayToday}
+      />
+
+      {/* 12b. Anytime XP Level-Up Spin & Ronaldo SIUUUU Modal */}
+      <XpSpinModal
+        isOpen={!isBotCrawler && showXpSpinModal}
+        onClose={() => setShowXpSpinModal(false)}
+        isDark={isDark}
+        userName={currentUser?.name || userName}
       />
 
       {/* 13. XP Milestone & Level 2412 (MAX) Fireworks + Halo Celebration */}
