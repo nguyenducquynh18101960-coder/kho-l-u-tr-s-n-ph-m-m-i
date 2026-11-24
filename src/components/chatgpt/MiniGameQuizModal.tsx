@@ -20,6 +20,7 @@ import { GradeLevel } from '../../types';
 import { awardMiniGameAchievement } from '../../data/initialAchievements';
 import { StudentBadge } from '../../types/achievements';
 import { celebrationEngine } from '../../utils/confettiFireworks';
+import { recordAttemptResult } from '../../utils/knowledgeGapTracker';
 
 interface MiniGameQuizModalProps {
   isOpen: boolean;
@@ -372,6 +373,17 @@ export const MiniGameQuizModal: React.FC<MiniGameQuizModalProps> = ({
     setIsAnswered(true);
 
     const isCorrect = idx === currentQ.correctIndex;
+    recordAttemptResult({
+      subject: subjectTitle,
+      topic: lessonContext ? lessonContext.slice(0, 80) : subjectTitle,
+      question: currentQ.question,
+      userAnswer: currentQ.options[idx],
+      correctAnswer: currentQ.options[currentQ.correctIndex],
+      explanation: currentQ.explanation,
+      isCorrect,
+      source: 'minigame',
+    });
+
     if (isCorrect) {
       setCorrectCount((prev) => prev + 1);
       setScoreAnimation('+1.0 Điểm 🎉');

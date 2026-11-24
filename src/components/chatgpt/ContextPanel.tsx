@@ -25,6 +25,7 @@ import {
   Globe,
   Bell,
   Gamepad2,
+  TrendingUp,
 } from 'lucide-react';
 import { ChatSession, ChatGroup, FriendItem } from '../../types';
 import { UserAccount } from '../../types/auth';
@@ -49,7 +50,6 @@ interface ContextPanelProps {
   subscriptionPlan: 'free' | 'plus' | 'premium';
   onOpenStoreModal?: () => void;
   onOpenPricingModal?: (initialPlan?: 'plus' | 'premium', initialStep?: 'plans' | 'checkout') => void;
-  onOpenOfferModal: () => void;
   onOpenAchievementsModal?: () => void;
 }
 
@@ -73,7 +73,6 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
   subscriptionPlan,
   onOpenStoreModal,
   onOpenPricingModal,
-  onOpenOfferModal,
   onOpenAchievementsModal,
 }) => {
   const [historySearch, setHistorySearch] = useState('');
@@ -165,7 +164,7 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
     );
   };
 
-  const handleOpenCommunitiesDirectory = (category: 'all' | 'game' | 'study' = 'all') => {
+  const handleOpenCommunitiesDirectory = (category: 'all' | 'game' | 'study' | 'chat' = 'all') => {
     setSelectedCommunityKey(category === 'game' ? 'communities_game' : 'communities_directory');
     setActiveTab('group');
     window.dispatchEvent(new CustomEvent('max10_open_communities', { detail: { category } }));
@@ -571,6 +570,8 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
                         ? g.gamePlatform
                           ? `Game · ${g.gamePlatform}`
                           : 'Cộng đồng Game'
+                        : g.communityCategory === 'chat'
+                        ? 'Trò chuyện tự do'
                         : 'Học tập';
                     return (
                       <button
@@ -586,7 +587,14 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
                         }`}
                       >
                         <div className="relative w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-sm shrink-0">
-                          <span>{g.avatarIcon || (g.communityCategory === 'game' ? '🎮' : '📚')}</span>
+                          <span>
+                            {g.avatarIcon ||
+                              (g.communityCategory === 'game'
+                                ? '🎮'
+                                : g.communityCategory === 'chat'
+                                ? '💬'
+                                : '📚')}
+                          </span>
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="truncate">{g.name}</div>
@@ -726,7 +734,7 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
       )}
 
       {/* ========================================================= */}
-      {/* SPACE 3: KHO LUYỆN TẬP (Luyện đề, Chấm bài, Mini game, 5 Bước Điểm 10) */}
+      {/* SPACE 3: KHO LUYỆN TẬP (Luyện đề, Chấm bài, Mini game, Quay XP) */}
       {/* ========================================================= */}
       {effectiveSpace === 'practice' && (
         <div className="flex-1 overflow-y-auto p-3 space-y-2 text-xs">
@@ -774,6 +782,26 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
             </div>
           </button>
 
+          <button
+            type="button"
+            onClick={() => setActiveTab('tracker')}
+            className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl border text-left transition-colors cursor-pointer ${
+              activeTab === 'tracker'
+                ? 'bg-emerald-500/12 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-bold'
+                : isDark
+                ? 'bg-white/[0.02] border-white/[0.06] hover:bg-white/[0.06]'
+                : 'bg-white border-slate-200/80 hover:bg-slate-50'
+            }`}
+          >
+            <TrendingUp className="w-4 h-4 text-emerald-500 shrink-0" />
+            <div className="min-w-0">
+              <div className="font-bold truncate">Phân tích Lỗ hổng AI</div>
+              <div className="text-[10px] text-slate-400 dark:text-zinc-500 truncate">
+                Biểu đồ môn yếu &amp; lộ trình ôn bù
+              </div>
+            </div>
+          </button>
+
           <div className="pt-2 px-2 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
             Săn Điểm 10 nhanh
           </div>
@@ -814,24 +842,6 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
             <div className="min-w-0">
               <div className="font-extrabold truncate">Mini game thuộc bài</div>
               <div className="text-[10px] opacity-80 truncate">Đua Top 1 &amp; nhận XP</div>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={onOpenOfferModal}
-            className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl border text-left transition-colors cursor-pointer ${
-              isDark
-                ? 'bg-white/[0.02] border-white/[0.06] hover:bg-white/[0.06]'
-                : 'bg-white border-slate-200/80 hover:bg-slate-50'
-            }`}
-          >
-            <Sparkles className="w-4 h-4 text-emerald-500 shrink-0" />
-            <div className="min-w-0">
-              <div className="font-bold truncate">5 Bước Điểm 10</div>
-              <div className="text-[10px] text-slate-400 dark:text-zinc-500 truncate">
-                Phương pháp học chuẩn THCS
-              </div>
             </div>
           </button>
         </div>

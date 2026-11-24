@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { HonorRollLeaderboard } from './HonorRollLeaderboard';
 import { awardStudentActivity } from '../data/initialAchievements';
+import { recordAttemptResult } from '../utils/knowledgeGapTracker';
 import {
   ALL_CLASSES_LIST,
   ClassCode,
@@ -328,6 +329,25 @@ export const ExamPractice: React.FC<ExamPracticeProps> = ({
     if (examData?.title) {
       const updatedCache = updateCachedExamResult(examData.title, score);
       setCachedExams(updatedCache);
+    }
+    if (examData?.questions) {
+      examData.questions.forEach((q) => {
+        const userAns = (userAnswers[q.id] || '').trim().toUpperCase();
+        const correctAns = (q.correctAnswer || '').trim().toUpperCase();
+        const isCorrect = Boolean(
+          userAns && (userAns === correctAns || userAns.startsWith(correctAns) || correctAns.startsWith(userAns))
+        );
+        recordAttemptResult({
+          subject: currentSubject.name,
+          topic: examData.title || currentSubject.name,
+          question: q.questionText,
+          userAnswer: userAnswers[q.id] || 'Chưa trả lời',
+          correctAnswer: q.correctAnswer,
+          explanation: q.stepByStepSolution || q.score10Secret,
+          isCorrect,
+          source: 'exam',
+        });
+      });
     }
     if (currentSubject.id === 'toan') {
       awardStudentActivity({ type: 'solve_algebra', count: Math.max(1, correctCount), score });

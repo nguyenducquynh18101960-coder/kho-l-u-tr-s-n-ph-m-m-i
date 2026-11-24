@@ -5,6 +5,7 @@ import { UserAccount, STORAGE_KEY_AUTH_USER, isUserAdmin, STORAGE_KEY_USER_GENDE
 import { GenderType, STORAGE_KEY_USER_AVATAR } from './data/presetAvatars';
 import { SUBJECTS } from './data/subjects';
 import { useAutoUpdate } from './hooks/useAutoUpdate';
+import { CountryCode, QuizRole, QuizTopicId } from './data/countryCultures';
 
 // Study Hub UI Components
 import { Header } from './components/chatgpt/Header';
@@ -28,7 +29,6 @@ import { IncomingCallModal } from './components/chatgpt/IncomingCallModal';
 // Modals & Device Helper
 import { getOrCreateDeviceId } from './components/chatgpt/Max10SecurityVerification';
 import { Max10IntroSplash } from './components/chatgpt/Max10IntroSplash';
-import { OfferModal } from './components/chatgpt/OfferModal';
 import { ThemeBackgroundModal } from './components/chatgpt/ThemeBackgroundModal';
 import { AIVoiceModal } from './components/chatgpt/AIVoiceModal';
 import { UserNameModal } from './components/chatgpt/UserNameModal';
@@ -60,11 +60,23 @@ import { soundEffects } from './utils/soundEffects';
 import { getDailyQuestionQuota, MAX_DAILY_QUESTIONS } from './data/questionQuota';
 import { purgeUnrelatedLegacyClassGroups } from './data/classSystemData';
 import { isSearchEngineBot, syncHomepageSeoMeta } from './utils/seoBot';
+import { KnowledgeGapTracker } from './components/chatgpt/KnowledgeGapTracker';
+import {
+  addVipUnlockedDecorations,
+  AvatarFrameId,
+  loadLocalDecorations,
+  NameplateId,
+  saveLocalDecorations,
+} from './data/profileDecorations';
 
 const STORAGE_KEY_SESSIONS = 'max10_chat_sessions_v3';
 const STORAGE_KEY_SELECTED_GRADE = 'max10_selected_grade_v1';
 const STORAGE_KEY_USER_NAME = 'max10_user_name_v1';
 const STORAGE_KEY_THEME_MODE = 'max10_theme_mode_v1';
+const STORAGE_KEY_COUNTRY_CODE = 'max10_country_culture_v1';
+const STORAGE_KEY_BILINGUAL_MODE = 'max10_bilingual_mode_v1';
+const STORAGE_KEY_QUIZ_SUBJECT = 'max10_quiz_subject_v1';
+const STORAGE_KEY_QUIZ_ROLE = 'max10_quiz_role_v1';
 
 export function App() {
   // Theme & Dark mode
@@ -157,6 +169,87 @@ export function App() {
   // Selected Subject for Exam & Tool views
   const [currentSubjectIndex, setCurrentSubjectIndex] = useState<number>(0);
   const currentSubject: SubjectInfo = SUBJECTS[currentSubjectIndex] || SUBJECTS[0];
+
+  // Country & Language Culture + Interactive Quiz & Voice Tutor Mode
+  const [countryCode, setCountryCode] = useState<CountryCode>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_COUNTRY_CODE);
+      if (saved && ['VN', 'US', 'GB', 'JP', 'KR', 'CN', 'DE', 'FR'].includes(saved)) {
+        return saved as CountryCode;
+      }
+    } catch {}
+    return 'VN';
+  });
+
+  const [bilingualMode, setBilingualMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_BILINGUAL_MODE);
+      return saved !== 'false';
+    } catch {}
+    return true;
+  });
+
+  const [quizVoiceMode, setQuizVoiceMode] = useState<boolean>(false);
+
+  const [quizSubject, setQuizSubject] = useState<QuizTopicId>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_QUIZ_SUBJECT);
+      if (saved && ['Toán', 'Văn', 'Anh', 'Lịch sử', 'Giao tiếp', 'KHTN', 'Địa lý'].includes(saved)) {
+        return saved as QuizTopicId;
+      }
+    } catch {}
+    return 'Toán';
+  });
+
+  const [quizRole, setQuizRole] = useState<QuizRole>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_QUIZ_ROLE);
+      if (saved === 'deskmate') return 'deskmate';
+    } catch {}
+    return 'tutor';
+  });
+
+  const handleSelectCountry = (code: CountryCode) => {
+    setCountryCode(code);
+    try {
+      localStorage.setItem(STORAGE_KEY_COUNTRY_CODE, code);
+    } catch {}
+  };
+
+  const handleToggleBilingualMode = () => {
+    setBilingualMode((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(STORAGE_KEY_BILINGUAL_MODE, next ? 'true' : 'false');
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleSelectQuizSubject = (topic: QuizTopicId) => {
+    setQuizSubject(topic);
+    try {
+      localStorage.setItem(STORAGE_KEY_QUIZ_SUBJECT, topic);
+    } catch {}
+  };
+
+  const handleSelectQuizRole = (role: QuizRole) => {
+    setQuizRole(role);
+    try {
+      localStorage.setItem(STORAGE_KEY_QUIZ_ROLE, role);
+    } catch {}
+  };
+
+  const handleToggleQuizVoiceMode = () => {
+    setQuizVoiceMode((prev) => {
+      const next = !prev;
+      if (next) {
+        setActiveTabState('chat');
+        setActiveSpace('ai');
+      }
+      return next;
+    });
+  };
 
   // Navigation tab & Study Hub 4 spaces
   const [activeTab, setActiveTabState] = useState<MainTabId>('chat');
@@ -283,17 +376,24 @@ export function App() {
     const onNotifViewed = () => {
       markNotificationsAsSeen();
     };
+    const onOpenHolidayEvent = (e: Event) => {
+      const detail = (e as CustomEvent<{ holidayId?: HolidayId }>).detail;
+      if (detail?.holidayId) setHolidayGiftInitialId(detail.holidayId);
+      setIsExactHolidayToday(false);
+      setShowHolidayGiftModal(true);
+    };
     window.addEventListener('max10:admin-message', onNewAdminMsg);
     window.addEventListener('max10_notifications_viewed', onNotifViewed);
     window.addEventListener('max10_open_notifications_in_chat', onNotifViewed);
+    window.addEventListener('max10_open_holiday_gift', onOpenHolidayEvent);
     return () => {
       window.removeEventListener('max10:admin-message', onNewAdminMsg);
       window.removeEventListener('max10_notifications_viewed', onNotifViewed);
       window.removeEventListener('max10_open_notifications_in_chat', onNotifViewed);
+      window.removeEventListener('max10_open_holiday_gift', onOpenHolidayEvent);
     };
   }, [currentNotificationSignature]);
 
-  const [showOfferModal, setShowOfferModal] = useState<boolean>(false);
   const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
   const [showVoiceModal, setShowVoiceModal] = useState<boolean>(false);
   const [showNameModal, setShowNameModal] = useState<boolean>(false);
@@ -420,7 +520,8 @@ export function App() {
     text: string,
     image?: { data: string; mimeType: string; previewUrl: string } | null,
     isThinking?: boolean,
-    mode?: 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector' | 'all_in_one'
+    mode?: 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector' | 'all_in_one',
+    quizOverrides?: { interactiveQuizMode?: boolean; quizSubject?: QuizTopicId; quizRole?: QuizRole }
   ) => {
     if ((!text || !text.trim()) && !image) return;
 
@@ -436,13 +537,18 @@ export function App() {
     updateActiveSessionMessages(currentMsgs);
     setChatLoading(true);
 
+    const effectiveQuizMode =
+      quizOverrides?.interactiveQuizMode !== undefined ? quizOverrides.interactiveQuizMode : quizVoiceMode;
+    const effectiveQuizSubject = quizOverrides?.quizSubject || quizSubject;
+    const effectiveQuizRole = quizOverrides?.quizRole || quizRole;
+
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           grade,
-          subject: currentSubject.name,
+          subject: effectiveQuizMode ? effectiveQuizSubject : currentSubject.name,
           mode: mode || (isThinking ? 'grade_10_secret' : 'tutor'),
           messages: currentMsgs.map((m) => ({
             role: m.role,
@@ -452,6 +558,11 @@ export function App() {
           image: image ? { mimeType: image.mimeType, data: image.data } : null,
           userName,
           isThinking,
+          countryCode,
+          bilingualMode,
+          interactiveQuizMode: effectiveQuizMode,
+          quizSubject: effectiveQuizSubject,
+          quizRole: effectiveQuizRole,
         }),
       });
 
@@ -696,11 +807,120 @@ export function App() {
       }
     }
     setSubscriptionPlan((user.plan as SubscriptionPlan) || 'free');
-    if (user.role === 'admin') {
+    if (user.role === 'admin' || isUserAdmin(user)) {
+      sessionStorage.setItem('max10_master_security_verified', 'true');
       setActiveTab('control');
     }
+    sessionStartedAtRef.current = Date.now();
     setShowAuthModal(false);
   };
+
+  const sessionStartedAtRef = React.useRef<number>(Date.now());
+  const [pinnedSystemBanner, setPinnedSystemBanner] = useState<{
+    id: string;
+    title: string;
+    content: string;
+    severity: 'info' | 'warning' | 'celebrate';
+    updatedAt: number;
+    author: string;
+  } | null>(null);
+  const [dismissedPinId, setDismissedPinId] = useState<string | null>(null);
+  const [godModeNotice, setGodModeNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isUserAdmin(currentUser)) {
+      sessionStorage.setItem('max10_master_security_verified', 'true');
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (isBotCrawler) return;
+    let active = true;
+
+    const runSessionCheck = async () => {
+      try {
+        const uid = currentUser?.id || '';
+        const url = `/api/users/session-check?userId=${encodeURIComponent(
+          uid
+        )}&sessionStartedAt=${sessionStartedAtRef.current}`;
+        const res = await fetch(url);
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        if (!res.ok || !ct.includes('application/json')) return;
+        const data = await res.json();
+        if (!active || !data?.success) return;
+
+        if ('pinnedBanner' in data) {
+          setPinnedSystemBanner(data.pinnedBanner || null);
+        }
+
+        const isCurrentAdmin = isUserAdmin(currentUser);
+        if ((data.forceLogout || data.locked) && uid && !isCurrentAdmin) {
+          setGodModeNotice(
+            data.locked
+              ? '🔒 Tài khoản của bạn đã bị Quản trị viên tạm khóa.'
+              : '🚪 Quản trị viên đã yêu cầu đăng xuất phiên làm việc này.'
+          );
+          setTimeout(() => setGodModeNotice(null), 5000);
+          handleLogout();
+          return;
+        }
+
+        if (data.vipGift && uid) {
+          const gift = data.vipGift;
+          if (Number(gift.xpBonus) > 0) {
+            const st = loadStudentAchievements();
+            const nextXp = st.totalXp + Number(gift.xpBonus);
+            const lv = calculateLevel(nextXp);
+            saveStudentAchievements({
+              ...st,
+              totalXp: nextXp,
+              level: lv.level,
+              levelTitle: lv.title,
+              nextLevelXp: lv.nextLevelXp,
+            });
+          }
+
+          const nps = Array.isArray(gift.unlockedNameplates) ? gift.unlockedNameplates : [];
+          const frs = Array.isArray(gift.unlockedFrames) ? gift.unlockedFrames : [];
+          if (nps.length > 0 || frs.length > 0) {
+            addVipUnlockedDecorations(nps, frs);
+          }
+          if (gift.equippedNameplateId || gift.equippedFrameId) {
+            const curDec = loadLocalDecorations(isCurrentAdmin);
+            saveLocalDecorations({
+              ...curDec,
+              ...(gift.equippedNameplateId
+                ? { nameplateId: gift.equippedNameplateId as NameplateId }
+                : {}),
+              ...(gift.equippedFrameId ? { frameId: gift.equippedFrameId as AvatarFrameId } : {}),
+            });
+          }
+
+          soundEffects.playBadgeUnlocked();
+          celebrateMilestone();
+          setGodModeNotice(
+            `🎁 Quà tặng VIP từ Quản trị viên: +${Number(gift.xpBonus || 0)} XP${
+              gift.equippedNameplateId ? ' & Nameplate VIP' : ''
+            }!`
+          );
+          setTimeout(() => setGodModeNotice(null), 6000);
+
+          fetch('/api/users/vip-gifts/ack', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: uid, giftId: gift.id }),
+          }).catch(() => {});
+        }
+      } catch {}
+    };
+
+    runSessionCheck();
+    const timer = window.setInterval(runSessionCheck, 15000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [currentUser?.id, currentUser?.email]);
 
   const handleOpenPricingModal = (initialPlan?: 'plus' | 'premium', initialStep?: 'plans' | 'checkout') => {
     setPricingInitialState({ initialPlan, initialStep });
@@ -936,7 +1156,6 @@ export function App() {
             onSelectSpace={handleSelectSpace}
             isDark={isDark}
             onToggleTheme={() => setIsDark((prev) => !prev)}
-            onOpenOfferModal={() => setShowOfferModal(true)}
             onOpenIntroModal={() => setShowIntroSplash(true)}
             activeTheme={activeTheme}
             onOpenThemeModal={() => setShowThemeModal(true)}
@@ -992,7 +1211,6 @@ export function App() {
             subscriptionPlan={subscriptionPlan}
             onOpenStoreModal={() => setShowStoreModal(true)}
             onOpenPricingModal={handleOpenPricingModal}
-            onOpenOfferModal={() => setShowOfferModal(true)}
             onOpenAchievementsModal={() => setShowAchievementsModal(true)}
           />
         </>
@@ -1014,7 +1232,6 @@ export function App() {
             activeTab={activeTab}
             activeSpace={activeSpace}
             onSelectTab={setActiveTab}
-            onOpenOfferModal={() => setShowOfferModal(true)}
             onOpenIntroModal={() => setShowIntroSplash(true)}
             activeTheme={activeTheme}
             onOpenThemeModal={() => setShowThemeModal(true)}
@@ -1049,6 +1266,12 @@ export function App() {
             hasUnreadNotifications={hasUnreadAdminNotifications}
             historyCount={sessions.length}
             onLogout={handleLogout}
+            countryCode={countryCode}
+            onSelectCountry={handleSelectCountry}
+            bilingualMode={bilingualMode}
+            onToggleBilingualMode={handleToggleBilingualMode}
+            quizVoiceMode={quizVoiceMode}
+            onToggleQuizVoiceMode={handleToggleQuizVoiceMode}
           />
         )}
 
@@ -1113,6 +1336,42 @@ export function App() {
           </div>
         )}
 
+        {/* Global Pinned Announcement Banner published from Admin God-Mode */}
+        {!isChatFullscreen &&
+          pinnedSystemBanner &&
+          dismissedPinId !== pinnedSystemBanner.id && (
+            <div
+              className={`px-4 py-2 text-xs font-bold flex flex-wrap items-center justify-between gap-2 shadow-sm z-20 ${
+                pinnedSystemBanner.severity === 'warning'
+                  ? 'bg-rose-600 text-white'
+                  : pinnedSystemBanner.severity === 'celebrate'
+                  ? 'bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white'
+                  : 'bg-gradient-to-r from-indigo-600 via-blue-600 to-emerald-600 text-white'
+              }`}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="px-2 py-0.5 rounded-full bg-black/25 text-[10px] font-black uppercase shrink-0">
+                  📌 {pinnedSystemBanner.title}
+                </span>
+                <span className="truncate sm:whitespace-normal">{pinnedSystemBanner.content}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDismissedPinId(pinnedSystemBanner.id)}
+                className="px-2.5 py-1 rounded-lg bg-black/20 hover:bg-black/35 text-white text-[11px] font-bold cursor-pointer shrink-0"
+              >
+                Ẩn
+              </button>
+            </div>
+          )}
+
+        {/* Non-blocking God-Mode Notification Toast (VIP Gifts / Force Logout) */}
+        {godModeNotice && (
+          <div className="fixed bottom-5 right-5 z-[10070] px-4 py-3 rounded-2xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-2xl border border-amber-400/50 text-xs font-extrabold flex items-center gap-2 max-w-md">
+            <span>{godModeNotice}</span>
+          </div>
+        )}
+
         {/* Dynamic Main Workspace depending on activeTab */}
         <main className="relative flex-1 min-h-0 overflow-hidden">
           {activeTab === 'chat' && (
@@ -1138,7 +1397,6 @@ export function App() {
               userAvatar={userAvatar}
               currentUser={currentUser}
               onOpenNameModal={() => setShowNameModal(true)}
-              onOpenOfferModal={() => setShowOfferModal(true)}
               onOpenIntroModal={() => setShowIntroSplash(true)}
               onOpenStoreModal={() => setShowStoreModal(true)}
               subscriptionPlan={subscriptionPlan}
@@ -1153,6 +1411,14 @@ export function App() {
                   setHistoryDrawerOpen(false);
                 }
               }}
+              countryCode={countryCode}
+              bilingualMode={bilingualMode}
+              quizVoiceMode={quizVoiceMode}
+              onToggleQuizVoiceMode={handleToggleQuizVoiceMode}
+              quizSubject={quizSubject}
+              onSelectQuizSubject={handleSelectQuizSubject}
+              quizRole={quizRole}
+              onSelectQuizRole={handleSelectQuizRole}
             />
           )}
 
@@ -1192,10 +1458,11 @@ export function App() {
                 setIsChatFullscreen(false);
               }}
               autoUpdateNotice={autoUpdateNotice}
-              onOpenOfferModal={() => setShowOfferModal(true)}
               onOpenStoreModal={() => setShowStoreModal(true)}
               onOpenPricingModal={() => handleOpenPricingModal()}
               onOpenIntroModal={() => setShowIntroSplash(true)}
+              countryCode={countryCode}
+              bilingualMode={bilingualMode}
             />
           )}
 
@@ -1355,6 +1622,22 @@ export function App() {
               />
             </div>
           )}
+
+          {activeTab === 'tracker' && (
+            <KnowledgeGapTracker
+              isDark={isDark}
+              onPracticeTopic={(_subject, tutorPrompt) => {
+                setQuizVoiceMode(true);
+                setActiveTab('chat');
+                setTimeout(() => {
+                  handleSendMessage(tutorPrompt, null, false, 'tutor', {
+                    interactiveQuizMode: true,
+                    quizRole: 'tutor',
+                  });
+                }, 90);
+              }}
+            />
+          )}
         </main>
       </div>
 
@@ -1372,20 +1655,7 @@ export function App() {
         }}
       />
 
-      {/* 2. Offer Modal (5 Bước học tập chuẩn Điểm 10) */}
-      <OfferModal
-        isOpen={showOfferModal}
-        onClose={() => setShowOfferModal(false)}
-        isDark={isDark}
-        userName={userName}
-        onSaveUserName={handleSaveUserName}
-        currentGrade={grade}
-        onSelectGrade={handleSelectGrade}
-        userAvatar={userAvatar}
-        onOpenAvatarModal={() => setShowAvatarModal(true)}
-      />
-
-      {/* 3. Theme Background Modal */}
+      {/* 2. Theme Background Modal */}
       <ThemeBackgroundModal
         isOpen={showThemeModal}
         onClose={() => setShowThemeModal(false)}

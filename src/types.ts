@@ -260,7 +260,7 @@ export interface ChatGroup {
   isClassGroup?: boolean;
   isCustomClassGroup?: boolean;
   isCommunity?: boolean;
-  communityCategory?: 'game' | 'study';
+  communityCategory?: 'game' | 'study' | 'chat';
   createdByAdmin?: boolean;
   gamePlatform?: 'All' | 'Mobile' | 'PC' | 'Console' | 'Cross-Platform' | string;
   gameTitle?: string;

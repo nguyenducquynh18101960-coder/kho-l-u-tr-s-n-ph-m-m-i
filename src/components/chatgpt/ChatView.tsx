@@ -65,6 +65,17 @@ import {
 import Markdown from 'react-markdown';
 import { formatDolaMath } from '../../utils/dolaMathFormatter';
 import { MainTabId } from './Sidebar';
+import {
+  CountryCode,
+  QuizRole,
+  QuizTopicId,
+  QUIZ_TOPICS,
+  getCountryCulture,
+} from '../../data/countryCultures';
+import { RobotTutor3D, RobotReactionType } from './RobotTutor3D';
+import { SmartWhiteboard } from './SmartWhiteboard';
+import { recordAttemptResult } from '../../utils/knowledgeGapTracker';
+import { AIVoicePersona } from '../../types/voice';
 
 interface ChatViewProps {
   grade: GradeLevel;
@@ -74,7 +85,8 @@ interface ChatViewProps {
     text: string,
     image?: { data: string; mimeType: string; previewUrl: string } | null,
     isThinking?: boolean,
-    mode?: 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector' | 'all_in_one'
+    mode?: 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector' | 'all_in_one',
+    quizOverrides?: { interactiveQuizMode?: boolean; quizSubject?: QuizTopicId; quizRole?: QuizRole }
   ) => void;
   onRegenerate: () => void;
   isDark: boolean;
@@ -93,7 +105,6 @@ interface ChatViewProps {
   userAvatar?: string;
   currentUser?: UserAccount | null;
   onOpenNameModal?: () => void;
-  onOpenOfferModal?: () => void;
   onOpenIntroModal?: () => void;
   onOpenStoreModal?: () => void;
   subscriptionPlan?: 'free' | 'plus' | 'premium';
@@ -101,6 +112,14 @@ interface ChatViewProps {
   isFullscreen?: boolean;
   onToggleFullscreen?: (val?: boolean) => void;
   isAdmin?: boolean;
+  countryCode?: CountryCode;
+  bilingualMode?: boolean;
+  quizVoiceMode?: boolean;
+  onToggleQuizVoiceMode?: () => void;
+  quizSubject?: QuizTopicId;
+  onSelectQuizSubject?: (topic: QuizTopicId) => void;
+  quizRole?: QuizRole;
+  onSelectQuizRole?: (role: QuizRole) => void;
 }
 
 export const ChatView: React.FC<ChatViewProps> = ({
@@ -125,14 +144,23 @@ export const ChatView: React.FC<ChatViewProps> = ({
   userAvatar,
   currentUser,
   onOpenNameModal,
-  onOpenOfferModal,
   onOpenIntroModal,
   subscriptionPlan = 'free',
   onOpenPricingModal,
   isFullscreen: isFullscreenProp,
   onToggleFullscreen,
   isAdmin = false,
+  countryCode = 'VN',
+  bilingualMode = true,
+  quizVoiceMode = false,
+  onToggleQuizVoiceMode,
+  quizSubject = 'Toán',
+  onSelectQuizSubject,
+  quizRole = 'tutor',
+  onSelectQuizRole,
 }) => {
+  const activeCountry = getCountryCulture(countryCode);
+  const [autoSpeakTutor, setAutoSpeakTutor] = useState<boolean>(true);
   const [input, setInput] = useState('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('toan');
   const [attachedImage, setAttachedImage] = useState<{
@@ -146,10 +174,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [isListening, setIsListening] = useState(false);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [activeVoicePersona, setActiveVoicePersona] = useState<AIVoicePersona>(() =>
+    aiVoice.getState().activePersona
+  );
   const [selectedModel, setSelectedModel] = useState<'ultra' | 'deepthink' | 'allinone' | 'studio'>('ultra');
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [feedbackGiven, setFeedbackGiven] = useState<Record<string, 'up' | 'down'>>({});
   const [localIsFullscreen, setLocalIsFullscreen] = useState(false);
+  const [robotReaction, setRobotReaction] = useState<RobotReactionType>('none');
+  const [robotReactionTrigger, setRobotReactionTrigger] = useState<number>(0);
 
   // Live Achievement Stats for Welcome Dashboard Card
   const [achievementStats, setAchievementStats] = useState<StudentAchievementStats>(() =>
@@ -322,6 +355,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   useEffect(() => {
     const unsub = aiVoice.subscribe((st) => {
       setSpeakingId(st.isPlaying ? st.activeMessageId : null);
+      setActiveVoicePersona(st.activePersona);
     });
     return unsub;
   }, []);
@@ -330,12 +364,63 @@ export const ChatView: React.FC<ChatViewProps> = ({
   useEffect(() => {
     if (messages.length > prevMsgCountRef.current && !loading) {
       const lastMsg = messages[messages.length - 1];
-      if (lastMsg && lastMsg.role === 'assistant' && aiVoice.getSettings().autoReadResponse) {
-        aiVoice.speak(lastMsg.content, lastMsg.id);
+      const shouldSpeak =
+        lastMsg &&
+        lastMsg.role === 'assistant' &&
+        ((quizVoiceMode && autoSpeakTutor) || aiVoice.getSettings().autoReadResponse);
+      if (shouldSpeak) {
+        aiVoice.speak(lastMsg.content, lastMsg.id, undefined, activeCountry.ttsLang);
+      }
+
+      if (quizVoiceMode && lastMsg && lastMsg.role === 'assistant') {
+        const lower = lastMsg.content.toLowerCase();
+        const isCorrectPraise =
+          /chính xác|đúng rồi|xuất sắc|tuyệt vời|giỏi quá|chuẩn rồi|correct|great job|well done|excellent|bravo|正解|すばらしい|잘했어요|정답|ausgezeichnet|parfait/.test(
+            lower
+          ) && !/chưa chính xác|chưa đúng|không chính xác/.test(lower);
+        const isEncourageHint =
+          /gần đúng|chưa đúng|chưa chính xác|thử lại|gợi ý nhẹ|suy nghĩ lại|almost|try again|not quite|hint|もう少し|다시 한 번|noch einmal|presque/.test(
+            lower
+          );
+
+        const lastUserMsg = [...messages]
+          .slice(0, -1)
+          .reverse()
+          .find((m) => m.role === 'user');
+        const prevTutorQuestion = [...messages]
+          .slice(0, -1)
+          .reverse()
+          .find((m) => m.role === 'assistant');
+
+        if (isCorrectPraise) {
+          setRobotReaction('celebrate');
+          setRobotReactionTrigger((n) => n + 1);
+          recordAttemptResult({
+            subject: quizSubject,
+            topic: `Hỏi bài 3D · ${quizSubject}`,
+            question: prevTutorQuestion?.content.slice(0, 220) || `Câu hỏi ${quizSubject} cùng Gia sư 3D`,
+            userAnswer: lastUserMsg?.content.slice(0, 140),
+            explanation: lastMsg.content.slice(0, 240),
+            isCorrect: true,
+            source: 'ai_quiz',
+          });
+        } else if (isEncourageHint) {
+          setRobotReaction('encourage');
+          setRobotReactionTrigger((n) => n + 1);
+          recordAttemptResult({
+            subject: quizSubject,
+            topic: `Hỏi bài 3D · ${quizSubject}`,
+            question: prevTutorQuestion?.content.slice(0, 220) || `Câu hỏi ${quizSubject} cùng Gia sư 3D`,
+            userAnswer: lastUserMsg?.content.slice(0, 140),
+            explanation: lastMsg.content.slice(0, 260),
+            isCorrect: false,
+            source: 'ai_quiz',
+          });
+        }
       }
     }
     prevMsgCountRef.current = messages.length;
-  }, [messages, loading]);
+  }, [messages, loading, quizVoiceMode, autoSpeakTutor, activeCountry.ttsLang, quizSubject]);
 
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -344,7 +429,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   };
 
   const handleSpeak = (text: string, id: string) => {
-    aiVoice.speak(text, id);
+    aiVoice.speak(text, id, undefined, activeCountry.ttsLang);
   };
 
   const handleDownloadImage = async (url: string, filename: string) => {
@@ -394,17 +479,18 @@ export const ChatView: React.FC<ChatViewProps> = ({
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      showToast('Trình duyệt hiện tại chưa hỗ trợ ghi âm tiếng Việt trực tiếp.');
+      showToast(`Trình duyệt hiện tại chưa hỗ trợ ghi âm giọng nói (${activeCountry.languageName}) trực tiếp.`);
       return;
     }
 
     try {
       const recognition = new SpeechRecognition();
-      recognition.lang = 'vi-VN';
+      recognition.lang = activeCountry.speechLang;
       recognition.continuous = false;
       recognition.interimResults = false;
 
       setIsListening(true);
+      showToast(`🎤 Đang nghe (${activeCountry.flag} ${activeCountry.languageName})...`);
       recognition.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
         setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
@@ -417,6 +503,23 @@ export const ChatView: React.FC<ChatViewProps> = ({
     } catch {
       setIsListening(false);
     }
+  };
+
+  const handleStartQuizSession = (customTopic?: QuizTopicId) => {
+    const topicToUse = customTopic || quizSubject;
+    if (!isAdmin && quotaStatus.remaining <= 0) {
+      setQuotaStatus(getDailyQuestionQuota(isAdmin));
+      return;
+    }
+    useQuestionSlot(isAdmin);
+    setQuotaStatus(getDailyQuestionQuota(isAdmin));
+    const roleLabel = quizRole === 'deskmate' ? 'bạn học cùng bàn' : 'gia sư';
+    const startPrompt = `Bắt đầu chế độ Nói chuyện & Hỏi bài (${roleLabel}) môn ${topicToUse} (${grade}, phong cách ${activeCountry.nativeName}). Hãy chào ngắn gọn và đặt cho mình câu hỏi đầu tiên (mức độ dễ trước) và đợi mình trả lời nhé!`;
+    onSendMessage(startPrompt, null, false, 'tutor', {
+      interactiveQuizMode: true,
+      quizSubject: topicToUse,
+      quizRole,
+    });
   };
 
   const handleSubmit = (e?: React.FormEvent) => {
@@ -763,6 +866,234 @@ export const ChatView: React.FC<ChatViewProps> = ({
         </div>
       </div>
 
+      {/* Interactive Quiz & Voice Tutor Control Strip */}
+      {quizVoiceMode && (
+        <div
+          className={`px-4 sm:px-6 py-2.5 border-b shrink-0 flex flex-col gap-2 z-15 ${
+            isDark
+              ? 'bg-emerald-950/35 border-emerald-500/25 text-zinc-100'
+              : 'bg-emerald-50/90 border-emerald-200 text-slate-900'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-600 text-white font-extrabold shadow-xs">
+                <Mic className="w-3.5 h-3.5" />
+                <span>Hỏi bài &amp; Nói chuyện</span>
+              </span>
+
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl border border-emerald-500/30 bg-white/70 dark:bg-white/[0.06] font-bold">
+                <span>{activeCountry.flag}</span>
+                <span>{activeCountry.nativeName}</span>
+                {countryCode !== 'VN' && (
+                  <span className="text-[10px] text-emerald-700 dark:text-emerald-300">
+                    ({bilingualMode ? 'Song ngữ' : 'Bản ngữ'})
+                  </span>
+                )}
+              </span>
+
+              <div className="inline-flex items-center p-0.5 rounded-xl border border-emerald-500/25 bg-white/70 dark:bg-white/[0.04]">
+                <button
+                  type="button"
+                  onClick={() => onSelectQuizRole?.('tutor')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-colors ${
+                    quizRole === 'tutor'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-600 dark:text-zinc-300 hover:bg-black/5 dark:hover:bg-white/5'
+                  }`}
+                >
+                  👩‍🏫 Gia sư
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSelectQuizRole?.('deskmate')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-colors ${
+                    quizRole === 'deskmate'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-600 dark:text-zinc-300 hover:bg-black/5 dark:hover:bg-white/5'
+                  }`}
+                >
+                  🧑‍🎓 Bạn cùng bàn
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {/* Strict Gender Voice Toggle (Nữ ra giọng Nữ, Nam ra giọng Nam) */}
+              <div
+                className="inline-flex items-center p-0.5 rounded-xl border border-emerald-500/25 bg-white/80 dark:bg-white/[0.04]"
+                title={`Đang dùng: ${activeVoicePersona.name} (${activeVoicePersona.accent})`}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = aiVoice.setVoiceGender('female');
+                    showToast(`👩 Đã chuyển sang ${next.name} (Giọng Nữ chuẩn)`);
+                  }}
+                  className={`px-2 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-colors ${
+                    activeVoicePersona.gender === 'female'
+                      ? 'bg-rose-500 text-white shadow-2xs'
+                      : 'text-slate-600 dark:text-zinc-300 hover:bg-black/5 dark:hover:bg-white/5'
+                  }`}
+                >
+                  👩 Giọng Nữ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = aiVoice.setVoiceGender('male');
+                    showToast(`👨 Đã chuyển sang ${next.name} (Giọng Nam chuẩn)`);
+                  }}
+                  className={`px-2 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-colors ${
+                    activeVoicePersona.gender === 'male'
+                      ? 'bg-blue-600 text-white shadow-2xs'
+                      : 'text-slate-600 dark:text-zinc-300 hover:bg-black/5 dark:hover:bg-white/5'
+                  }`}
+                >
+                  👨 Giọng Nam
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setAutoSpeakTutor((prev) => !prev)}
+                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border cursor-pointer flex items-center gap-1 transition-colors ${
+                  autoSpeakTutor
+                    ? 'bg-teal-600 text-white border-teal-600'
+                    : isDark
+                    ? 'bg-white/[0.04] border-white/10 text-zinc-300'
+                    : 'bg-white border-slate-200 text-slate-600'
+                }`}
+                title="Tự động đọc phản hồi bằng giọng quốc gia đang chọn"
+              >
+                <Volume2 className="w-3.5 h-3.5" />
+                <span>{autoSpeakTutor ? 'Tự đọc: Bật' : 'Tự đọc: Tắt'}</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => handleStartQuizSession()}
+                className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-[11px] font-extrabold cursor-pointer flex items-center gap-1 shadow-xs"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Bắt đầu hỏi bài ngay</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleVoiceInput}
+                className={`px-2.5 py-1 rounded-xl text-[11px] font-extrabold border cursor-pointer flex items-center gap-1 transition-colors ${
+                  isListening
+                    ? 'bg-rose-600 text-white border-rose-600'
+                    : 'bg-white dark:bg-white/[0.08] border-emerald-300 dark:border-emerald-500/35 text-emerald-700 dark:text-emerald-300'
+                }`}
+              >
+                <Mic className="w-3.5 h-3.5" />
+                <span>{isListening ? 'Đang nghe...' : 'Nói trả lời'}</span>
+              </button>
+
+              {!isEmptyState && (
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() =>
+                    onSendMessage(
+                      'Mình sẵn sàng rồi, hãy đặt cho mình câu hỏi tiếp theo (nâng dần độ khó một chút) nhé!',
+                      null,
+                      false,
+                      'tutor',
+                      { interactiveQuizMode: true, quizSubject, quizRole }
+                    )
+                  }
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border cursor-pointer disabled:opacity-50 ${
+                    isDark
+                      ? 'bg-white/[0.05] border-white/10 text-zinc-200 hover:bg-white/10'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  ⏭️ Câu tiếp theo
+                </button>
+              )}
+
+              {onToggleQuizVoiceMode && (
+                <button
+                  type="button"
+                  onClick={onToggleQuizVoiceMode}
+                  className="p-1 rounded-lg text-slate-500 hover:text-rose-500 cursor-pointer"
+                  title="Tắt chế độ Hỏi bài cùng Gia sư AI"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Topic Selector */}
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span className="font-bold text-emerald-800 dark:text-emerald-300 mr-1">Chủ đề:</span>
+            {QUIZ_TOPICS.map((t) => {
+              const activeTopic = quizSubject === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => onSelectQuizSubject?.(t.id)}
+                  className={`px-2.5 py-1 rounded-lg font-bold border cursor-pointer transition-colors flex items-center gap-1 ${
+                    activeTopic
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : isDark
+                      ? 'bg-white/[0.04] border-white/10 text-zinc-300 hover:bg-white/10'
+                      : 'bg-white border-emerald-200/80 text-slate-700 hover:bg-emerald-100/70'
+                  }`}
+                >
+                  <span>{t.emoji}</span>
+                  <span>{t.label}</span>
+                </button>
+              );
+            })}
+            <span className="ml-auto hidden lg:inline text-[11px] text-emerald-700/85 dark:text-emerald-300/85 font-medium">
+              Quy tắc: AI hỏi từng câu một · Đợi bạn trả lời rồi nhận xét &amp; tăng dần độ khó
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive 3D Virtual Tutor Character Stage + Smart Whiteboard Side-by-Side */}
+      {quizVoiceMode && (
+        <div className="px-3 sm:px-6 pt-2.5 shrink-0">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-stretch">
+            <div className="lg:col-span-5 min-w-0">
+              <RobotTutor3D
+                countryCode={countryCode}
+                isListening={isListening}
+                isSpeaking={speakingId !== null}
+                reaction={robotReaction}
+                reactionTrigger={robotReactionTrigger}
+                isDark={isDark}
+                compact={!isEmptyState}
+                onTriggerTestReaction={(type) => {
+                  setRobotReaction(type);
+                  setRobotReactionTrigger((n) => n + 1);
+                }}
+              />
+            </div>
+            <div className="lg:col-span-7 min-w-0">
+              <SmartWhiteboard
+                latestAiText={
+                  [...messages].reverse().find((m) => m.role === 'assistant')?.content || ''
+                }
+                subjectLabel={quizSubject}
+                countryFlag={activeCountry.flag}
+                countryName={activeCountry.name}
+                isDark={isDark}
+                compact={!isEmptyState}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Scrollable Viewport */}
       <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 scroll-smooth overscroll-contain">
         <div
@@ -818,7 +1149,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Quick Primary Actions: Quay XP Lên Cấp + Mini game thuộc bài + 5 Bước Điểm 10 */}
+                  {/* Quick Primary Actions: Quay XP Lên Cấp + Mini game thuộc bài */}
                   <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                     <button
                       type="button"
@@ -845,15 +1176,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     >
                       <Trophy className="w-4 h-4 shrink-0" />
                       <span>Mini game thuộc bài</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={onOpenOfferModal || onOpenNameModal}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white font-bold text-xs sm:text-sm shadow-sm hover:-translate-y-0.5 transition-all cursor-pointer whitespace-nowrap"
-                    >
-                      <Sparkles className="w-4 h-4 shrink-0" />
-                      <span>5 Bước Điểm 10</span>
                     </button>
                   </div>
                 </div>
@@ -1205,25 +1527,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
                                 <hr className="my-3 border-black/10 dark:border-white/10" />
                               ),
                               a: ({ href, children }) => {
-                                const is5StepLink =
-                                  href === '#5-buoc-diem-10' ||
-                                  href === '#5-buoc' ||
-                                  href === '#guide' ||
-                                  href === '#diem10' ||
-                                  (typeof href === 'string' && href.includes('5-buoc'));
-                                if (is5StepLink) {
-                                  return (
-                                    <button
-                                      type="button"
-                                      onClick={() => onOpenOfferModal && onOpenOfferModal()}
-                                      className="inline-flex items-center gap-1.5 px-3 py-1 my-1 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-700 dark:text-emerald-300 font-bold text-xs transition-all cursor-pointer"
-                                    >
-                                      <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                                      <span>{children}</span>
-                                    </button>
-                                  );
-                                }
-
                                 const isQrLink =
                                   href === '#chuyen-khoan' ||
                                   href === '#chuyen-khoan-plus' ||
@@ -1779,7 +2082,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={`Hỏi bài tập ${grade}, dán đề thi hoặc tải ảnh bài cần giải...`}
+                  placeholder={
+                    quizVoiceMode
+                      ? `Trả lời câu hỏi của ${quizRole === 'deskmate' ? 'bạn học cùng bàn' : 'gia sư'} (${activeCountry.nativeName}) bằng chữ hoặc nhấn Mic...`
+                      : `Hỏi bài tập ${grade}, dán đề thi hoặc tải ảnh bài cần giải...`
+                  }
                   rows={1}
                   className={`flex-1 min-w-0 bg-transparent border-0 focus:outline-none focus:ring-0 text-xs sm:text-sm resize-none leading-relaxed py-2 px-1 ${
                     isDark ? 'text-white placeholder-zinc-500' : 'text-slate-900 placeholder-slate-400'

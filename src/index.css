@@ -398,4 +398,114 @@
   animation: levelBadgePop 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* =========================================================================
+   DISCORD NAMEPLATE & AVATAR FRAME ANIMATIONS (12+ THEMES)
+   ========================================================================= */
+
+@keyframes npGradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes npShimmerSweep {
+  0% { transform: translateX(-120%) skewX(-18deg); opacity: 0; }
+  25% { opacity: 0.7; }
+  75% { opacity: 0.7; }
+  100% { transform: translateX(220%) skewX(-18deg); opacity: 0; }
+}
+
+@keyframes npSparkleFloat {
+  0%, 100% { transform: translateY(0px) scale(0.9); opacity: 0.45; }
+  50% { transform: translateY(-4px) scale(1.15); opacity: 1; }
+}
+
+@keyframes npPetalDrift {
+  0% { transform: translate3d(-8px, -10px, 0) rotate(0deg); opacity: 0; }
+  20% { opacity: 0.95; }
+  85% { opacity: 0.85; }
+  100% { transform: translate3d(26px, 34px, 0) rotate(220deg); opacity: 0; }
+}
+
+@keyframes npEmberRise {
+  0% { transform: translate3d(0, 18px, 0) scale(0.7); opacity: 0; }
+  25% { opacity: 1; }
+  100% { transform: translate3d(8px, -22px, 0) scale(1.1); opacity: 0; }
+}
+
+@keyframes npLightningFlash {
+  0%, 72%, 100% { opacity: 0.15; transform: translateX(-15%); }
+  75% { opacity: 1; transform: translateX(5%); }
+  78% { opacity: 0.3; }
+  82% { opacity: 0.95; transform: translateX(18%); }
+}
+
+@keyframes npMeteorShoot {
+  0% { transform: translate3d(-30px, -12px, 0) rotate(25deg); opacity: 0; }
+  20% { opacity: 1; }
+  70% { opacity: 0.85; }
+  100% { transform: translate3d(140px, 36px, 0) rotate(25deg); opacity: 0; }
+}
+
+@keyframes avatarFrameSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes avatarFrameBreathe {
+  0%, 100% { filter: brightness(1) saturate(1); }
+  50% { filter: brightness(1.18) saturate(1.2); }
+}
+
+.np-bg-animate {
+  background-size: 220% 220%;
+  animation: npGradientShift 7s ease infinite;
+}
+
+.np-shimmer {
+  animation: npShimmerSweep 3.8s ease-in-out infinite;
+}
+
+.np-sparkle {
+  animation: npSparkleFloat 2.4s ease-in-out infinite;
+}
+
+.np-petal {
+  animation: npPetalDrift 4.4s linear infinite;
+}
+
+.np-ember {
+  animation: npEmberRise 2.8s ease-out infinite;
+}
+
+.np-lightning {
+  animation: npLightningFlash 3.6s ease-in-out infinite;
+}
+
+.np-meteor {
+  animation: npMeteorShoot 3.4s ease-in infinite;
+}
+
+.avatar-frame-spin {
+  animation: avatarFrameSpin 6s linear infinite;
+}
+
+.avatar-frame-breathe {
+  animation: avatarFrameBreathe 2.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .np-bg-animate,
+  .np-shimmer,
+  .np-sparkle,
+  .np-petal,
+  .np-ember,
+  .np-lightning,
+  .np-meteor,
+  .avatar-frame-spin,
+  .avatar-frame-breathe {
+    animation: none;
+  }
+}
+
 

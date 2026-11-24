@@ -46,8 +46,13 @@ import {
   CreditCard,
   Trash2,
   RotateCcw,
+  Gift,
+  LogOut,
+  Pin,
+  MessageSquare,
 } from 'lucide-react';
 import { ADMIN_DEFAULT_PIN, MASTER_SECURITY_CODE } from '../../types/auth';
+import { NAMEPLATE_TEMPLATES, AVATAR_FRAME_TEMPLATES } from '../../data/profileDecorations';
 
 export interface UserAccount {
   id: string;
@@ -99,7 +104,7 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // User requested: "mã QR để chuyển tài khoản là cái QR mà bạn vừa làm thanh điều khiển để điều khiển Max10 và xem tất cả tài khoản là quyền của bạn mở duy gmail đómackhanhduy992012@gmail.comchỉ có bạn mới xem được tất cả và làm quản trị viên của Max10 với hướng dẫn tôi tìm thấy Max10 trên google"
-  const [activeCenterTab, setActiveCenterTab] = useState<'control_qr' | 'accounts' | 'google_guide' | 'security'>('control_qr');
+  const [activeCenterTab, setActiveCenterTab] = useState<'control_qr' | 'accounts' | 'godmode' | 'google_guide' | 'security'>('control_qr');
   const [bannedAccounts, setBannedAccounts] = useState<any[]>([]);
   const [securityLogs, setSecurityLogs] = useState<any[]>([]);
   const [banTargetInput, setBanTargetInput] = useState<string>('');
@@ -112,6 +117,166 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
   const [grade10SecretMode, setGrade10SecretMode] = useState<boolean>(true);
   const [autoReceiptScan, setAutoReceiptScan] = useState<boolean>(true);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // God-Mode State
+  const [godModeLoading, setGodModeLoading] = useState<boolean>(false);
+  const [godModeAccounts, setGodModeAccounts] = useState<any[]>([]);
+  const [godModeOnlineCount, setGodModeOnlineCount] = useState<number>(1);
+  const [godModeLoginLogs, setGodModeLoginLogs] = useState<any[]>([]);
+  const [godModeModMessages, setGodModeModMessages] = useState<any[]>([]);
+  const [godModePinnedBanner, setGodModePinnedBanner] = useState<any>(null);
+  const [pinTitleInput, setPinTitleInput] = useState<string>('Thông báo từ Ban Quản Trị Max10 AI');
+  const [pinContentInput, setPinContentInput] = useState<string>('');
+  const [pinSeverityInput, setPinSeverityInput] = useState<'info' | 'warning' | 'celebrate'>('celebrate');
+  const [vipGiftTarget, setVipGiftTarget] = useState<{ id: string; name: string } | null>(null);
+  const [vipXpAmount, setVipXpAmount] = useState<number>(500);
+  const [vipNameplateId, setVipNameplateId] = useState<string>('golden_victory');
+  const [vipFrameId, setVipFrameId] = useState<string>('royal_gold');
+  const [vipNote, setVipNote] = useState<string>('Quà tặng VIP từ Quản trị viên Mạc Khánh Duy!');
+
+  const fetchGodModeOverview = async () => {
+    setGodModeLoading(true);
+    try {
+      const res = await fetch('/api/admin/godmode/overview', {
+        headers: {
+          'x-max10-master-code': MASTER_SECURITY_CODE,
+          'x-max10-user-id': currentUser?.id || 'admin-mac-khanh-duy',
+        },
+      });
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (!res.ok || !ct.includes('application/json')) return;
+      const data = await res.json();
+      if (data.success) {
+        setGodModeAccounts(Array.isArray(data.accounts) ? data.accounts : []);
+        setGodModeOnlineCount(Number(data.onlineCount || 1));
+        setGodModeLoginLogs(Array.isArray(data.loginLogs) ? data.loginLogs : []);
+        setGodModeModMessages(Array.isArray(data.moderationMessages) ? data.moderationMessages : []);
+        setGodModePinnedBanner(data.pinnedBanner || null);
+      }
+    } catch (e) {
+      console.warn('God-mode overview error:', e);
+    } finally {
+      setGodModeLoading(false);
+    }
+  };
+
+  const handleForceLogoutUser = async (accountId: string, accountName: string) => {
+    try {
+      const res = await fetch('/api/admin/accounts/force-logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-max10-master-code': MASTER_SECURITY_CODE,
+          'x-max10-user-id': currentUser?.id || 'admin-mac-khanh-duy',
+        },
+        body: JSON.stringify({ accountId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`🚪 Đã gửi lệnh đá đăng xuất tới ${accountName}!`);
+        fetchGodModeOverview();
+      } else {
+        showToast(data.error || 'Không thể đá đăng xuất.');
+      }
+    } catch {
+      showToast('Lỗi kết nối khi thực hiện Force Logout.');
+    }
+  };
+
+  const handleSendVipGift = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vipGiftTarget) return;
+    try {
+      const res = await fetch('/api/admin/accounts/gift-vip', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-max10-master-code': MASTER_SECURITY_CODE,
+          'x-max10-user-id': currentUser?.id || 'admin-mac-khanh-duy',
+        },
+        body: JSON.stringify({
+          accountId: vipGiftTarget.id,
+          xpBonus: vipXpAmount,
+          unlockedNameplates: vipNameplateId ? [vipNameplateId] : [],
+          unlockedFrames: vipFrameId && vipFrameId !== 'none' ? [vipFrameId] : [],
+          equippedNameplateId: vipNameplateId || undefined,
+          equippedFrameId: vipFrameId && vipFrameId !== 'none' ? vipFrameId : undefined,
+          message: vipNote,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`🎁 Đã gửi +${vipXpAmount} XP & trang trí VIP cho ${vipGiftTarget.name}!`);
+        setVipGiftTarget(null);
+        fetchGodModeOverview();
+      } else {
+        showToast(data.error || 'Không thể gửi quà VIP.');
+      }
+    } catch {
+      showToast('Lỗi kết nối khi gửi quà VIP.');
+    }
+  };
+
+  const handlePublishGlobalPin = async (action: 'pin' | 'clear') => {
+    if (action === 'pin' && !pinContentInput.trim()) {
+      showToast('Vui lòng nhập nội dung thông báo ghim toàn hệ thống!');
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin/system-pin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-max10-master-code': MASTER_SECURITY_CODE,
+          'x-max10-user-id': currentUser?.id || 'admin-mac-khanh-duy',
+        },
+        body: JSON.stringify({
+          action,
+          title: pinTitleInput.trim(),
+          content: pinContentInput.trim(),
+          severity: pinSeverityInput,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGodModePinnedBanner(data.pinnedBanner || null);
+        if (action === 'clear') {
+          showToast('📌 Đã gỡ thông báo ghim toàn hệ thống.');
+        } else {
+          setPinContentInput('');
+          showToast('📌 Đã ghim thông báo khẩn lên màn hình mọi thiết bị!');
+        }
+      } else {
+        showToast(data.error || 'Lỗi khi cập nhật ghim toàn hệ thống.');
+      }
+    } catch {
+      showToast('Lỗi kết nối khi gửi lệnh ghim hệ thống.');
+    }
+  };
+
+  const handleDeleteModMessage = async (groupId: string, msgId: string) => {
+    try {
+      const res = await fetch(
+        `/api/admin/moderation/messages/${encodeURIComponent(groupId)}/${encodeURIComponent(msgId)}`,
+        {
+          method: 'DELETE',
+          headers: {
+            'x-max10-master-code': MASTER_SECURITY_CODE,
+            'x-max10-user-id': currentUser?.id || 'admin-mac-khanh-duy',
+          },
+        }
+      );
+      const data = await res.json();
+      if (data.success) {
+        setGodModeModMessages((prev) => prev.filter((m) => m.msgId !== msgId));
+        showToast('🗑️ Đã xóa tin nhắn vi phạm khỏi phòng cộng đồng!');
+      } else {
+        showToast(data.error || 'Không thể xóa tin nhắn.');
+      }
+    } catch {
+      showToast('Lỗi kết nối khi xóa tin nhắn.');
+    }
+  };
 
   const fetchBannedAccounts = async () => {
     try {
@@ -288,8 +453,11 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
   const [pinError, setPinError] = useState<string>('');
 
   useEffect(() => {
+    if (isAdminUnlocked) {
+      sessionStorage.setItem('max10_master_security_verified', 'true');
+    }
     fetchAccounts();
-  }, []);
+  }, [isAdminUnlocked]);
 
   const handleVerifyPin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -756,6 +924,22 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
           <Users className="w-4 h-4" />
           <span>👥 Quản Lý Tất Cả Tài Khoản ({accounts.length})</span>
           {!isMacKhanhDuy && <Lock className="w-3.5 h-3.5 text-amber-500" />}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveCenterTab('godmode');
+            fetchGodModeOverview();
+          }}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black transition-all cursor-pointer whitespace-nowrap ${
+            activeCenterTab === 'godmode'
+              ? 'neu-accent-btn text-white'
+              : 'neu-btn text-amber-600 dark:text-amber-300'
+          }`}
+        >
+          <Crown className="w-4 h-4 text-amber-500" />
+          <span>👑 God-Mode ({godModeOnlineCount} Online)</span>
         </button>
 
         <button
@@ -1991,6 +2175,382 @@ export const Max10ControlCenter: React.FC<Max10ControlCenterProps> = ({
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 5: ADMIN GOD-MODE DASHBOARD */}
+      {activeCenterTab === 'godmode' && isMacKhanhDuy && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Header & Quick Refresh */}
+          <div className="p-4 rounded-3xl bg-gradient-to-r from-amber-500/15 via-rose-500/10 to-indigo-500/15 border border-amber-500/35 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 text-white flex items-center justify-center shadow-md">
+                <Crown className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base sm:text-lg font-black">
+                  Bảng Điều Khiển Admin Tối Thượng (God-Mode)
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-zinc-400">
+                  Giám sát Online/Offline thời gian thực · Tặng XP &amp; Nameplate VIP · Đá đăng xuất · Ghim thông báo toàn hệ thống · Kiểm duyệt cộng đồng
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={fetchGodModeOverview}
+              disabled={godModeLoading}
+              className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${godModeLoading ? 'animate-spin' : ''}`} />
+              <span>Làm mới trực tiếp</span>
+            </button>
+          </div>
+
+          {/* 1. Global Pinned Banner Publisher */}
+          <div
+            className={`p-5 rounded-3xl border space-y-3 ${
+              isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-xs'
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-sm font-black flex items-center gap-2">
+                <Pin className="w-4 h-4 text-indigo-500" />
+                <span>Ghim Thông Báo Toàn Hệ Thống (Mọi thiết bị thấy ngay)</span>
+              </h4>
+              {godModePinnedBanner && (
+                <button
+                  type="button"
+                  onClick={() => handlePublishGlobalPin('clear')}
+                  className="px-3 py-1 rounded-xl bg-rose-500/15 text-rose-500 border border-rose-500/30 text-xs font-extrabold cursor-pointer"
+                >
+                  Gỡ ghim hiện tại
+                </button>
+              )}
+            </div>
+
+            {godModePinnedBanner && (
+              <div className="p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 text-xs">
+                <span className="font-black">Đang ghim: </span>
+                <strong>{godModePinnedBanner.title}</strong> — {godModePinnedBanner.content}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 text-xs">
+              <input
+                type="text"
+                value={pinTitleInput}
+                onChange={(e) => setPinTitleInput(e.target.value)}
+                placeholder="Tiêu đề ghim..."
+                className={`md:col-span-4 px-3 py-2 rounded-xl border outline-hidden ${
+                  isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-slate-50 border-slate-300'
+                }`}
+              />
+              <select
+                value={pinSeverityInput}
+                onChange={(e) => setPinSeverityInput(e.target.value as any)}
+                className={`md:col-span-2 px-3 py-2 rounded-xl border outline-hidden font-bold ${
+                  isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-slate-50 border-slate-300'
+                }`}
+              >
+                <option value="celebrate">🎉 Sự kiện / Vinh danh</option>
+                <option value="info">📢 Thông báo chung</option>
+                <option value="warning">🚨 Cảnh báo khẩn</option>
+              </select>
+              <input
+                type="text"
+                value={pinContentInput}
+                onChange={(e) => setPinContentInput(e.target.value)}
+                placeholder="Nhập nội dung ghim lên thanh trên cùng của tất cả người dùng..."
+                className={`md:col-span-4 px-3 py-2 rounded-xl border outline-hidden ${
+                  isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-slate-50 border-slate-300'
+                }`}
+              />
+              <button
+                type="button"
+                onClick={() => handlePublishGlobalPin('pin')}
+                className="md:col-span-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:brightness-110 text-white font-black cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Pin className="w-3.5 h-3.5" />
+                <span>Ghim ngay</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 2. VIP Gift Popover Inline Card when selecting a target */}
+          {vipGiftTarget && (
+            <form
+              onSubmit={handleSendVipGift}
+              className={`p-5 rounded-3xl border-2 border-amber-500/50 space-y-3 ${
+                isDark ? 'bg-amber-950/20' : 'bg-amber-50/70'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-sm font-black flex items-center gap-2 text-amber-600 dark:text-amber-300">
+                  <Gift className="w-4 h-4" />
+                  <span>Tặng XP &amp; Trang Trí VIP cho: {vipGiftTarget.name}</span>
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setVipGiftTarget(null)}
+                  className="p-1 rounded-lg hover:bg-black/10 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+                <div>
+                  <label className="block font-bold mb-1">Số XP tặng thêm:</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={50000}
+                    step={50}
+                    value={vipXpAmount}
+                    onChange={(e) => setVipXpAmount(Number(e.target.value) || 0)}
+                    className={`w-full px-3 py-2 rounded-xl border outline-hidden ${
+                      isDark ? 'bg-zinc-900 border-zinc-700 text-white' : 'bg-white border-slate-300'
+                    }`}
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold mb-1">Nameplate VIP:</label>
+                  <select
+                    value={vipNameplateId}
+                    onChange={(e) => setVipNameplateId(e.target.value)}
+                    className={`w-full px-3 py-2 rounded-xl border outline-hidden ${
+                      isDark ? 'bg-zinc-900 border-zinc-700 text-white' : 'bg-white border-slate-300'
+                    }`}
+                  >
+                    <option value="">-- Không đổi Nameplate --</option>
+                    {NAMEPLATE_TEMPLATES.map((np) => (
+                      <option key={np.id} value={np.id}>
+                        {np.previewEmoji} {np.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold mb-1">Khung Avatar VIP:</label>
+                  <select
+                    value={vipFrameId}
+                    onChange={(e) => setVipFrameId(e.target.value)}
+                    className={`w-full px-3 py-2 rounded-xl border outline-hidden ${
+                      isDark ? 'bg-zinc-900 border-zinc-700 text-white' : 'bg-white border-slate-300'
+                    }`}
+                  >
+                    <option value="">-- Không đổi Khung --</option>
+                    {AVATAR_FRAME_TEMPLATES.map((fr) => (
+                      <option key={fr.id} value={fr.id}>
+                        {fr.previewEmoji} {fr.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold mb-1">Lời nhắn kèm quà:</label>
+                  <input
+                    type="text"
+                    value={vipNote}
+                    onChange={(e) => setVipNote(e.target.value)}
+                    className={`w-full px-3 py-2 rounded-xl border outline-hidden ${
+                      isDark ? 'bg-zinc-900 border-zinc-700 text-white' : 'bg-white border-slate-300'
+                    }`}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs cursor-pointer shadow-md"
+                >
+                  ✨ Xác nhận Gửi Quà VIP Ngay
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* 3. Live Online/Offline User Table */}
+          <div
+            className={`p-5 rounded-3xl border space-y-3 ${
+              isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-xs'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-sm font-black flex items-center gap-2">
+                <Radio className="w-4 h-4 text-emerald-500" />
+                <span>
+                  Giám Sát Người Dùng ({godModeOnlineCount}/{godModeAccounts.length} đang Online)
+                </span>
+              </h4>
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-slate-200/70 dark:border-zinc-800">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-100 dark:bg-zinc-800/70 font-bold text-slate-600 dark:text-zinc-300">
+                  <tr>
+                    <th className="p-3">Tài khoản</th>
+                    <th className="p-3">Vai trò / Gói</th>
+                    <th className="p-3">Trạng thái Online</th>
+                    <th className="p-3 text-right">Quyền God-Mode</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-zinc-800">
+                  {godModeAccounts.map((acc) => {
+                    const isOwnerAcc = acc.id === 'admin-mac-khanh-duy';
+                    return (
+                      <tr key={acc.id} className="hover:bg-black/[0.02] dark:hover:bg-white/[0.02]">
+                        <td className="p-3">
+                          <div className="font-black">{acc.name}</div>
+                          <div className="text-[11px] text-slate-500 dark:text-zinc-400">
+                            {acc.emailOrPhone}
+                          </div>
+                        </td>
+                        <td className="p-3">
+                          <span className="px-2 py-0.5 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 font-bold mr-1">
+                            {acc.role === 'admin' ? 'Admin' : acc.role === 'teacher' ? 'Giáo viên' : 'Học sinh'}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-300 font-bold uppercase">
+                            {acc.plan}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <div className="inline-flex items-center gap-1.5 font-bold">
+                            <span
+                              className={`w-2.5 h-2.5 rounded-full ${
+                                acc.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
+                              }`}
+                            />
+                            <span className={acc.isOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}>
+                              {acc.lastActiveText}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setVipGiftTarget({ id: acc.id, name: acc.name })}
+                              className="px-2.5 py-1 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-300 border border-amber-500/30 font-bold cursor-pointer flex items-center gap-1"
+                            >
+                              <Gift className="w-3 h-3" />
+                              <span>Tặng VIP/XP</span>
+                            </button>
+                            {!isOwnerAcc && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleForceLogoutUser(acc.id, acc.name)}
+                                  className="px-2.5 py-1 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-300 border border-rose-500/30 font-bold cursor-pointer flex items-center gap-1"
+                                >
+                                  <LogOut className="w-3 h-3" />
+                                  <span>Đá đăng xuất</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleStatus(acc.id, acc.status === 'locked' ? 'locked' : 'active')}
+                                  className="px-2.5 py-1 rounded-xl bg-slate-500/15 hover:bg-slate-500/25 text-slate-700 dark:text-zinc-200 border border-slate-500/25 font-bold cursor-pointer"
+                                >
+                                  {acc.status === 'locked' ? 'Mở khóa' : 'Khóa'}
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 4. Login Audit Logs & Community Message Moderation Side-by-Side */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Login Audit Logs */}
+            <div
+              className={`p-5 rounded-3xl border space-y-3 ${
+                isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-xs'
+              }`}
+            >
+              <h4 className="text-sm font-black flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-sky-500" />
+                <span>Nhật Ký Đăng Nhập Gần Đây ({godModeLoginLogs.length})</span>
+              </h4>
+              <div className="max-h-72 overflow-y-auto space-y-2 pr-1 text-xs">
+                {godModeLoginLogs.length === 0 ? (
+                  <p className="text-slate-500 py-6 text-center">Chưa có nhật ký đăng nhập mới.</p>
+                ) : (
+                  godModeLoginLogs.map((log) => (
+                    <div
+                      key={log.id}
+                      className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${
+                        isDark ? 'bg-white/[0.02] border-white/10' : 'bg-slate-50 border-slate-200'
+                      }`}
+                    >
+                      <div>
+                        <span className="font-black">{log.userName}</span>{' '}
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-600 dark:text-sky-300 font-bold">
+                          {log.role} · {log.provider || 'auth'}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-500 dark:text-zinc-400 shrink-0">
+                        {log.timeStr}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Community Message Moderation */}
+            <div
+              className={`p-5 rounded-3xl border space-y-3 ${
+                isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-slate-200 shadow-xs'
+              }`}
+            >
+              <h4 className="text-sm font-black flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-rose-500" />
+                <span>Kiểm Duyệt Tin Nhắn Cộng Đồng ({godModeModMessages.length})</span>
+              </h4>
+              <div className="max-h-72 overflow-y-auto space-y-2 pr-1 text-xs">
+                {godModeModMessages.length === 0 ? (
+                  <p className="text-slate-500 py-6 text-center">Chưa có tin nhắn cộng đồng nào.</p>
+                ) : (
+                  godModeModMessages.map((msg) => (
+                    <div
+                      key={`${msg.groupId}-${msg.msgId}`}
+                      className={`p-2.5 rounded-xl border flex items-start justify-between gap-2 ${
+                        isDark ? 'bg-white/[0.02] border-white/10' : 'bg-slate-50 border-slate-200'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                          <span className="font-black">{msg.senderName}</span>
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 font-bold">
+                            {msg.groupName}
+                          </span>
+                          <span className="text-slate-400">{msg.timestamp}</span>
+                        </div>
+                        <p className="mt-1 text-slate-700 dark:text-zinc-200 break-words line-clamp-2">
+                          {msg.content}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteModMessage(msg.groupId, msg.msgId)}
+                        className="px-2 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[10px] shrink-0 cursor-pointer flex items-center gap-1"
+                        title="Xóa tin nhắn vi phạm"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Xóa</span>
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

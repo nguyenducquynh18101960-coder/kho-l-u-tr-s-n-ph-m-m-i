@@ -20,7 +20,6 @@ interface AdminNotificationsDrawerProps {
   onClose: () => void;
   isDark: boolean;
   autoUpdateNotice?: string | null;
-  onOpenOfferModal: () => void;
   onOpenStoreModal?: () => void;
   onOpenPricingModal?: () => void;
   onOpenIntroModal?: () => void;
@@ -56,7 +55,6 @@ export const AdminNotificationsDrawer: React.FC<AdminNotificationsDrawerProps> =
   onClose,
   isDark,
   autoUpdateNotice,
-  onOpenOfferModal,
   onOpenStoreModal,
   onOpenPricingModal,
   onOpenIntroModal,
@@ -271,25 +269,6 @@ export const AdminNotificationsDrawer: React.FC<AdminNotificationsDrawerProps> =
             <div className="px-1 text-[11px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
               Tiện ích nhanh
             </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                onOpenOfferModal();
-                onClose();
-              }}
-              className={`w-full flex items-center justify-between gap-3 p-3 rounded-2xl border text-left transition-colors cursor-pointer ${
-                isDark
-                  ? 'bg-white/[0.03] border-white/[0.08] hover:bg-white/[0.07]'
-                  : 'bg-white border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              <span className="flex items-center gap-2.5">
-                <Sparkles className="w-4 h-4 text-emerald-500 shrink-0" />
-                <span className="font-bold">5 Bước Điểm 10 THCS</span>
-              </span>
-              <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-            </button>
 
             {onOpenStoreModal && (
               <button

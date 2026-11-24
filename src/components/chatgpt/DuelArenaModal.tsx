@@ -10,6 +10,9 @@ import {
   Zap,
   Users,
   Sparkles,
+  Bot,
+  Award,
+  Loader2,
 } from 'lucide-react';
 import { DuelChallenge, GradeLevel, PublicMemberProfile } from '../../types';
 import {
@@ -26,6 +29,8 @@ import {
 import { calculateLevel } from '../../types/achievements';
 import { celebrateMilestone, launchGoldenStarBurst } from '../../utils/confettiFireworks';
 import { soundEffects } from '../../utils/soundEffects';
+import { CountryCode, getCountryCulture } from '../../data/countryCultures';
+import { recordAttemptResult } from '../../utils/knowledgeGapTracker';
 
 const STORAGE_KEY_LOCAL_CHALLENGES = 'max10_local_challenges_v1';
 
@@ -66,7 +71,22 @@ interface DuelArenaModalProps {
   currentUserAvatar?: string;
   targetMember?: PublicMemberProfile | null;
   existingChallenge?: DuelChallenge | null;
+  countryCode?: CountryCode;
+  initialTab?: 'duel' | 'leaderboard';
   onChallengeUpdated: (challenge: DuelChallenge, mode: 'created' | 'completed') => void;
+}
+
+interface LeaderboardPlayer {
+  userId: string;
+  name: string;
+  avatar: string;
+  wins: number;
+  draws: number;
+  losses: number;
+  played: number;
+  totalCorrect: number;
+  winRate: number;
+  points: number;
 }
 
 const QUESTION_TIME_LIMIT_SEC = 20;
@@ -84,10 +104,19 @@ export const DuelArenaModal: React.FC<DuelArenaModalProps> = ({
   currentUserAvatar,
   targetMember,
   existingChallenge,
+  countryCode = 'VN',
+  initialTab = 'duel',
   onChallengeUpdated,
 }) => {
+  const activeCountry = getCountryCulture(countryCode);
+  const [modalTab, setModalTab] = useState<'duel' | 'leaderboard'>(initialTab);
   const [selectedSubject, setSelectedSubject] = useState<DuelSubjectOption>('Tổng hợp THCS');
   const [selectedGrade, setSelectedGrade] = useState<GradeLevel>(currentGrade);
+  const [useAiReferee, setUseAiReferee] = useState<boolean>(true);
+  const [generatingAiQuestions, setGeneratingAiQuestions] = useState<boolean>(false);
+  const [aiRefereeNote, setAiRefereeNote] = useState<string>('');
+  const [leaderboard, setLeaderboard] = useState<LeaderboardPlayer[]>([]);
+  const [loadingLeaderboard, setLoadingLeaderboard] = useState<boolean>(false);
   const [activeChallenge, setActiveChallenge] = useState<DuelChallenge | null>(null);
   const [stage, setStage] = useState<'setup' | 'playing' | 'summary'>('setup');
   const [questionIdx, setQuestionIdx] = useState(0);
@@ -108,11 +137,82 @@ export const DuelArenaModal: React.FC<DuelArenaModalProps> = ({
     }
   };
 
+  const loadLeaderboardData = async () => {
+    setLoadingLeaderboard(true);
+    try {
+      const res = await safeFetchJson<{ success?: boolean; leaderboard?: LeaderboardPlayer[] }>(
+        '/api/challenges/leaderboard'
+      );
+      const serverList = Array.isArray(res?.leaderboard) ? res.leaderboard : [];
+      if (serverList.length > 0) {
+        setLeaderboard(serverList);
+      } else {
+        // Fallback compute from localStorage challenges
+        const local = loadLocalChallenges();
+        const map = new Map<string, LeaderboardPlayer>();
+        local.forEach((c) => {
+          if (c.status === 'completed' && c.challengerId && c.opponentId) {
+            const ensure = (id: string, name: string, avatar?: string): LeaderboardPlayer => {
+              let item = map.get(id);
+              if (!item) {
+                item = {
+                  userId: id,
+                  name,
+                  avatar: avatar || '',
+                  wins: 0,
+                  draws: 0,
+                  losses: 0,
+                  played: 0,
+                  totalCorrect: 0,
+                  winRate: 0,
+                  points: 0,
+                };
+                map.set(id, item);
+              }
+              return item;
+            };
+            const cE = ensure(c.challengerId, c.challengerName, c.challengerAvatar);
+            const oE = ensure(c.opponentId, c.opponentName || 'Đối thủ', c.opponentAvatar);
+            const cS = Number(c.challengerScore || 0);
+            const oS = Number(c.opponentScore || 0);
+            cE.played += 1;
+            oE.played += 1;
+            cE.totalCorrect += cS;
+            oE.totalCorrect += oS;
+            if (c.winnerId === c.challengerId) {
+              cE.wins += 1;
+              cE.points += 100 + cS * 10;
+              oE.losses += 1;
+              oE.points += 20 + oS * 10;
+            } else if (c.winnerId === c.opponentId) {
+              oE.wins += 1;
+              oE.points += 100 + oS * 10;
+              cE.losses += 1;
+              cE.points += 20 + cS * 10;
+            } else {
+              cE.draws += 1;
+              oE.draws += 1;
+              cE.points += 50 + cS * 10;
+              oE.points += 50 + oS * 10;
+            }
+          }
+        });
+        const computed = Array.from(map.values())
+          .map((e) => ({ ...e, winRate: e.played > 0 ? Math.round((e.wins / e.played) * 100) : 0 }))
+          .sort((a, b) => b.points - a.points || b.wins - a.wins);
+        setLeaderboard(computed);
+      }
+    } finally {
+      setLoadingLeaderboard(false);
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) {
       clearTimer();
       return;
     }
+    setModalTab(initialTab);
     setSelectedGrade(currentGrade);
     setSelectedOption(null);
     setQuestionIdx(0);
@@ -120,6 +220,8 @@ export const DuelArenaModal: React.FC<DuelArenaModalProps> = ({
     setStreak(0);
     setTimeLeft(QUESTION_TIME_LIMIT_SEC);
     setXpAwarded(0);
+    setAiRefereeNote('');
+    loadLeaderboardData();
 
     if (existingChallenge) {
       setActiveChallenge(existingChallenge);
@@ -131,12 +233,12 @@ export const DuelArenaModal: React.FC<DuelArenaModalProps> = ({
     }
 
     return () => clearTimer();
-  }, [isOpen, existingChallenge, currentGrade]);
+  }, [isOpen, existingChallenge, currentGrade, initialTab]);
 
   // Question countdown timer while playing and no option selected yet
   useEffect(() => {
     clearTimer();
-    if (!isOpen || stage !== 'playing' || selectedOption !== null) return;
+    if (!isOpen || modalTab !== 'duel' || stage !== 'playing' || selectedOption !== null) return;
 
     timerRef.current = window.setInterval(() => {
       setTimeLeft((prev) => {
@@ -144,6 +246,19 @@ export const DuelArenaModal: React.FC<DuelArenaModalProps> = ({
           clearTimer();
           setSelectedOption(-1); // Timeout sentinel
           setStreak(0);
+          setAiRefereeNote('⏱️ Hết giờ rồi! Trọng tài AI nhắc bạn giữ tốc độ nhé.');
+          if (currentQuestion) {
+            recordAttemptResult({
+              subject: currentQuestion.subject || selectedSubject,
+              topic: `Đấu trường 1v1 · ${currentQuestion.subject || selectedSubject}`,
+              question: currentQuestion.question,
+              userAnswer: 'Hết thời gian (0 điểm)',
+              correctAnswer: currentQuestion.options[currentQuestion.correctIndex],
+              explanation: currentQuestion.explanation,
+              isCorrect: false,
+              source: 'duel',
+            });
+          }
           return 0;
         }
         return prev - 1;
@@ -151,7 +266,7 @@ export const DuelArenaModal: React.FC<DuelArenaModalProps> = ({
     }, 1000);
 
     return () => clearTimer();
-  }, [isOpen, stage, questionIdx, selectedOption]);
+  }, [isOpen, modalTab, stage, questionIdx, selectedOption]);
 
   const currentQuestion = useMemo(() => {
     if (!activeChallenge) return null;
@@ -162,8 +277,36 @@ export const DuelArenaModal: React.FC<DuelArenaModalProps> = ({
 
   const isTargetSelf = !targetMember || targetMember.id === currentUserId;
 
-  const handleStartNewChallenge = () => {
-    const questions = buildDuelQuestions(selectedSubject, selectedGrade, 5);
+  const handleStartNewChallenge = async () => {
+    setAiRefereeNote('');
+    let questions = buildDuelQuestions(selectedSubject, selectedGrade, 5);
+
+    if (useAiReferee) {
+      setGeneratingAiQuestions(true);
+      try {
+        const res = await safeFetchJson<{
+          success?: boolean;
+          questions?: typeof questions;
+        }>('/api/duel/generate-questions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            subject: selectedSubject,
+            grade: selectedGrade,
+            countryCode,
+            count: 5,
+          }),
+        });
+        if (res?.success && Array.isArray(res.questions) && res.questions.length >= 3) {
+          questions = res.questions;
+        }
+      } catch {
+        // Silent graceful fallback to instant offline question bank
+      } finally {
+        setGeneratingAiQuestions(false);
+      }
+    }
+
     const created: DuelChallenge = {
       id: `duel-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       contextType,
@@ -196,12 +339,33 @@ export const DuelArenaModal: React.FC<DuelArenaModalProps> = ({
     if (selectedOption !== null || !currentQuestion) return;
     clearTimer();
     setSelectedOption(idx);
-    if (idx === currentQuestion.correctIndex) {
+    const isCorrect = idx === currentQuestion.correctIndex;
+    recordAttemptResult({
+      subject: currentQuestion.subject || selectedSubject,
+      topic: `Đấu trường 1v1 · ${currentQuestion.subject || selectedSubject}`,
+      question: currentQuestion.question,
+      userAnswer: currentQuestion.options[idx],
+      correctAnswer: currentQuestion.options[currentQuestion.correctIndex],
+      explanation: currentQuestion.explanation,
+      isCorrect,
+      source: 'duel',
+    });
+
+    if (isCorrect) {
+      const nextStreak = streak + 1;
       setScore((s) => s + 1);
-      setStreak((st) => st + 1);
+      setStreak(nextStreak);
+      setAiRefereeNote(
+        nextStreak >= 2
+          ? `🤖 Trọng tài AI (${activeCountry.flag}): Quá đỉnh! Chuỗi ${nextStreak} câu đúng liên tiếp — giữ vững tốc độ nhé!`
+          : `🤖 Trọng tài AI (${activeCountry.flag}): Chính xác tuyệt đối! Còn dư ${timeLeft}s trên đồng hồ.`
+      );
       soundEffects.playCorrect();
     } else {
       setStreak(0);
+      setAiRefereeNote(
+        `🤖 Trọng tài AI (${activeCountry.flag}): Suýt trúng rồi! Đừng lo, câu này đã được lưu vào Sổ tay Ôn bù Lỗ hổng AI để bạn xem lại.`
+      );
       soundEffects.playClick();
     }
   };
@@ -375,13 +539,135 @@ export const DuelArenaModal: React.FC<DuelArenaModalProps> = ({
               ? `Nhận Kèo Thi Đấu vs ${existingChallenge.challengerName}`
               : !isTargetSelf && targetMember
               ? `Thách Đấu Trực Tiếp ${targetMember.name}`
-              : 'Mở Kèo Thi Đấu Trong Nhóm / Cộng Đồng'}
+              : 'Mở Kèo Thi Đấu & Vinh Danh Bảng Xếp Hạng'}
           </h2>
+
+          {/* Top Navigation Tabs: Thi đấu 1v1 | Bảng xếp hạng */}
+          <div className="flex items-center gap-2 mt-3">
+            <button
+              type="button"
+              onClick={() => setModalTab('duel')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors ${
+                modalTab === 'duel'
+                  ? 'bg-white text-emerald-800 shadow-xs'
+                  : 'bg-white/10 text-emerald-100 hover:bg-white/20'
+              }`}
+            >
+              <Swords className="w-3.5 h-3.5" />
+              <span>Thi đấu 1v1</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setModalTab('leaderboard');
+                loadLeaderboardData();
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors ${
+                modalTab === 'leaderboard'
+                  ? 'bg-amber-400 text-slate-950 shadow-xs'
+                  : 'bg-white/10 text-emerald-100 hover:bg-white/20'
+              }`}
+            >
+              <Trophy className="w-3.5 h-3.5" />
+              <span>Bảng Xếp Hạng ({leaderboard.length})</span>
+            </button>
+          </div>
         </div>
 
         {/* Body */}
         <div className="p-5 space-y-4">
-          {stage === 'setup' && (
+          {modalTab === 'leaderboard' ? (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2 font-extrabold text-amber-500">
+                  <Award className="w-4 h-4" />
+                  <span>Top Cao Thủ Đấu Trường Điểm 10</span>
+                </div>
+                <span className="text-[11px] text-slate-500 dark:text-zinc-400">
+                  Thắng +100đ · Hòa +50đ · +10đ/câu đúng
+                </span>
+              </div>
+
+              {loadingLeaderboard ? (
+                <div className="py-10 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Đang tổng hợp bảng xếp hạng...</span>
+                </div>
+              ) : leaderboard.length === 0 ? (
+                <div
+                  className={`rounded-2xl p-8 text-center border border-dashed ${
+                    isDark ? 'border-white/10 text-zinc-400' : 'border-slate-200 text-slate-500'
+                  }`}
+                >
+                  <Trophy className="w-10 h-10 mx-auto text-amber-500/70 mb-2" />
+                  <div className="text-sm font-black">Chưa có trận đấu hoàn tất nào!</div>
+                  <p className="text-xs mt-1">
+                    Hãy chuyển sang tab Thi đấu 1v1 để mở kèo thách đấu đầu tiên trong cộng đồng!
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+                  {leaderboard.map((p, idx) => {
+                    const isMe = p.userId === currentUserId;
+                    const rankBadge =
+                      idx === 0
+                        ? 'bg-amber-400 text-slate-950'
+                        : idx === 1
+                        ? 'bg-slate-300 text-slate-900'
+                        : idx === 2
+                        ? 'bg-orange-400 text-slate-950'
+                        : 'bg-slate-500/15 text-slate-500 dark:text-zinc-300';
+
+                    return (
+                      <div
+                        key={p.userId}
+                        className={`p-3 rounded-2xl border flex items-center justify-between gap-3 ${
+                          isMe
+                            ? 'bg-emerald-500/12 border-emerald-500/40'
+                            : isDark
+                            ? 'bg-white/[0.02] border-white/10'
+                            : 'bg-slate-50/80 border-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span
+                            className={`w-7 h-7 rounded-xl text-xs font-black flex items-center justify-center shrink-0 ${rankBadge}`}
+                          >
+                            #{idx + 1}
+                          </span>
+                          <UserAvatarWithStatus name={p.name} src={p.avatar} size="sm" />
+                          <div className="min-w-0">
+                            <div className="text-xs sm:text-sm font-black truncate flex items-center gap-1.5">
+                              <span>{p.name}</span>
+                              {isMe && (
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-600 text-white text-[9px] font-bold">
+                                  Bạn
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-zinc-400">
+                              {p.wins} Thắng · {p.draws} Hòa · {p.played} Trận ({p.winRate}% thắng)
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <div className="text-sm font-black text-amber-500 tabular-nums">
+                            {p.points} đ
+                          </div>
+                          <div className="text-[10px] text-slate-500 dark:text-zinc-400">
+                            {p.totalCorrect} câu đúng
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              {stage === 'setup' && (
             <div className="space-y-4">
               {/* Versus Preview Banner */}
               <div
@@ -487,6 +773,38 @@ export const DuelArenaModal: React.FC<DuelArenaModalProps> = ({
                 </div>
               </div>
 
+              {/* AI Referee Toggle */}
+              <div
+                className={`p-3 rounded-2xl border flex items-center justify-between gap-3 ${
+                  isDark ? 'bg-emerald-950/25 border-emerald-500/25' : 'bg-emerald-50/70 border-emerald-200'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 text-xs">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                    <Bot className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-extrabold">
+                      Trọng tài Gia sư AI {activeCountry.flag} ({activeCountry.name})
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-zinc-400">
+                      Tự động soạn 5 câu hỏi tốc độ mới nhất và chấm điểm trực tiếp
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setUseAiReferee((v) => !v)}
+                  className={`px-3 py-1.5 rounded-xl text-[11px] font-black cursor-pointer shrink-0 transition-colors ${
+                    useAiReferee
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-200 dark:bg-white/10 text-slate-600 dark:text-zinc-300'
+                  }`}
+                >
+                  {useAiReferee ? 'BẬT' : 'TẮT'}
+                </button>
+              </div>
+
               <div
                 className={`p-3 rounded-xl border text-xs ${
                   isDark
@@ -507,11 +825,21 @@ export const DuelArenaModal: React.FC<DuelArenaModalProps> = ({
                 </button>
                 <button
                   type="button"
+                  disabled={generatingAiQuestions}
                   onClick={handleStartNewChallenge}
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white text-xs sm:text-sm font-black shadow-lg shadow-emerald-600/20 flex items-center gap-2 cursor-pointer whitespace-nowrap"
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 disabled:opacity-60 text-white text-xs sm:text-sm font-black shadow-lg shadow-emerald-600/20 flex items-center gap-2 cursor-pointer whitespace-nowrap"
                 >
-                  <Swords className="w-4 h-4" />
-                  <span>Bắt đầu Thi Đấu Ngay!</span>
+                  {generatingAiQuestions ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Gia sư AI đang ra đề...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Swords className="w-4 h-4" />
+                      <span>Bắt đầu Thi Đấu Ngay!</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -621,9 +949,20 @@ export const DuelArenaModal: React.FC<DuelArenaModalProps> = ({
                 })}
               </div>
 
-              {/* Explanation & Next */}
+              {/* AI Referee Remark + Explanation & Next */}
               {selectedOption !== null && (
                 <div className="space-y-3 pt-1">
+                  {aiRefereeNote && (
+                    <div
+                      className={`px-3 py-2 rounded-xl border text-xs font-extrabold flex items-center gap-2 ${
+                        selectedOption === currentQuestion.correctIndex
+                          ? 'bg-emerald-600/12 border-emerald-500/35 text-emerald-700 dark:text-emerald-300'
+                          : 'bg-indigo-500/12 border-indigo-500/35 text-indigo-700 dark:text-indigo-300'
+                      }`}
+                    >
+                      <span>{aiRefereeNote}</span>
+                    </div>
+                  )}
                   <div
                     className={`p-3 rounded-xl border text-xs leading-relaxed ${
                       selectedOption === currentQuestion.correctIndex
@@ -703,7 +1042,18 @@ export const DuelArenaModal: React.FC<DuelArenaModalProps> = ({
                 <span>Đã cộng +{xpAwarded} XP vào cấp độ của bạn!</span>
               </div>
 
-              <div className="pt-2 flex justify-center">
+              <div className="pt-2 flex flex-wrap justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    loadLeaderboardData();
+                    setModalTab('leaderboard');
+                  }}
+                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm cursor-pointer flex items-center gap-1.5"
+                >
+                  <Trophy className="w-4 h-4" />
+                  <span>Xem Bảng Xếp Hạng</span>
+                </button>
                 <button
                   type="button"
                   onClick={onClose}
@@ -713,6 +1063,8 @@ export const DuelArenaModal: React.FC<DuelArenaModalProps> = ({
                 </button>
               </div>
             </div>
+          )}
+            </>
           )}
         </div>
       </div>

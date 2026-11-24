@@ -90,40 +90,51 @@ class AIVoiceManager {
     this.state.speed = this.settings.speed;
   }
 
-  // Pre-process text to sound natural in spoken Vietnamese and math
-  public cleanTextForSpeech(rawText: string): string {
-    return rawText
+  // Pre-process text to sound natural in spoken target language
+  public cleanTextForSpeech(rawText: string, langCode: string = 'vi-VN'): string {
+    const isVi = !langCode || langCode.toLowerCase().startsWith('vi');
+    let cleaned = rawText
       // Remove image markdown
       .replace(/!\[.*?\]\(.*?\)/g, '')
       // Remove URLs
       .replace(/https?:\/\/\S+/g, '')
       // Remove markdown headers, bold, italics, code blocks
-      .replace(/```[\s\S]*?```/g, ' đoạn mã ')
+      .replace(/```[\s\S]*?```/g, isVi ? ' đoạn mã ' : ' code ')
       .replace(/`([^`]+)`/g, ' $1 ')
-      .replace(/[*#_~>]/g, ' ')
-      // Math symbols to natural Vietnamese words
-      .replace(/\$\$(.*?)\$\$/g, ' công thức toán $1 ')
-      .replace(/\$(.*?)\$/g, ' $1 ')
-      .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, ' $1 trên $2 ')
-      .replace(/\\sqrt\{([^}]+)\}/g, ' căn bậc hai của $1 ')
-      .replace(/\+/g, ' cộng ')
-      .replace(/-/g, ' trừ ')
-      .replace(/×/g, ' nhân ')
-      .replace(/÷/g, ' chia ')
-      .replace(/=/g, ' bằng ')
-      .replace(/≠/g, ' khác ')
-      .replace(/≤/g, ' nhỏ hơn hoặc bằng ')
-      .replace(/≥/g, ' lớn hơn hoặc bằng ')
-      .replace(/²/g, ' bình phương ')
-      .replace(/³/g, ' mũ ba ')
-      .replace(/\s+/g, ' ')
-      .trim();
+      .replace(/[*#_~>]/g, ' ');
+
+    if (isVi) {
+      cleaned = cleaned
+        .replace(/\$\$(.*?)\$\$/g, ' công thức toán $1 ')
+        .replace(/\$(.*?)\$/g, ' $1 ')
+        .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, ' $1 trên $2 ')
+        .replace(/\\sqrt\{([^}]+)\}/g, ' căn bậc hai của $1 ')
+        .replace(/\+/g, ' cộng ')
+        .replace(/-/g, ' trừ ')
+        .replace(/×/g, ' nhân ')
+        .replace(/÷/g, ' chia ')
+        .replace(/=/g, ' bằng ')
+        .replace(/≠/g, ' khác ')
+        .replace(/≤/g, ' nhỏ hơn hoặc bằng ')
+        .replace(/≥/g, ' lớn hơn hoặc bằng ')
+        .replace(/²/g, ' bình phương ')
+        .replace(/³/g, ' mũ ba ');
+    } else {
+      cleaned = cleaned
+        .replace(/\$\$(.*?)\$\$/g, ' $1 ')
+        .replace(/\$(.*?)\$/g, ' $1 ')
+        .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, ' $1 / $2 ')
+        .replace(/\\sqrt\{([^}]+)\}/g, ' sqrt($1) ');
+    }
+
+    return cleaned.replace(/\s+/g, ' ').trim();
   }
 
   public async speak(
     rawText: string,
     messageId: string | null = null,
-    customPersona?: AIVoicePersona
+    customPersona?: AIVoicePersona,
+    langCode: string = 'vi-VN'
   ): Promise<void> {
     // If clicking the currently playing message, toggle stop
     if (
@@ -138,7 +149,7 @@ class AIVoiceManager {
     this.stop();
 
     const persona = customPersona || this.state.activePersona;
-    const cleanText = this.cleanTextForSpeech(rawText);
+    const cleanText = this.cleanTextForSpeech(rawText, langCode);
     if (!cleanText) return;
 
     // Truncate to sensible length to prevent audio timeout
@@ -159,11 +170,11 @@ class AIVoiceManager {
 
     // Strategy 1: Try Gemini TTS API if enabled
     if (this.settings.preferGeminiTTS) {
-      const cacheKey = `${persona.geminiVoice}_${textToSpeak.slice(0, 80)}`;
+      const cacheKey = `${langCode}_${persona.geminiVoice}_${textToSpeak.slice(0, 80)}`;
       const cachedUrl = this.audioCache.get(cacheKey);
 
       if (cachedUrl) {
-        this.playAudioUrl(cachedUrl, 'gemini');
+        this.playAudioUrl(cachedUrl, 'gemini', langCode);
         return;
       }
 
@@ -175,13 +186,14 @@ class AIVoiceManager {
             text: textToSpeak,
             voice: persona.geminiVoice,
             speed: this.settings.speed,
+            lang: langCode,
           }),
         });
 
         const data = await res.json();
         if (data.success && data.audioUrl) {
           this.audioCache.set(cacheKey, data.audioUrl);
-          this.playAudioUrl(data.audioUrl, 'gemini');
+          this.playAudioUrl(data.audioUrl, 'gemini', langCode);
           return;
         }
       } catch (err) {
@@ -190,10 +202,10 @@ class AIVoiceManager {
     }
 
     // Strategy 2: Fallback to Web Speech API
-    this.speakWithWebSpeech(textToSpeak);
+    this.speakWithWebSpeech(textToSpeak, langCode);
   }
 
-  private playAudioUrl(url: string, engine: 'gemini' | 'webspeech') {
+  private playAudioUrl(url: string, engine: 'gemini' | 'webspeech', langCode: string = 'vi-VN') {
     try {
       const audio = new Audio(url);
       audio.playbackRate = this.settings.speed || 1.0;
@@ -225,19 +237,19 @@ class AIVoiceManager {
 
       audio.onerror = () => {
         console.warn('Audio playback error, fallback to WebSpeech');
-        this.speakWithWebSpeech(this.state.activeText);
+        this.speakWithWebSpeech(this.state.activeText, langCode);
       };
 
       audio.play().catch((err) => {
         console.warn('Auto-play blocked or audio error:', err);
-        this.speakWithWebSpeech(this.state.activeText);
+        this.speakWithWebSpeech(this.state.activeText, langCode);
       });
     } catch {
-      this.speakWithWebSpeech(this.state.activeText);
+      this.speakWithWebSpeech(this.state.activeText, langCode);
     }
   }
 
-  private speakWithWebSpeech(text: string) {
+  private speakWithWebSpeech(text: string, langCode: string = 'vi-VN') {
     if (!('speechSynthesis' in window)) {
       this.resetState();
       return;
@@ -245,13 +257,24 @@ class AIVoiceManager {
 
     window.speechSynthesis.cancel();
 
+    const targetLang = langCode || 'vi-VN';
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'vi-VN';
+    utterance.lang = targetLang;
     utterance.rate = this.settings.speed || 1.0;
+
+    // Pick matching native voice if available
+    try {
+      const voices = window.speechSynthesis.getVoices();
+      const shortPrefix = targetLang.split('-')[0].toLowerCase();
+      const exactVoice = voices.find((v) => v.lang.toLowerCase() === targetLang.toLowerCase());
+      const prefixVoice = voices.find((v) => v.lang.toLowerCase().startsWith(shortPrefix));
+      if (exactVoice) utterance.voice = exactVoice;
+      else if (prefixVoice) utterance.voice = prefixVoice;
+    } catch {}
 
     // Adjust pitch based on persona gender
     if (this.state.activePersona.gender === 'female') {
-      utterance.pitch = 1.15;
+      utterance.pitch = 1.1;
     } else {
       utterance.pitch = 0.95;
     }

@@ -23,6 +23,7 @@ import {
   User,
   X,
   RotateCw,
+  TrendingUp,
 } from 'lucide-react';
 import { GradeLevel, ChatSession } from '../../types';
 import { BackgroundTheme } from '../../types/theme';
@@ -44,13 +45,14 @@ export type MainTabId =
   | 'achievements'
   | 'schedule'
   | 'class_management'
-  | 'spin';
+  | 'spin'
+  | 'tracker';
 
 export type HubSpaceId = 'ai' | 'community' | 'practice' | 'tools';
 
 export function getSpaceFromTab(tab: MainTabId): HubSpaceId {
   if (tab === 'group') return 'community';
-  if (tab === 'exam' || tab === 'grade' || tab === 'spin') return 'practice';
+  if (tab === 'exam' || tab === 'grade' || tab === 'spin' || tab === 'tracker') return 'practice';
   if (
     tab === 'schedule' ||
     tab === 'mindmap' ||
@@ -84,7 +86,6 @@ interface SidebarProps {
   onSelectSpace?: (space: HubSpaceId) => void;
   isDark: boolean;
   onToggleTheme: () => void;
-  onOpenOfferModal: () => void;
   onOpenIntroModal?: () => void;
   activeTheme?: BackgroundTheme;
   onOpenThemeModal?: () => void;
@@ -117,7 +118,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectSpace,
   isDark,
   onToggleTheme,
-  onOpenOfferModal,
   userName = 'Bạn học',
   onOpenNameModal,
   currentUser,
@@ -165,7 +165,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       id: 'practice',
       label: 'Kho Luyện Tập',
-      subtitle: 'Luyện đề, Chấm bài, Mini game, 5 Bước',
+      subtitle: 'Luyện đề, Chấm bài, Mini game, Quay XP',
       icon: BookOpen,
       defaultTab: 'exam',
     },
@@ -197,6 +197,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'group', label: 'Cộng đồng & Chat', icon: Users, accent: 'text-teal-500' },
     { id: 'exam', label: 'Luyện đề thi', icon: BookOpen, accent: 'text-emerald-500' },
     { id: 'grade', label: 'Chấm bài AI', icon: FileCheck2, accent: 'text-sky-500' },
+    { id: 'tracker', label: 'Phân tích Lỗ hổng AI', icon: TrendingUp, accent: 'text-emerald-500' },
     { id: 'spin', label: 'Quay XP Lên Cấp', icon: RotateCw, accent: 'text-emerald-500' },
     { id: 'schedule', label: 'Lịch học cá nhân', icon: Calendar, accent: 'text-emerald-500' },
     { id: 'mindmap', label: 'Sơ đồ tư duy', icon: GitFork, accent: 'text-teal-500' },
@@ -307,7 +308,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="relative group flex justify-center w-full">
             <button
               type="button"
-              onClick={onOpenAdminNotifications || onOpenOfferModal}
+              onClick={onOpenAdminNotifications}
               className={`relative w-11 h-11 rounded-2xl flex items-center justify-center transition-all cursor-pointer ${
                 isDark
                   ? 'text-zinc-300 hover:bg-white/[0.07] hover:text-emerald-400'

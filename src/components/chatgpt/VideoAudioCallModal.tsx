@@ -42,6 +42,7 @@ export interface VideoAudioCallModalProps {
   targetId?: string;
   callerId?: string;
   callId?: string;
+  roomCallKey?: string;
   role?: 'caller' | 'callee';
   participants?: CallParticipant[];
   userName: string;
@@ -71,15 +72,17 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
   targetId,
   callerId,
   callId: initialCallId,
+  roomCallKey,
   role = 'caller',
   participants = [],
   userName = 'Bạn học',
   userAvatar,
   isDark = true,
 }) => {
+  const myUserId = callerId || `user-${userName.toLowerCase().replace(/\s+/g, '-')}`;
   // Call status: 'ringing' -> 'connected' -> 'declined' | 'timeout' | 'ended'
   const [callStatus, setCallStatus] = useState<'ringing' | 'connected' | 'declined' | 'timeout' | 'ended'>(
-    role === 'callee' ? 'connected' : 'ringing'
+    role === 'callee' || roomCallKey ? 'connected' : 'ringing'
   );
   const [statusReasonText, setStatusReasonText] = useState<string>('');
   const [ringRemainingSec, setRingRemainingSec] = useState<number>(RING_DURATION_SECONDS);
@@ -91,6 +94,8 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
   // Audio & Video controls
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [isVideoOff, setIsVideoOff] = useState<boolean>(callType === 'voice');
+  const isMutedRef = useRef<boolean>(false);
+  const isVideoOffRef = useRef<boolean>(callType === 'voice');
   const [isSpeakerMuted, setIsSpeakerMuted] = useState<boolean>(false);
   const [isSharingScreen, setIsSharingScreen] = useState<boolean>(false);
   const [showWhiteboard, setShowWhiteboard] = useState<boolean>(false);
@@ -122,12 +127,13 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const activeCallIdRef = useRef<string | undefined>(initialCallId);
+  const effectiveRoleRef = useRef<'caller' | 'callee'>(role);
   const expiresAtRef = useRef<number>(Date.now() + RING_DURATION_SECONDS * 1000);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const offerSentRef = useRef<boolean>(false);
   const answerSentRef = useRef<boolean>(false);
-  const appliedRemoteOfferRef = useRef<boolean>(false);
-  const appliedRemoteAnswerRef = useRef<boolean>(false);
+  const lastRemoteOfferSdpRef = useRef<string>('');
+  const lastRemoteAnswerSdpRef = useRef<string>('');
   const addedCandidateCountRef = useRef<number>(0);
   const isMountedRef = useRef<boolean>(true);
   const animFrameRef = useRef<number | null>(null);
@@ -138,14 +144,27 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const [userAudioLevel, setUserAudioLevel] = useState<number>(0);
 
-  // Whiteboard Canvas
+  // Whiteboard Canvas & Single-Drawer Lock State
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [drawColor, setDrawColor] = useState<string>('#3b82f6');
   const [brushSize, setBrushSize] = useState<number>(3);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
+  const activeStrokePointsRef = useRef<Array<{ x: number; y: number }>>([]);
+  const [wbState, setWbState] = useState<{
+    activeDrawerId: string | null;
+    activeDrawerName: string | null;
+    strokes: Array<{ id: string; color: string; size: number; points: Array<{ x: number; y: number }> }>;
+    clearedAt: number;
+  }>({
+    activeDrawerId: null,
+    activeDrawerName: null,
+    strokes: [],
+    clearedAt: 0,
+  });
+  const [wbLockNotice, setWbLockNotice] = useState<string>('');
 
   const isRealSignaledCall = Boolean(
-    roomType !== 'teacher' && (initialCallId || (targetId && callerId))
+    roomType !== 'teacher' && (roomCallKey || initialCallId || (targetId && callerId))
   );
 
   // Active group participants fallback for UI display
@@ -299,23 +318,37 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
       await fetch(`/api/calls/${encodeURIComponent(cid)}/signal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role, ...payload }),
+        body: JSON.stringify({ role: effectiveRoleRef.current, ...payload }),
       });
     } catch {}
   };
 
+  const attachLocalTracksToPeer = (pc: RTCPeerConnection) => {
+    if (!localStreamRef.current) return;
+    const senders = pc.getSenders();
+    localStreamRef.current.getTracks().forEach((track) => {
+      const existing = senders.find((s) => s.track && s.track.kind === track.kind);
+      if (existing) {
+        if (existing.track !== track) {
+          existing.replaceTrack(track).catch(() => {});
+        }
+      } else {
+        pc.addTrack(track, localStreamRef.current!);
+      }
+    });
+  };
+
   const setupPeerConnection = () => {
-    if (pcRef.current) return pcRef.current;
+    if (pcRef.current) {
+      attachLocalTracksToPeer(pcRef.current);
+      return pcRef.current;
+    }
     const pc = new RTCPeerConnection(RTC_CONFIG);
     pcRef.current = pc;
     const remoteStream = new MediaStream();
     remoteStreamRef.current = remoteStream;
 
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => {
-        pc.addTrack(track, localStreamRef.current!);
-      });
-    }
+    attachLocalTracksToPeer(pc);
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -366,11 +399,12 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
     isMountedRef.current = true;
 
     activeCallIdRef.current = initialCallId;
+    effectiveRoleRef.current = role;
     expiresAtRef.current = Date.now() + RING_DURATION_SECONDS * 1000;
     offerSentRef.current = false;
     answerSentRef.current = false;
-    appliedRemoteOfferRef.current = false;
-    appliedRemoteAnswerRef.current = false;
+    lastRemoteOfferSdpRef.current = '';
+    lastRemoteAnswerSdpRef.current = '';
     addedCandidateCountRef.current = 0;
 
     setDuration(0);
@@ -378,12 +412,17 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
     setCameraError(null);
     setStatusReasonText('');
     setIsMuted(false);
-    setIsVideoOff(callType === 'voice');
-    setRemoteMediaState({ isMuted: false, isVideoOff: callType === 'voice' });
+    isMutedRef.current = false;
+    const initVidOff = callType === 'voice';
+    setIsVideoOff(initVidOff);
+    isVideoOffRef.current = initVidOff;
+    setRemoteMediaState({ isMuted: false, isVideoOff: initVidOff });
     setRingRemainingSec(RING_DURATION_SECONDS);
     setTotalRingSeconds(RING_DURATION_SECONDS);
     setIsBusyWaiting(false);
-    setCallStatus(role === 'callee' ? 'connected' : 'ringing');
+    setWbState({ activeDrawerId: null, activeDrawerName: null, strokes: [], clearedAt: 0 });
+    setWbLockNotice('');
+    setCallStatus(role === 'callee' || roomCallKey ? 'connected' : 'ringing');
     setInCallMessages(
       roomType === 'teacher'
         ? [
@@ -396,7 +435,7 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
         : []
     );
 
-    if (role === 'caller') {
+    if (role === 'caller' && !roomCallKey) {
       playRingtone();
     } else {
       playConnectedChime();
@@ -407,55 +446,69 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
     let teacherConnectTimer: any = null;
 
     async function initMediaAndSignaling() {
-      // 1. Capture real front-facing camera (facingMode: 'user') & microphone immediately
+      // 1. Capture real front-facing camera & microphone BEFORE creating WebRTC Offer/Answer
       try {
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video:
-              callType === 'video'
-                ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
-                : false,
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-            },
-          });
+          let stream: MediaStream | null = null;
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video:
+                callType === 'video'
+                  ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
+                  : false,
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+              },
+            });
+          } catch {
+            // Fallback to audio-only if camera hardware is unavailable
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: false,
+              audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            });
+            setIsVideoOff(true);
+            isVideoOffRef.current = true;
+            setCameraError('Không tìm thấy Camera — đang dùng Micro nói chuyện trực tiếp.');
+          }
 
           if (!isMountedRef.current) {
-            stream.getTracks().forEach((t) => t.stop());
+            stream?.getTracks().forEach((t) => t.stop());
             return;
           }
 
-          localStreamRef.current = stream;
-          setHasCameraPermission(true);
-          syncLocalVideoElement();
+          if (stream) {
+            localStreamRef.current = stream;
+            setHasCameraPermission(stream.getVideoTracks().length > 0);
+            syncLocalVideoElement();
 
-          // Local Mic speaking level visualiser
-          try {
-            const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-            if (AudioCtx && stream.getAudioTracks().length > 0) {
-              const actx = new AudioCtx();
-              const src = actx.createMediaStreamSource(stream);
-              const analyser = actx.createAnalyser();
-              analyser.fftSize = 64;
-              src.connect(analyser);
-              analyserRef.current = analyser;
+            // Local Mic speaking level visualiser
+            try {
+              const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+              if (AudioCtx && stream.getAudioTracks().length > 0) {
+                const actx = new AudioCtx();
+                const src = actx.createMediaStreamSource(stream);
+                const analyser = actx.createAnalyser();
+                analyser.fftSize = 64;
+                src.connect(analyser);
+                analyserRef.current = analyser;
 
-              const checkAudio = () => {
-                if (!isMountedRef.current) return;
-                if (analyserRef.current) {
-                  const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-                  analyserRef.current.getByteFrequencyData(dataArray);
-                  let sum = 0;
-                  for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-                  setUserAudioLevel(sum / dataArray.length);
-                }
+                const checkAudio = () => {
+                  if (!isMountedRef.current) return;
+                  if (analyserRef.current) {
+                    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+                    analyserRef.current.getByteFrequencyData(dataArray);
+                    let sum = 0;
+                    for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+                    setUserAudioLevel(sum / dataArray.length);
+                  }
+                  animFrameRef.current = requestAnimationFrame(checkAudio);
+                };
                 animFrameRef.current = requestAnimationFrame(checkAudio);
-              };
-              animFrameRef.current = requestAnimationFrame(checkAudio);
-            }
-          } catch {}
+              }
+            } catch {}
+          }
         } else {
           setHasCameraPermission(false);
           setCameraError('Trình duyệt không hỗ trợ Camera/Micro.');
@@ -469,7 +522,7 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
 
       if (!isMountedRef.current) return;
 
-      // 2. Teacher room fallback (no remote human peer — show brief waiting ring before connecting)
+      // 2. Teacher room fallback (no remote human peer)
       if (!isRealSignaledCall) {
         teacherConnectTimer = setTimeout(() => {
           if (!isMountedRef.current) return;
@@ -481,18 +534,41 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
               .speak(`Thầy cô ${targetName} đã kết nối cuộc gọi. Em hãy bật mic và camera để hỏi bài nhé!`)
               .catch(() => {});
           }
-        }, 2800);
+        }, 2200);
         return;
       }
 
-      // 3. Real peer-to-peer signaled call flow
-      if (role === 'caller' && !activeCallIdRef.current) {
+      // 3a. Shared Discord Voice/Video Channel join (immediate WebRTC room connect)
+      if (roomCallKey) {
+        try {
+          const res = await fetch('/api/calls/room-join', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              roomKey: roomCallKey,
+              userId: myUserId,
+              userName,
+              userAvatar: userAvatar || '',
+              roomName: targetName,
+              callType,
+              mediaState: { isMuted: isMutedRef.current, isVideoOff: isVideoOffRef.current },
+            }),
+          });
+          const data = await res.json();
+          if (data?.success && data.call) {
+            activeCallIdRef.current = data.call.callId;
+            effectiveRoleRef.current = data.role === 'callee' ? 'callee' : 'caller';
+            setCallStatus('connected');
+          }
+        } catch {}
+      } else if (role === 'caller' && !activeCallIdRef.current) {
+        // 3b. Direct / Group 15s ringing start
         try {
           const res = await fetch('/api/calls/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              callerId: callerId || 'user-local',
+              callerId: myUserId,
               callerName: userName,
               callerAvatar: userAvatar || '',
               calleeId: targetId,
@@ -500,7 +576,7 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
               calleeAvatar: targetAvatar || '',
               roomType: roomType === 'group' ? 'group' : 'direct',
               callType,
-              callerMedia: { isMuted: false, isVideoOff: callType === 'voice' },
+              callerMedia: { isMuted: isMutedRef.current, isVideoOff: isVideoOffRef.current },
             }),
           });
           const data = await res.json();
@@ -512,8 +588,8 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
         } catch {}
       }
 
-      // 15-second (extendable) waiting/ringing countdown timer for Caller
-      if (role === 'caller') {
+      // 15-second (extendable) waiting/ringing countdown timer for Caller (non-room calls)
+      if (role === 'caller' && !roomCallKey) {
         countdownTimer = setInterval(async () => {
           if (!isMountedRef.current) return;
           const remainingMs = Math.max(0, expiresAtRef.current - Date.now());
@@ -545,12 +621,13 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
         }, 250);
       }
 
-      // Signaling & Status poll every 650ms
+      // Signaling, Whiteboard & Status poll every 550ms
       const pollSignaling = async () => {
         const cid = activeCallIdRef.current;
         if (!cid || !isMountedRef.current) return;
+        const myRole = effectiveRoleRef.current;
         try {
-          const res = await fetch(`/api/calls/${encodeURIComponent(cid)}/status?role=${role}`);
+          const res = await fetch(`/api/calls/${encodeURIComponent(cid)}/status?role=${myRole}`);
           if (!res.ok) return;
           const data = await res.json();
           const call = data?.call;
@@ -562,12 +639,22 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
             setRingRemainingSec(Math.ceil((call.expiresAt - Date.now()) / 1000));
           }
 
-          // Update remote media state (avatar vs video, mic indicator)
-          const remoteMedia = role === 'caller' ? call.calleeMedia : call.callerMedia;
+          // Update remote media state
+          const remoteMedia = myRole === 'caller' ? call.calleeMedia : call.callerMedia;
           if (remoteMedia) {
             setRemoteMediaState({
               isMuted: !!remoteMedia.isMuted,
               isVideoOff: !!remoteMedia.isVideoOff,
+            });
+          }
+
+          // Sync Single-Drawer Whiteboard State
+          if (call.whiteboard) {
+            setWbState({
+              activeDrawerId: call.whiteboard.activeDrawerId || null,
+              activeDrawerName: call.whiteboard.activeDrawerName || null,
+              strokes: Array.isArray(call.whiteboard.strokes) ? call.whiteboard.strokes : [],
+              clearedAt: call.whiteboard.clearedAt || 0,
             });
           }
 
@@ -638,8 +725,8 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
 
             const pc = setupPeerConnection();
 
-            // Caller creates & sends SDP Offer once accepted
-            if (role === 'caller' && !offerSentRef.current) {
+            // Caller creates & sends SDP Offer once accepted (and tracks are already attached)
+            if (myRole === 'caller' && !offerSentRef.current) {
               offerSentRef.current = true;
               try {
                 const offer = await pc.createOffer({
@@ -649,38 +736,36 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
                 await pc.setLocalDescription(offer);
                 await sendSignal({
                   offer,
-                  mediaState: { isMuted, isVideoOff },
+                  mediaState: { isMuted: isMutedRef.current, isVideoOff: isVideoOffRef.current },
                 });
               } catch {}
             }
 
-            // Caller receives Callee's SDP Answer
-            if (role === 'caller' && call.answer && !appliedRemoteAnswerRef.current) {
-              appliedRemoteAnswerRef.current = true;
+            // Caller receives Callee's SDP Answer (supports renegotiation)
+            if (myRole === 'caller' && call.answer?.sdp && call.answer.sdp !== lastRemoteAnswerSdpRef.current) {
+              lastRemoteAnswerSdpRef.current = call.answer.sdp;
               try {
                 await pc.setRemoteDescription(new RTCSessionDescription(call.answer));
               } catch {}
             }
 
-            // Callee receives Caller's SDP Offer and sends Answer
-            if (role === 'callee' && call.offer && !appliedRemoteOfferRef.current) {
-              appliedRemoteOfferRef.current = true;
+            // Callee receives Caller's SDP Offer (supports renegotiation) and sends Answer
+            if (myRole === 'callee' && call.offer?.sdp && call.offer.sdp !== lastRemoteOfferSdpRef.current) {
+              lastRemoteOfferSdpRef.current = call.offer.sdp;
               try {
                 await pc.setRemoteDescription(new RTCSessionDescription(call.offer));
-                if (!answerSentRef.current) {
-                  answerSentRef.current = true;
-                  const answer = await pc.createAnswer();
-                  await pc.setLocalDescription(answer);
-                  await sendSignal({
-                    answer,
-                    mediaState: { isMuted, isVideoOff },
-                  });
-                }
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                answerSentRef.current = true;
+                await sendSignal({
+                  answer,
+                  mediaState: { isMuted: isMutedRef.current, isVideoOff: isVideoOffRef.current },
+                });
               } catch {}
             }
 
             // Apply remote ICE candidates
-            const remoteCandidates = role === 'caller' ? call.calleeCandidates : call.callerCandidates;
+            const remoteCandidates = myRole === 'caller' ? call.calleeCandidates : call.callerCandidates;
             if (Array.isArray(remoteCandidates) && pc.remoteDescription) {
               while (addedCandidateCountRef.current < remoteCandidates.length) {
                 const cand = remoteCandidates[addedCandidateCountRef.current];
@@ -695,7 +780,7 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
       };
 
       pollSignaling();
-      statusPollTimer = setInterval(pollSignaling, 650);
+      statusPollTimer = setInterval(pollSignaling, 550);
     }
 
     initMediaAndSignaling();
@@ -703,7 +788,7 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
     const onExternalEndCall = (ev: Event) => {
       const detail = (ev as CustomEvent<{ keepCallId?: string }>).detail;
       if (detail?.keepCallId && detail.keepCallId === activeCallIdRef.current) return;
-      if (activeCallIdRef.current) {
+      if (activeCallIdRef.current && !roomCallKey) {
         fetch(`/api/calls/${encodeURIComponent(activeCallIdRef.current)}/end`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -723,7 +808,7 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
       clearTimeout(teacherConnectTimer);
       cleanupAllMedia();
     };
-  }, [isOpen, callType, roomType, targetName, targetId, initialCallId, role]);
+  }, [isOpen, callType, roomType, targetName, targetId, initialCallId, roomCallKey, role]);
 
   // Duration Timer when connected
   useEffect(() => {
@@ -738,18 +823,20 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
   const handleToggleMute = () => {
     const next = !isMuted;
     setIsMuted(next);
+    isMutedRef.current = next;
     if (localStreamRef.current) {
       localStreamRef.current.getAudioTracks().forEach((track) => {
         track.enabled = !next;
       });
     }
-    sendSignal({ mediaState: { isMuted: next, isVideoOff } });
+    sendSignal({ mediaState: { isMuted: next, isVideoOff: isVideoOffRef.current } });
   };
 
   // Toggle Camera (When off -> show Avatar while mic & remote audio stay active!)
   const handleToggleCamera = async () => {
     const next = !isVideoOff;
     setIsVideoOff(next);
+    isVideoOffRef.current = next;
 
     if (localStreamRef.current) {
       localStreamRef.current.getVideoTracks().forEach((track) => {
@@ -778,6 +865,14 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
             }
           });
         }
+        // Renegotiate offer so remote peer immediately sees newly enabled camera
+        if (pcRef.current && effectiveRoleRef.current === 'caller' && activeCallIdRef.current) {
+          try {
+            const offer = await pcRef.current.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+            await pcRef.current.setLocalDescription(offer);
+            await sendSignal({ offer, mediaState: { isMuted: isMutedRef.current, isVideoOff: next } });
+          } catch {}
+        }
         setHasCameraPermission(true);
         setCameraError(null);
         syncLocalVideoElement();
@@ -786,7 +881,7 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
       }
     }
 
-    sendSignal({ mediaState: { isMuted, isVideoOff: next } });
+    sendSignal({ mediaState: { isMuted: isMutedRef.current, isVideoOff: next } });
   };
 
   // Screen Share
@@ -817,42 +912,159 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
     }
   };
 
-  // Whiteboard drawing handlers
-  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Render synced whiteboard strokes whenever strokes update
+  useEffect(() => {
+    if (!showWhiteboard) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    setIsDrawing(true);
-    ctx.beginPath();
-    ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const s of wbState.strokes) {
+      if (!s.points || s.points.length === 0) continue;
+      ctx.beginPath();
+      ctx.lineWidth = s.size;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = s.color;
+      ctx.moveTo(s.points[0].x, s.points[0].y);
+      for (let i = 1; i < s.points.length; i++) {
+        ctx.lineTo(s.points[i].x, s.points[i].y);
+      }
+      ctx.stroke();
+    }
+  }, [showWhiteboard, wbState.strokes, wbState.clearedAt]);
+
+  const canDrawOnWhiteboard =
+    !wbState.activeDrawerId || wbState.activeDrawerId === myUserId;
+  const isMyWhiteboardLock = wbState.activeDrawerId === myUserId;
+
+  const callWhiteboardApi = async (action: 'claim' | 'release' | 'stroke' | 'clear', stroke?: any) => {
+    const cid = activeCallIdRef.current;
+    if (!cid) {
+      // Local solo fallback (e.g., Teacher simulated room)
+      if (action === 'claim') {
+        setWbState((prev) => ({ ...prev, activeDrawerId: myUserId, activeDrawerName: userName }));
+      } else if (action === 'release') {
+        setWbState((prev) => ({ ...prev, activeDrawerId: null, activeDrawerName: null }));
+      } else if (action === 'stroke' && stroke) {
+        setWbState((prev) => ({ ...prev, strokes: [...prev.strokes, stroke] }));
+      } else if (action === 'clear') {
+        setWbState((prev) => ({ ...prev, strokes: [], clearedAt: Date.now() }));
+      }
+      return true;
+    }
+
+    try {
+      const res = await fetch(`/api/calls/${encodeURIComponent(cid)}/whiteboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          userId: myUserId,
+          userName,
+          stroke,
+        }),
+      });
+      const data = await res.json();
+      if (data?.whiteboard) {
+        setWbState({
+          activeDrawerId: data.whiteboard.activeDrawerId || null,
+          activeDrawerName: data.whiteboard.activeDrawerName || null,
+          strokes: Array.isArray(data.whiteboard.strokes) ? data.whiteboard.strokes : [],
+          clearedAt: data.whiteboard.clearedAt || 0,
+        });
+      }
+      if (!data?.success && data?.error) {
+        setWbLockNotice(data.error);
+        setTimeout(() => setWbLockNotice(''), 2500);
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
   };
 
-  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
+  const getCanvasPoint = (clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / Math.max(1, rect.width);
+    const scaleY = canvas.height / Math.max(1, rect.height);
+    return {
+      x: Math.round((clientX - rect.left) * scaleX * 10) / 10,
+      y: Math.round((clientY - rect.top) * scaleY * 10) / 10,
+    };
+  };
+
+  // Whiteboard single-drawer drawing handlers
+  const handleCanvasPointerDown = async (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!canDrawOnWhiteboard) {
+      setWbLockNotice(`🔒 ${wbState.activeDrawerName || 'Người khác'} đang vẽ — Chỉ 1 người được vẽ lúc này!`);
+      setTimeout(() => setWbLockNotice(''), 2500);
+      return;
+    }
+    if (!isMyWhiteboardLock) {
+      const granted = await callWhiteboardApi('claim');
+      if (!granted) return;
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    const pt = getCanvasPoint(e.clientX, e.clientY);
+    activeStrokePointsRef.current = [pt];
+    setIsDrawing(true);
+    ctx.beginPath();
+    ctx.moveTo(pt.x, pt.y);
+  };
+
+  const handleCanvasPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawing || !canDrawOnWhiteboard) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const pt = getCanvasPoint(e.clientX, e.clientY);
+    activeStrokePointsRef.current.push(pt);
     ctx.lineWidth = brushSize;
     ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.strokeStyle = drawColor;
-    ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+    ctx.lineTo(pt.x, pt.y);
     ctx.stroke();
   };
 
-  const handleCanvasMouseUp = () => {
+  const handleCanvasPointerUp = () => {
+    if (!isDrawing) return;
     setIsDrawing(false);
+    const pts = activeStrokePointsRef.current;
+    activeStrokePointsRef.current = [];
+    if (pts.length > 0 && canDrawOnWhiteboard) {
+      const stroke = {
+        id: 'st-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+        color: drawColor,
+        size: brushSize,
+        points: pts,
+      };
+      callWhiteboardApi('stroke', stroke);
+    }
   };
 
   const handleClearWhiteboard = () => {
+    if (!canDrawOnWhiteboard) {
+      setWbLockNotice(`Chỉ ${wbState.activeDrawerName || 'người đang giữ bút'} mới được xóa bảng!`);
+      setTimeout(() => setWbLockNotice(''), 2500);
+      return;
+    }
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx?.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    callWhiteboardApi('clear');
   };
 
   // Send In-Call Chat Message
@@ -928,7 +1140,14 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
   const handleEndCall = async () => {
     const reason = callStatus === 'ringing' && role === 'caller' ? 'cancelled' : 'ended';
     setCallStatus('ended');
-    if (activeCallIdRef.current) {
+    if (isMyWhiteboardLock && activeCallIdRef.current) {
+      fetch(`/api/calls/${encodeURIComponent(activeCallIdRef.current)}/whiteboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'release', userId: myUserId, userName }),
+      }).catch(() => {});
+    }
+    if (activeCallIdRef.current && !roomCallKey) {
       fetch(`/api/calls/${encodeURIComponent(activeCallIdRef.current)}/end`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1090,64 +1309,117 @@ export const VideoAudioCallModal: React.FC<VideoAudioCallModalProps> = ({
               </div>
             )}
 
-            {/* Interactive Whiteboard Canvas Overlay */}
+            {/* Interactive Single-Drawer Whiteboard Canvas Overlay */}
             {showWhiteboard ? (
               <div className="w-full h-full rounded-2xl bg-slate-900 border border-white/20 flex flex-col relative overflow-hidden shadow-2xl">
-                <div className="py-2 px-3 bg-zinc-800/90 border-b border-white/10 flex items-center justify-between gap-2 flex-wrap text-xs">
-                  <div className="flex items-center gap-2">
+                <div className="py-2 px-3 bg-zinc-800/95 border-b border-white/10 flex items-center justify-between gap-2 flex-wrap text-xs">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-black text-amber-400 flex items-center gap-1">
-                      <Edit3 className="w-4 h-4" /> Bảng Viết Giải Bài &amp; Vẽ Hình
+                      <Edit3 className="w-4 h-4" /> Bảng Vẽ 1 Người
                     </span>
-                    <div className="flex items-center gap-1.5 ml-2">
-                      {['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ffffff'].map((color) => (
-                        <button
-                          key={color}
-                          type="button"
-                          onClick={() => setDrawColor(color)}
-                          className={`w-5 h-5 rounded-full border transition-transform ${
-                            drawColor === color ? 'scale-125 border-white ring-2 ring-white/50' : 'border-black/40'
-                          }`}
-                          style={{ backgroundColor: color }}
-                        />
-                      ))}
-                    </div>
-                    <select
-                      value={brushSize}
-                      onChange={(e) => setBrushSize(Number(e.target.value))}
-                      className="bg-zinc-700 text-white rounded-lg px-2 py-0.5 text-xs outline-none"
-                    >
-                      <option value={2}>Nét mảnh (2px)</option>
-                      <option value={4}>Nét vừa (4px)</option>
-                      <option value={8}>Nét đậm (8px)</option>
-                    </select>
+
+                    {wbState.activeDrawerId ? (
+                      isMyWhiteboardLock ? (
+                        <span className="px-2 py-0.5 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-bold text-[11px]">
+                          ✅ Bạn đang giữ bút (Người khác chỉ xem)
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-lg bg-rose-500/20 border border-rose-400/40 text-rose-300 font-bold text-[11px]">
+                          🔒 {wbState.activeDrawerName} đang vẽ (Bạn bị khóa vẽ)
+                        </span>
+                      )
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-lg bg-white/10 text-slate-300 font-semibold text-[11px]">
+                        Trống · Chỉ 1 người được vẽ mỗi lượt
+                      </span>
+                    )}
+
+                    {canDrawOnWhiteboard && (
+                      <>
+                        <div className="flex items-center gap-1.5 ml-1">
+                          {['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ffffff'].map((color) => (
+                            <button
+                              key={color}
+                              type="button"
+                              onClick={() => setDrawColor(color)}
+                              className={`w-5 h-5 rounded-full border transition-transform cursor-pointer ${
+                                drawColor === color ? 'scale-125 border-white ring-2 ring-white/50' : 'border-black/40'
+                              }`}
+                              style={{ backgroundColor: color }}
+                            />
+                          ))}
+                        </div>
+                        <select
+                          value={brushSize}
+                          onChange={(e) => setBrushSize(Number(e.target.value))}
+                          className="bg-zinc-700 text-white rounded-lg px-2 py-0.5 text-xs outline-none"
+                        >
+                          <option value={2}>Nét mảnh (2px)</option>
+                          <option value={4}>Nét vừa (4px)</option>
+                          <option value={8}>Nét đậm (8px)</option>
+                        </select>
+                      </>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleClearWhiteboard}
-                      className="px-2.5 py-1 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white text-xs font-bold transition-all"
-                    >
-                      Xóa bảng
-                    </button>
+                  <div className="flex items-center gap-1.5">
+                    {!wbState.activeDrawerId && (
+                      <button
+                        type="button"
+                        onClick={() => callWhiteboardApi('claim')}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all cursor-pointer"
+                      >
+                        ✏️ Nhận quyền vẽ
+                      </button>
+                    )}
+
+                    {isMyWhiteboardLock && (
+                      <button
+                        type="button"
+                        onClick={() => callWhiteboardApi('release')}
+                        className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all cursor-pointer"
+                      >
+                        🤝 Nhường quyền vẽ
+                      </button>
+                    )}
+
+                    {canDrawOnWhiteboard && (
+                      <button
+                        type="button"
+                        onClick={handleClearWhiteboard}
+                        className="px-2.5 py-1 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white text-xs font-bold transition-all cursor-pointer"
+                      >
+                        Xóa bảng
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => setShowWhiteboard(false)}
-                      className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all"
+                      className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all cursor-pointer"
                     >
                       Trở lại Video
                     </button>
                   </div>
                 </div>
 
+                {wbLockNotice && (
+                  <div className="px-3 py-1.5 bg-rose-600/90 text-white text-xs font-bold text-center">
+                    {wbLockNotice}
+                  </div>
+                )}
+
                 <canvas
                   ref={canvasRef}
                   width={960}
                   height={540}
-                  onMouseDown={handleCanvasMouseDown}
-                  onMouseMove={handleCanvasMouseMove}
-                  onMouseUp={handleCanvasMouseUp}
-                  className="flex-1 w-full h-full bg-[#1e2330] cursor-crosshair touch-none"
+                  onPointerDown={handleCanvasPointerDown}
+                  onPointerMove={handleCanvasPointerMove}
+                  onPointerUp={handleCanvasPointerUp}
+                  onPointerLeave={handleCanvasPointerUp}
+                  className={`flex-1 w-full h-full bg-[#1e2330] touch-none ${
+                    canDrawOnWhiteboard ? 'cursor-crosshair' : 'cursor-not-allowed opacity-95'
+                  }`}
                 />
               </div>
             ) : roomType === 'group' ? (

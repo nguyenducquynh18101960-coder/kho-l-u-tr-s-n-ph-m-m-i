@@ -73,6 +73,7 @@ import {
   Volume2,
   Headphones,
   ChevronRight,
+  Palette,
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { getVisibleHolidays } from './HolidayGiftAnimationModal';
@@ -111,6 +112,17 @@ import {
   deleteClassSeatingPlan,
 } from '../../data/classSystemData';
 import { formatAccurateTime } from '../../utils/timeFormat';
+import { CountryCode } from '../../data/countryCultures';
+import {
+  UserDecorationConfig,
+  loadLocalDecorations,
+  getMemberDecoration,
+  getNameplateById,
+} from '../../data/profileDecorations';
+import { NameplateBannerStrip, UserBadgesStrip } from './ProfileDecorationSystem';
+import { ProfileDecorationModal } from './ProfileDecorationModal';
+import { loadStudentAchievements } from '../../data/initialAchievements';
+import { calculateLevel } from '../../types/achievements';
 
 /** Helper to strictly detect and exclude AI bots and assistants from friend search and peer discovery */
 export const isAiEntity = (member: { id?: string; name?: string; isAi?: boolean; role?: string }) => {
@@ -313,10 +325,11 @@ interface GroupChatStudioProps {
   onExitFullscreen?: () => void;
   hideInnerSidebar?: boolean;
   autoUpdateNotice?: string | null;
-  onOpenOfferModal?: () => void;
   onOpenStoreModal?: () => void;
   onOpenPricingModal?: () => void;
   onOpenIntroModal?: () => void;
+  countryCode?: CountryCode;
+  bilingualMode?: boolean;
 }
 
 const STORAGE_KEY_GROUPS = 'max10_real_groups_v15';
@@ -360,10 +373,11 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
   onExitFullscreen,
   hideInnerSidebar = false,
   autoUpdateNotice,
-  onOpenOfferModal,
   onOpenStoreModal,
   onOpenPricingModal,
   onOpenIntroModal,
+  countryCode = 'VN',
+  bilingualMode = true,
 }) => {
   // Purge any stale fake seeded chats and legacy auto-created "Nhóm Học Tập Chính Thức" groups
   const deletedGroupIdsRef = useRef<Set<string>>(new Set());
@@ -436,6 +450,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
   const [adminBroadcastMessages, setAdminBroadcastMessages] = useState<DirectChatMessage[]>([]);
   const [adminQuickBroadcastText, setAdminQuickBroadcastText] = useState<string>('');
   const [isSendingBroadcast, setIsSendingBroadcast] = useState<boolean>(false);
+  const [publishUpdateAsAdmin, setPublishUpdateAsAdmin] = useState<boolean>(false);
 
   // @Mention autocomplete state (works in Group/Community AND Direct chats)
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -443,7 +458,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
   // Communities Directory & Admin Game Pinning / Approval / Management state
   const [showCommunitiesView, setShowCommunitiesView] = useState<boolean>(false);
-  const [communityCategoryFilter, setCommunityCategoryFilter] = useState<'all' | 'game' | 'study' | 'pending'>('all');
+  const [communityCategoryFilter, setCommunityCategoryFilter] = useState<'all' | 'game' | 'chat' | 'study' | 'pending'>('all');
   const [communityPlatformFilter, setCommunityPlatformFilter] = useState<'all' | 'Cross-Platform' | 'Mobile' | 'PC' | 'Console'>('all');
   const [communitySearchQuery, setCommunitySearchQuery] = useState<string>('');
   const [newCommunityPlatform, setNewCommunityPlatform] = useState<'Cross-Platform' | 'Mobile' | 'PC' | 'Console'>('Cross-Platform');
@@ -457,7 +472,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
   const [editCommForm, setEditCommForm] = useState<{
     name: string;
     description: string;
-    communityCategory: 'game' | 'study';
+    communityCategory: 'game' | 'study' | 'chat';
     gameTitle: string;
     gamePlatform: string;
     gameGenre: string;
@@ -542,7 +557,33 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     typeof window !== 'undefined' ? window.innerWidth >= 1200 : false
   );
   const [rightDrawerTab, setRightDrawerTab] = useState<'members' | 'files'>('members');
-  const [discordChannel, setDiscordChannel] = useState<'general' | 'ai_tutor' | 'duel'>('general');
+  const [discordChannel, setDiscordChannel] = useState<'admin_news' | 'general' | 'ai_tutor' | 'duel'>('general');
+  const [myDecoration, setMyDecoration] = useState<UserDecorationConfig>(() =>
+    loadLocalDecorations(isRealAdmin)
+  );
+  const [peerDecorationsMap, setPeerDecorationsMap] = useState<Record<string, UserDecorationConfig>>({});
+  const [showDecorationModal, setShowDecorationModal] = useState<boolean>(false);
+
+  const currentUserLevel = useMemo(() => {
+    if (isRealAdmin) return 99;
+    try {
+      const stats = loadStudentAchievements();
+      return calculateLevel(stats.totalXp).level;
+    } catch {
+      return 1;
+    }
+  }, [isRealAdmin]);
+
+  const resolveMemberDecoration = (
+    memberId: string,
+    role?: string,
+    isAi?: boolean,
+    _name?: string
+  ): UserDecorationConfig => {
+    if (memberId === activeUserId) return myDecoration;
+    if (peerDecorationsMap[memberId]) return peerDecorationsMap[memberId];
+    return getMemberDecoration({ id: memberId, role, isAi });
+  };
   const [collapsedDiscordCats, setCollapsedDiscordCats] = useState<{
     text: boolean;
     voice: boolean;
@@ -562,6 +603,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     targetName: string;
     targetAvatar?: string;
     targetBadge?: string;
+    roomCallKey?: string;
     participants?: CallParticipant[];
   } | null>(null);
   const [repliedAdminThreads, setRepliedAdminThreads] = useState<Record<string, number>>(() => {
@@ -725,6 +767,8 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       if (e.key === 'Escape') {
         if (callModal) {
           setCallModal(null);
+        } else if (showDecorationModal) {
+          setShowDecorationModal(false);
         } else if (groupToDelete) {
           setGroupToDelete(null);
         } else if (userToUnfriend) {
@@ -877,10 +921,30 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           }
         }
       }
+      // Fetch Member Profile Decorations (Nameplates, Avatar Frames, Badges)
+      const resDeco = await fetch('/api/profile/decorations');
+      if (resDeco.ok) {
+        const dataDeco = await resDeco.json();
+        if (dataDeco?.success && dataDeco.decorations) {
+          setPeerDecorationsMap(dataDeco.decorations);
+        }
+      }
     } catch (e) {
       // Offline fallback
     }
   };
+
+  // Sync own profile decoration when updated in modal
+  useEffect(() => {
+    setMyDecoration(loadLocalDecorations(isRealAdmin));
+    const onDecoUpdated = (e: Event) => {
+      const detail = (e as CustomEvent<UserDecorationConfig>).detail;
+      if (detail) setMyDecoration(detail);
+      else setMyDecoration(loadLocalDecorations(isRealAdmin));
+    };
+    window.addEventListener('max10:decorations-updated', onDecoUpdated);
+    return () => window.removeEventListener('max10:decorations-updated', onDecoUpdated);
+  }, [isRealAdmin]);
 
   // Search REAL users by name only (No fake users, no grade/class required!)
   const searchUsersByName = async (nameQuery: string = '') => {
@@ -1075,10 +1139,10 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     };
 
     const onOpenCommunities = (e: Event) => {
-      const detail = (e as CustomEvent<{ category?: 'all' | 'game' | 'study' | 'pending' }>).detail;
+      const detail = (e as CustomEvent<{ category?: 'all' | 'game' | 'chat' | 'study' | 'pending' }>).detail;
       if (detail?.category) {
         setCommunityCategoryFilter(detail.category);
-        if (detail.category === 'study') setCommunityPlatformFilter('all');
+        if (detail.category === 'study' || detail.category === 'chat') setCommunityPlatformFilter('all');
       }
       setShowCommunitiesView(true);
     };
@@ -1518,7 +1582,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
   const [newGroupMode, setNewGroupMode] = useState<'class_homeroom' | 'study' | 'community'>(() =>
     isRealAdmin ? 'community' : isVerifiedTeacherOrAdmin ? 'class_homeroom' : 'study'
   );
-  const [newCommunityCategory, setNewCommunityCategory] = useState<'study' | 'game'>('study');
+  const [newCommunityCategory, setNewCommunityCategory] = useState<'study' | 'game' | 'chat'>('study');
   const [newGroupName, setNewGroupName] = useState<string>('');
   const [newGroupSubject, setNewGroupSubject] = useState<string>('Toán học');
   const [newGroupGrade, setNewGroupGrade] = useState<GradeLevel>(currentGrade);
@@ -1593,6 +1657,11 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
   const approvedGameCommunities = useMemo(
     () => approvedCommunities.filter((c) => c.communityCategory === 'game'),
+    [approvedCommunities]
+  );
+
+  const approvedChatCommunities = useMemo(
+    () => approvedCommunities.filter((c) => c.communityCategory === 'chat'),
     [approvedCommunities]
   );
 
@@ -1720,14 +1789,16 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
   const handleOpenEditCommunity = (comm: ChatGroup) => {
     setEditingCommunity(comm);
+    const cat: 'game' | 'study' | 'chat' =
+      comm.communityCategory === 'game' ? 'game' : comm.communityCategory === 'chat' ? 'chat' : 'study';
     setEditCommForm({
       name: comm.name || '',
       description: comm.description || '',
-      communityCategory: comm.communityCategory === 'study' ? 'study' : 'game',
+      communityCategory: cat,
       gameTitle: comm.gameTitle || '',
       gamePlatform: comm.gamePlatform || 'Cross-Platform',
       gameGenre: comm.gameGenre || '',
-      avatarIcon: comm.avatarIcon || (comm.communityCategory === 'game' ? '🎮' : '📚'),
+      avatarIcon: comm.avatarIcon || (cat === 'game' ? '🎮' : cat === 'chat' ? '💬' : '📚'),
       pinnedNotice: comm.pinnedNotice || '',
       isPinnedTrending: Boolean(comm.isPinnedTrending),
       trendingBadge: comm.trendingBadge || 'Thịnh hành',
@@ -1740,6 +1811,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
     const targetId = editingCommunity.id;
     const isGame = editCommForm.communityCategory === 'game';
+    const isChat = editCommForm.communityCategory === 'chat';
     const applyUpdate = (list: ChatGroup[]) =>
       list.map((g) =>
         g.id === targetId
@@ -1748,7 +1820,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
               name: editCommForm.name.trim(),
               description: editCommForm.description.trim(),
               communityCategory: editCommForm.communityCategory,
-              subject: isGame ? `Trò chơi · ${editCommForm.gamePlatform}` : 'Học tập',
+              subject: isGame ? `Trò chơi · ${editCommForm.gamePlatform}` : isChat ? 'Trò chuyện tự do' : 'Học tập',
               gameTitle: isGame ? editCommForm.gameTitle.trim() : undefined,
               gamePlatform: isGame ? editCommForm.gamePlatform : undefined,
               gameGenre: isGame ? editCommForm.gameGenre.trim() : undefined,
@@ -2043,13 +2115,14 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         setReplyingTo(null);
 
         if (isRealAdmin) {
+          const shouldPublishUpdate = publishUpdateAsAdmin;
           try {
             const res = await fetch('/api/admin/broadcast', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 content: text,
-                publishUpdate: false,
+                publishUpdate: shouldPublishUpdate,
                 senderId: ADMIN_ID,
                 senderName: `${ADMIN_NAME} (Quản trị viên)`,
                 senderAvatar: REAL_ADMIN_AVATAR,
@@ -2063,6 +2136,9 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 ...prev,
                 all_broadcast: [...(prev['all_broadcast'] || []), data.message],
               }));
+              if (shouldPublishUpdate) {
+                window.dispatchEvent(new CustomEvent('max10:admin-message', { detail: data.message }));
+              }
             }
           } catch (err) {}
           if (currentReply) {
@@ -2072,13 +2148,16 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
               localStorage.setItem(STORAGE_KEY_HIDDEN_BROADCAST_AT, String(hideAt));
             } catch {}
           }
+          setPublishUpdateAsAdmin(false);
           setTimeout(() => setIsSendingDm(false), 250);
           setToastMessage(
-            currentReply
+            shouldPublishUpdate
+              ? '📢 Đã phát Thông báo Cập nhật Hệ thống tới toàn bộ người dùng!'
+              : currentReply
               ? 'Đã trả lời tin nhắn trong kênh Admin & ẩn tin nhắn người khác gửi!'
               : 'Đã gửi tin nhắn Admin tới toàn bộ người dùng!'
           );
-          setTimeout(() => setToastMessage(''), 2500);
+          setTimeout(() => setToastMessage(''), 2800);
           return;
         }
       }
@@ -2163,11 +2242,13 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       setToastMessage(`Đã gửi tin nhắn tới ${activeFriend.name}`);
       setTimeout(() => setToastMessage(''), 2000);
 
-      // Check @Admin mention in DM/Broadcast (if sender is not Admin)
+      // Check @Admin mention OR direct message to Admin / Official Broadcast channel (if sender is not Admin)
       const lowerDm = text.toLowerCase();
       const isTaggingAdminDm =
         !isRealAdmin &&
-        (lowerDm.includes('@admin') ||
+        (activeFriend.id === 'all_broadcast' ||
+          activeFriend.id === ADMIN_ID ||
+          lowerDm.includes('@admin') ||
           lowerDm.includes('@mạc khánh duy') ||
           lowerDm.includes('@mac khanh duy'));
 
@@ -2193,9 +2274,11 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                message: `Bạn là Quản trị viên hệ thống Max10 AI (đang bật chế độ tự động trả lời). Người dùng "${activeUserName}" vừa nhắn @tag bạn trong "${activeFriend.name}": "${text}". Hãy trả lời thân thiện, ngắn gọn, giải đáp trực tiếp bằng tiếng Việt.`,
+                message: `Bạn là Quản trị viên hệ thống Max10 AI (đang bật chế độ tự động trả lời). Người dùng "${activeUserName}" vừa nhắn cho bạn trong "${activeFriend.name}": "${text}". Hãy trả lời thân thiện, ngắn gọn, giải đáp trực tiếp bằng tiếng Việt.`,
                 grade: currentGrade,
                 subject: 'Tổng hợp',
+                countryCode,
+                bilingualMode,
               }),
             });
             const dataAdmin = await resAdmin.json();
@@ -2253,9 +2336,12 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              message: `Bạn là Max10 AI - Gia sư Điểm 10 THCS được gọi vào cuộc trò chuyện 1-1 giữa "${activeUserName}" và "${activeFriend.name}". Nội dung hỏi: "${text}". Hãy giải bài chi tiết, ngắn gọn, dễ hiểu bằng tiếng Việt.`,
+              message: `Bạn là Max10 AI - Gia sư Điểm 10 THCS được gọi vào cuộc trò chuyện 1-1 giữa "${activeUserName}" và "${activeFriend.name}". Nội dung hỏi: "${text}". Hãy giải bài chi tiết, ngắn gọn, dễ hiểu.`,
               grade: currentGrade,
               subject: 'Toán',
+              countryCode,
+              bilingualMode,
+              userName: activeUserName,
             }),
           });
           const dataAi = await resAi.json();
@@ -2404,14 +2490,29 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
     const lower = text.toLowerCase();
 
-    // Trigger @Admin (Mạc Khánh Duy) in Community / Group when tagged:
+    // Trigger @Admin (Mạc Khánh Duy) in Community / Group when tagged OR inside #thông-báo-admin:
     // If Admin Auto-Reply is ON -> automatically answer as Admin; if OFF -> notify Admin for manual self-reply!
     const isTaggingAdmin =
       !isRealAdmin &&
-      (lower.includes('@admin') ||
+      (discordChannel === 'admin_news' ||
+        lower.includes('@admin') ||
         lower.includes('@quản trị viên') ||
         lower.includes('@mạc khánh duy') ||
         lower.includes('@mac khanh duy'));
+
+    if (isRealAdmin && discordChannel === 'admin_news') {
+      fetch('/api/admin/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: text,
+          publishUpdate: true,
+          senderId: ADMIN_ID,
+          senderName: `${ADMIN_NAME} (Quản trị viên)`,
+          senderAvatar: REAL_ADMIN_AVATAR,
+        }),
+      }).catch(() => {});
+    }
 
     if (isTaggingAdmin) {
       let shouldAutoReply = adminAutoReplyEnabled;
@@ -2481,35 +2582,63 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       }
     }
 
-    // Trigger @Max10 AI in group ONLY when explicitly tagged with @Max10 AI or @AI
+    // Trigger @Max10 AI in group/community when explicitly tagged OR inside #hoi-max10-ai channel
     const isTaggingAi =
       lower.includes('@max10 ai') ||
       lower.includes('@max10') ||
-      /(^|\s)@ai(\s|$|[.,!?])/.test(lower);
+      /(^|\s)@ai(\s|$|[.,!?])/.test(lower) ||
+      (discordChannel === 'ai_tutor' && !isTaggingAdmin);
 
     if (isTaggingAi) {
       setIsAiReplying(true);
       try {
+        const commCat: 'game' | 'chat' | 'study' =
+          activeGroup.communityCategory === 'game'
+            ? 'game'
+            : activeGroup.communityCategory === 'chat'
+            ? 'chat'
+            : 'study';
+        const recentHistory = [...(groupMessages[activeGroupId] || []), userMsg]
+          .filter((m) => !m.isSystemNotice)
+          .slice(-8)
+          .map((m) => ({
+            role: m.isAi || m.senderRole === 'ai_tutor' ? 'assistant' : 'user',
+            content: `${m.senderName}: ${m.content}`,
+          }));
+
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            message: `Bạn là Max10 AI - trợ lý học tập trong nhóm lớp "${activeGroup.name}". Học sinh "${activeUserName}" vừa tag bạn: "${text}". Hãy giải thích ngắn gọn, rõ ràng và dễ hiểu bằng tiếng Việt.`,
+            message: text,
+            messages: recentHistory,
             grade: currentGrade,
-            subject: activeGroup.subject || 'Toán',
+            subject: activeGroup.subject || (commCat === 'game' ? 'Game' : commCat === 'chat' ? 'Trò chuyện' : 'Toán'),
+            userName: activeUserName,
+            countryCode,
+            bilingualMode,
+            communityContext: {
+              isCommunity: Boolean(activeGroup.isCommunity),
+              category: commCat,
+              name: activeGroup.name,
+              gameTitle: activeGroup.gameTitle,
+              gamePlatform: activeGroup.gamePlatform,
+              gameGenre: activeGroup.gameGenre,
+              description: activeGroup.description,
+            },
           }),
         });
         const data = await res.json();
         const aiText =
           data?.reply ||
           data?.text ||
-          `Chào **${activeUserName}**! Mình đã nhận được câu hỏi của bạn trong nhóm **${activeGroup.name}**. Hãy gửi thêm đề bài chi tiết để mình hướng dẫn từng bước đạt Điểm 10 nhé!`;
+          `Chào **${activeUserName}**! Mình đã có mặt trong **${activeGroup.name}** để thảo luận cùng mọi người theo đúng chủ đề rồi đây!`;
 
         const aiGroupReply: GroupChatMessage = {
           id: 'ai-group-' + Date.now(),
           groupId: activeGroupId,
           senderId: 'ai-max10-group',
-          senderName: 'Max10 AI (AI trong nhóm)',
+          senderName: 'Max10 AI (AI trong cộng đồng)',
           senderAvatar: '/max10-avatar.jpg',
           senderRole: 'ai_tutor',
           isAi: true,
@@ -2536,24 +2665,27 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     }
   };
 
-  // Create a new group or official Admin Community (Game / Study)
+  // Create a new group or official Admin Community (Game / Chat / Study)
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGroupName.trim()) return;
 
-    // MODE A: ADMIN CREATES OFFICIAL MULTI-USER COMMUNITY (NO AI MEMBERS)
+    // MODE A: ADMIN CREATES OFFICIAL MULTI-USER COMMUNITY
     if (isRealAdmin && newGroupMode === 'community') {
-      const catLabel = newCommunityCategory === 'game' ? 'Trò chơi' : 'Học tập';
-      const defaultEmoji = newCommunityCategory === 'game' ? '🎮' : '📚';
       const isGameComm = newCommunityCategory === 'game';
+      const isChatComm = newCommunityCategory === 'chat';
+      const catLabel = isGameComm ? 'Trò chơi' : isChatComm ? 'Trò chuyện tự do' : 'Học tập';
+      const defaultEmoji = isGameComm ? '🎮' : isChatComm ? '💬' : '📚';
       const communityPayload: ChatGroup = {
         id: 'community-' + Date.now(),
         name: newGroupName.trim(),
         description:
           newGroupDesc.trim() ||
           (isGameComm
-            ? `Cộng đồng game ${newCommunityGameTitle.trim() || newGroupName.trim()} (${newCommunityPlatform}) do Quản trị viên Max10 lập — Mở cho tất cả game thủ người thật (không có AI giả).`
-            : `Cộng đồng ${catLabel} do Quản trị viên Max10 lập — Mở cho tất cả thành viên người thật (không có AI giả).`),
+            ? `Cộng đồng game ${newCommunityGameTitle.trim() || newGroupName.trim()} (${newCommunityPlatform}) — Thảo luận về trò chơi cùng mọi người & @Max10 AI.`
+            : isChatComm
+            ? `Cộng đồng trò chuyện tự do do Quản trị viên Max10 lập — Giao lưu, tâm sự thoải mái cùng mọi người & @Max10 AI.`
+            : `Cộng đồng Học tập do Quản trị viên Max10 lập — Thảo luận bài vở, giải đề cùng mọi người & @Max10 AI.`),
         grade: newGroupGrade,
         subject: isGameComm ? `Trò chơi · ${newCommunityPlatform}` : catLabel,
         createdAt: Date.now(),
@@ -2583,8 +2715,10 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         code: 'CD-' + Math.floor(1000 + Math.random() * 9000),
         onlyAdminCanAdd: false,
         pinnedNotice: isGameComm
-          ? `🎮 Cộng đồng ${newCommunityGameTitle.trim() || newGroupName.trim()} (${newCommunityPlatform}) do Quản trị viên Max10 lập — Rủ bạn chơi chung & gõ @Admin khi cần hỗ trợ!`
-          : `🌐 Cộng đồng ${catLabel} do Quản trị viên Max10 lập — Gõ @Admin khi cần hỗ trợ hoặc cùng thành viên người thật trao đổi!`,
+          ? `🎮 Cộng đồng Game ${newCommunityGameTitle.trim() || newGroupName.trim()} (${newCommunityPlatform}) — Thảo luận về trò chơi! Gõ @Max10 AI hoặc @Admin bất cứ lúc nào.`
+          : isChatComm
+          ? `💬 Cộng đồng Trò chuyện tự do — Giao lưu vui vẻ, thân thiện! Gõ @Max10 AI hoặc @Admin để trò chuyện cùng.`
+          : `📚 Cộng đồng Học tập — Thảo luận kiến thức, giải bài tập! Gõ @Max10 AI hoặc @Admin khi cần hỗ trợ.`,
         members: [
           {
             id: ADMIN_ID,
@@ -3186,7 +3320,13 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         ? '⚪ Đang offline'
         : '🟢 Đang trực tuyến')
     : activeGroup?.isCommunity
-    ? `🌐 Cộng đồng ${activeGroup.communityCategory === 'game' ? 'Trò chơi' : 'Học tập'} · ${(activeGroup?.members || []).filter((m) => !isAiEntity(m)).length} người thật (Không AI)`
+    ? `🌐 Cộng đồng ${
+        activeGroup.communityCategory === 'game'
+          ? 'Trò chơi'
+          : activeGroup.communityCategory === 'chat'
+          ? 'Trò chuyện tự do'
+          : 'Học tập'
+      } · ${(activeGroup?.members || []).filter((m) => !isAiEntity(m)).length} người thật · Gõ @Max10 AI để AI thảo luận theo chủ đề`
     : `👥 ${(activeGroup?.members || []).filter((m) => !isAiEntity(m)).length} thành viên · ${activeGroup?.subject || 'Học tập'}`;
 
   // Filtered messages in active conversation for in-chat search & hiding replied messages from other users in Admin channel
@@ -3213,12 +3353,45 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         !(m.senderId || '').startsWith('teacher-') &&
         !(m.senderId || '').startsWith('std-')
     );
-    if (!chatSearchText.trim()) return cleanMsgs;
+
+    let scopedMsgs = cleanMsgs;
+    if (discordChannel === 'admin_news') {
+      const broadcastAsGroup: GroupChatMessage[] = (adminBroadcastMessages || []).map((bm) => ({
+        id: `adm-ch-${bm.id}`,
+        groupId: activeGroupId,
+        senderId: bm.senderId || ADMIN_ID,
+        senderName: bm.senderName || 'Quản trị viên Max10',
+        senderAvatar: bm.senderAvatar || REAL_ADMIN_AVATAR,
+        senderRole: 'admin',
+        isAi: false,
+        content: normalizeLegacyBroadcastText(bm.content),
+        createdAt: bm.createdAt || Date.now(),
+        timestamp: formatAccurateTime(bm.createdAt, bm.timestamp),
+      }));
+      const groupAdminMsgs = cleanMsgs.filter(
+        (m) =>
+          m.senderRole === 'admin' ||
+          m.senderId === ADMIN_ID ||
+          m.isSystemNotice ||
+          m.senderId === activeUserId ||
+          (m.content || '').toLowerCase().includes('@admin')
+      );
+      const seenIds = new Set<string>();
+      scopedMsgs = [...broadcastAsGroup, ...groupAdminMsgs]
+        .filter((m) => {
+          if (seenIds.has(m.id)) return false;
+          seenIds.add(m.id);
+          return true;
+        })
+        .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    }
+
+    if (!chatSearchText.trim()) return scopedMsgs;
     const q = chatSearchText.toLowerCase();
-    return cleanMsgs.filter(
+    return scopedMsgs.filter(
       (m) => m.content.toLowerCase().includes(q) || m.senderName.toLowerCase().includes(q)
     );
-  }, [messages, chatSearchText]);
+  }, [messages, chatSearchText, discordChannel, adminBroadcastMessages, activeGroupId, activeUserId]);
 
   // Compute live @mention candidates across ALL chats (ALWAYS includes Admin + Max10 AI + real human members)
   const mentionCandidates = useMemo(() => {
@@ -3647,12 +3820,15 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           <div className="flex flex-col items-center gap-2 w-full">
             {groups.map((g) => {
               const isSelectedServer = activeMode === 'group' && activeGroupId === g.id && !showCommunitiesView;
+              const hasMessagesInServer = (groupMessages[g.id] || []).length > 0;
               return (
                 <div key={g.id} className="relative flex items-center justify-center w-full group">
                   <span
                     className={`absolute left-0 rounded-r-full transition-all duration-200 ${
                       isSelectedServer
                         ? 'h-10 w-1 bg-slate-900 dark:bg-white'
+                        : hasMessagesInServer
+                        ? 'h-2 w-1 bg-slate-900 dark:bg-white group-hover:h-5'
                         : 'h-0 group-hover:h-5 w-1 bg-slate-900 dark:bg-white'
                     }`}
                   />
@@ -3672,17 +3848,37 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                         ? 'rounded-[24px] hover:rounded-[16px] bg-[#313338] text-[#dbdee1] hover:bg-[#5865f2] hover:text-white'
                         : 'rounded-[24px] hover:rounded-[16px] bg-white text-slate-800 hover:bg-[#5865f2] hover:text-white shadow-2xs'
                     }`}
-                    title={`${g.name}${g.isCommunity ? (g.communityCategory === 'game' ? ' · Cộng đồng Game' : ' · Cộng đồng') : ' · Nhóm'}`}
+                    title={`${g.name}${
+                      g.isCommunity
+                        ? g.communityCategory === 'game'
+                          ? ' · Cộng đồng Trò chơi'
+                          : g.communityCategory === 'chat'
+                          ? ' · Cộng đồng Trò chuyện tự do'
+                          : ' · Cộng đồng Học tập'
+                        : ' · Nhóm'
+                    }`}
                   >
-                    <span>{g.avatarIcon || (g.communityCategory === 'game' ? '🎮' : '📚')}</span>
-                    {g.isPinnedTrending && (
+                    <span>
+                      {g.avatarIcon ||
+                        (g.communityCategory === 'game'
+                          ? '🎮'
+                          : g.communityCategory === 'chat'
+                          ? '💬'
+                          : '📚')}
+                    </span>
+                    {g.isPinnedTrending ? (
                       <span
                         className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#23a559] border-2 border-[#e3e5e8] dark:border-[#1e1f22] flex items-center justify-center text-[8px] text-white font-black"
                         title="Thịnh hành"
                       >
                         ★
                       </span>
-                    )}
+                    ) : hasMessagesInServer && !isSelectedServer ? (
+                      <span
+                        className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#da373c] border-2 border-[#e3e5e8] dark:border-[#1e1f22]"
+                        title="Có tin nhắn mới"
+                      />
+                    ) : null}
                   </button>
                 </div>
               );
@@ -3690,6 +3886,83 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           </div>
 
           <div className={`w-8 h-[2px] rounded-full shrink-0 my-0.5 ${isDark ? 'bg-[#35363c]' : 'bg-slate-300'}`} />
+
+          {/* Discord Community Category Quick Access (Trò chơi · Trò chuyện tự do · Học tập) */}
+          {[
+            {
+              cat: 'game' as const,
+              emoji: '🎮',
+              title: 'Cộng đồng Trò chơi',
+              activeBg: 'bg-[#23a559]',
+            },
+            {
+              cat: 'chat' as const,
+              emoji: '💬',
+              title: 'Cộng đồng Trò chuyện tự do',
+              activeBg: 'bg-sky-500',
+            },
+            {
+              cat: 'study' as const,
+              emoji: '📚',
+              title: 'Cộng đồng Học tập',
+              activeBg: 'bg-indigo-500',
+            },
+          ].map((item) => {
+            const isCatSelected = showCommunitiesView && communityCategoryFilter === item.cat;
+            return (
+              <div key={item.cat} className="relative flex items-center justify-center w-full group">
+                <span
+                  className={`absolute left-0 rounded-r-full transition-all duration-200 ${
+                    isCatSelected
+                      ? 'h-10 w-1 bg-slate-900 dark:bg-white'
+                      : 'h-0 group-hover:h-5 w-1 bg-slate-900 dark:bg-white'
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCommunityCategoryFilter(item.cat);
+                    setShowCommunitiesView(true);
+                    setMobileShowChat(true);
+                  }}
+                  className={`w-12 h-12 flex items-center justify-center text-lg transition-all duration-200 cursor-pointer ${
+                    isCatSelected
+                      ? `rounded-[16px] ${item.activeBg} text-white shadow-sm`
+                      : isDark
+                      ? 'rounded-[24px] hover:rounded-[16px] bg-[#313338] text-[#dbdee1] hover:bg-[#5865f2] hover:text-white'
+                      : 'rounded-[24px] hover:rounded-[16px] bg-white text-slate-700 hover:bg-[#5865f2] hover:text-white shadow-2xs'
+                  }`}
+                  title={item.title}
+                >
+                  <span>{item.emoji}</span>
+                </button>
+              </div>
+            );
+          })}
+
+          {/* Discord Server Rail: Đấu trường Tri thức (Arena & Leaderboard) */}
+          <div className="relative flex items-center justify-center w-full group">
+            <button
+              type="button"
+              onClick={() => {
+                setShowCommunitiesView(false);
+                setDuelModalState({
+                  isOpen: true,
+                  contextType: activeGroup ? (activeGroup.isCommunity ? 'community' : 'group') : 'community',
+                  contextId: activeGroup?.id || 'global-arena',
+                  contextName: activeGroup?.name || 'Đấu trường Tri thức Max10',
+                });
+              }}
+              className={`w-12 h-12 rounded-[24px] hover:rounded-[16px] flex items-center justify-center transition-all duration-200 cursor-pointer ${
+                isDark
+                  ? 'bg-[#313338] text-amber-400 hover:bg-amber-500 hover:text-slate-950'
+                  : 'bg-white text-amber-600 hover:bg-amber-500 hover:text-white shadow-2xs'
+              }`}
+              title="Đấu trường Tri thức 1v1 & Bảng xếp hạng"
+            >
+              <Swords className="w-5 h-5" />
+            </button>
+          </div>
 
           {/* Discord Green '+' Add Server / Group Button */}
           <div className="relative flex items-center justify-center w-full group">
@@ -3704,64 +3977,6 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
               title="Tạo Server / Nhóm học tập mới"
             >
               <Plus className="w-6 h-6" />
-            </button>
-          </div>
-
-          {/* Discord Game Communities Button */}
-          <div className="relative flex items-center justify-center w-full group">
-            <span
-              className={`absolute left-0 rounded-r-full transition-all duration-200 ${
-                showCommunitiesView && communityCategoryFilter === 'game'
-                  ? 'h-10 w-1 bg-slate-900 dark:bg-white'
-                  : 'h-0 group-hover:h-5 w-1 bg-slate-900 dark:bg-white'
-              }`}
-            />
-            <button
-              type="button"
-              onClick={() => {
-                setCommunityCategoryFilter('game');
-                setShowCommunitiesView(true);
-                setMobileShowChat(true);
-              }}
-              className={`w-12 h-12 flex items-center justify-center transition-all duration-200 cursor-pointer ${
-                showCommunitiesView && communityCategoryFilter === 'game'
-                  ? 'rounded-[16px] bg-[#23a559] text-white shadow-sm'
-                  : isDark
-                  ? 'rounded-[24px] hover:rounded-[16px] bg-[#313338] text-[#23a559] hover:bg-[#23a559] hover:text-white'
-                  : 'rounded-[24px] hover:rounded-[16px] bg-white text-[#23a559] hover:bg-[#23a559] hover:text-white shadow-2xs'
-              }`}
-              title="Khám phá Cộng đồng Game (Trò chơi điện tử phổ biến & Thịnh hành)"
-            >
-              <Gamepad2 className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Discord Explore All Communities Compass Button */}
-          <div className="relative flex items-center justify-center w-full group">
-            <span
-              className={`absolute left-0 rounded-r-full transition-all duration-200 ${
-                showCommunitiesView && communityCategoryFilter !== 'game'
-                  ? 'h-10 w-1 bg-slate-900 dark:bg-white'
-                  : 'h-0 group-hover:h-5 w-1 bg-slate-900 dark:bg-white'
-              }`}
-            />
-            <button
-              type="button"
-              onClick={() => {
-                setCommunityCategoryFilter('all');
-                setShowCommunitiesView(true);
-                setMobileShowChat(true);
-              }}
-              className={`w-12 h-12 flex items-center justify-center transition-all duration-200 cursor-pointer ${
-                showCommunitiesView && communityCategoryFilter !== 'game'
-                  ? 'rounded-[16px] bg-[#23a559] text-white shadow-sm'
-                  : isDark
-                  ? 'rounded-[24px] hover:rounded-[16px] bg-[#313338] text-[#23a559] hover:bg-[#23a559] hover:text-white'
-                  : 'rounded-[24px] hover:rounded-[16px] bg-white text-[#23a559] hover:bg-[#23a559] hover:text-white shadow-2xs'
-              }`}
-              title="Khám phá tất cả Cộng đồng (Game & Học tập)"
-            >
-              <Compass className="w-5 h-5" />
             </button>
           </div>
         </div>
@@ -3872,18 +4087,23 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                     <div className="space-y-0.5">
                       {[
                         {
+                          id: 'admin_news' as const,
+                          label: 'thông-báo-admin',
+                          title: 'Thông báo hệ thống & Nhắn hỏi Admin',
+                        },
+                        {
                           id: 'general' as const,
-                          label: 'chat-chung',
-                          title: 'Kênh chat chính của nhóm / cộng đồng',
+                          label: 'thảo-luận-chung',
+                          title: 'Kênh thảo luận chung của cộng đồng / nhóm',
                         },
                         {
                           id: 'ai_tutor' as const,
-                          label: 'hoi-max10-ai',
-                          title: 'Gọi @Max10 AI giải bài trực tiếp trong server',
+                          label: 'hỏi-bài-ai',
+                          title: 'Hỏi bài trực tiếp cùng Gia sư @Max10 AI',
                         },
                         {
                           id: 'duel' as const,
-                          label: 'thi-dau-kien-thuc',
+                          label: 'thi-đấu-kiến-thức',
                           title: 'Mở kèo Thi đấu kiến thức cùng thành viên',
                         },
                       ].map((ch) => {
@@ -3948,7 +4168,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                       ) : (
                         <ChevronDown className="w-3 h-3" />
                       )}
-                      <span>Kênh thoại &amp; Video</span>
+                      <span>Kênh thoại &amp; Học nhóm</span>
                     </button>
                   </div>
 
@@ -3962,8 +4182,9 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                             type: 'voice',
                             roomType: 'group',
                             targetId: activeGroup.id,
-                            targetName: activeGroup.name,
+                            targetName: `${activeGroup.name} · Phòng Học Nhóm 1`,
                             targetBadge: activeConversationBadge,
+                            roomCallKey: `voice-${activeGroup.id}-study1`,
                             participants: activeGroup.members.map((m) => ({
                               id: m.id,
                               name: m.name,
@@ -3978,8 +4199,8 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                             : 'text-[#4e5058] hover:bg-[#e3e5e8] hover:text-slate-900'
                         }`}
                       >
-                        <Volume2 className="w-4 h-4 shrink-0 text-[#80848e]" />
-                        <span className="truncate">Phòng Học Thoại</span>
+                        <Volume2 className="w-4 h-4 shrink-0 text-[#23a559]" />
+                        <span className="truncate">Phòng Học Nhóm 1</span>
                       </button>
 
                       <button
@@ -3990,8 +4211,9 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                             type: 'video',
                             roomType: 'group',
                             targetId: activeGroup.id,
-                            targetName: activeGroup.name,
+                            targetName: `${activeGroup.name} · Kênh Thoại & Cam`,
                             targetBadge: activeConversationBadge,
+                            roomCallKey: `voice-${activeGroup.id}-cam`,
                             participants: activeGroup.members.map((m) => ({
                               id: m.id,
                               name: m.name,
@@ -4006,8 +4228,8 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                             : 'text-[#4e5058] hover:bg-[#e3e5e8] hover:text-slate-900'
                         }`}
                       >
-                        <Video className="w-4 h-4 shrink-0 text-[#80848e]" />
-                        <span className="truncate">Phòng Video Nhóm</span>
+                        <Video className="w-4 h-4 shrink-0 text-[#5865f2]" />
+                        <span className="truncate">Kênh Thoại &amp; Cam</span>
                       </button>
                     </div>
                   )}
@@ -4334,7 +4556,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
           {/* BOTTOM DISCORD USER STATUS & VOICE CONTROL DOCK */}
           <div
-            className={`h-[52px] px-2 flex items-center justify-between gap-1 shrink-0 border-t ${
+            className={`h-[56px] px-2 flex items-center justify-between gap-1 shrink-0 border-t ${
               isDark
                 ? 'bg-[#232428] border-[#1f2023] text-[#dbdee1]'
                 : 'bg-[#ebedef] border-slate-200/90 text-slate-900'
@@ -4345,6 +4567,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 name={activeUserName}
                 src={activeUserAvatar}
                 presenceStatus={userPresence}
+                frameId={myDecoration.frameId}
                 size="sm"
                 isEditable={true}
                 onStatusChange={handleUpdatePresenceStatus}
@@ -4352,12 +4575,25 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-bold truncate leading-tight">{activeUserName}</div>
                 <div className="text-[10px] text-[#949ba4] truncate leading-tight">
-                  {PRESENCE_STATUS_CONFIG[userPresence]?.label || 'Trực tuyến'}
+                  {PRESENCE_STATUS_CONFIG[userPresence]?.shortLabel || 'Online'}
                 </div>
               </div>
             </div>
 
             <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowDecorationModal(true)}
+                className={`w-7 h-7 rounded-[4px] flex items-center justify-center transition-colors cursor-pointer ${
+                  isDark
+                    ? 'text-amber-300 hover:bg-[#35373c] hover:text-amber-200'
+                    : 'text-[#5865f2] hover:bg-slate-300/60'
+                }`}
+                title="Trang trí hồ sơ (Ảnh đại diện, Khung viền, Dải nền tên & Huy hiệu)"
+              >
+                <Palette className="w-4 h-4" />
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -4366,7 +4602,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                   setToastMessage(next ? 'Đã tắt Micro' : 'Đã bật Micro');
                   setTimeout(() => setToastMessage(''), 1800);
                 }}
-                className={`w-8 h-8 rounded-[4px] flex items-center justify-center transition-colors cursor-pointer ${
+                className={`w-7 h-7 rounded-[4px] flex items-center justify-center transition-colors cursor-pointer ${
                   discordMicMuted
                     ? 'text-[#da373c] hover:bg-[#35373c]/40'
                     : isDark
@@ -4386,7 +4622,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                   setToastMessage(next ? 'Đã tắt âm thanh nghe' : 'Đã bật âm thanh nghe');
                   setTimeout(() => setToastMessage(''), 1800);
                 }}
-                className={`w-8 h-8 rounded-[4px] flex items-center justify-center transition-colors cursor-pointer relative ${
+                className={`w-7 h-7 rounded-[4px] flex items-center justify-center transition-colors cursor-pointer relative ${
                   discordDeafened
                     ? 'text-[#da373c] hover:bg-[#35373c]/40'
                     : isDark
@@ -4397,7 +4633,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
               >
                 <Headphones className="w-4 h-4" />
                 {discordDeafened && (
-                  <span className="absolute w-5 h-[2px] bg-[#da373c] rotate-45 rounded-full" />
+                  <span className="absolute w-4 h-[2px] bg-[#da373c] rotate-45 rounded-full" />
                 )}
               </button>
 
@@ -4407,12 +4643,10 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                   if (onOpenAvatarModal) {
                     onOpenAvatarModal();
                   } else {
-                    const nexts: UserPresenceStatus[] = ['online', 'dnd', 'gaming', 'offline'];
-                    const curIdx = nexts.indexOf(userPresence);
-                    handleUpdatePresenceStatus(nexts[(curIdx + 1) % nexts.length]);
+                    setShowDecorationModal(true);
                   }
                 }}
-                className={`w-8 h-8 rounded-[4px] flex items-center justify-center transition-colors cursor-pointer ${
+                className={`w-7 h-7 rounded-[4px] flex items-center justify-center transition-colors cursor-pointer ${
                   isDark
                     ? 'text-[#b5bac1] hover:bg-[#35373c] hover:text-white'
                     : 'text-slate-600 hover:bg-slate-300/60'
@@ -4448,10 +4682,12 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                     <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
                       {communityCategoryFilter === 'game'
                         ? 'Cộng đồng Game — Trò chơi điện tử phổ biến'
-                        : 'Cộng Đồng Chính Thức (Cộng đồng Game & Học tập)'}
+                        : communityCategoryFilter === 'chat'
+                        ? 'Cộng đồng Trò chuyện — Giao lưu & Tâm sự tự do'
+                        : 'Cộng Đồng Chính Thức (Game · Trò chuyện · Học tập)'}
                     </h2>
                     <p className="text-xs text-slate-500 dark:text-zinc-400">
-                      Quản trị bởi <strong>{isRealAdmin ? ADMIN_NAME : 'Ban Quản Trị Max10'}</strong> · Thành viên người thật giao lưu trực tiếp (Không có AI giả)
+                      Quản trị bởi <strong>{isRealAdmin ? ADMIN_NAME : 'Ban Quản Trị Max10'}</strong> · Thảo luận theo đúng chủ đề (Game / Trò chuyện / Học tập) cùng thành viên &amp; @Max10 AI
                     </p>
                   </div>
                 </div>
@@ -4641,6 +4877,12 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                     icon: '🎮',
                   },
                   {
+                    id: 'chat' as const,
+                    label: `Cộng đồng Trò chuyện`,
+                    count: approvedChatCommunities.length,
+                    icon: '💬',
+                  },
+                  {
                     id: 'study' as const,
                     label: `Cộng đồng Học tập`,
                     count: approvedStudyCommunities.length,
@@ -4664,7 +4906,9 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                       type="button"
                       onClick={() => {
                         setCommunityCategoryFilter(tab.id);
-                        if (tab.id === 'study' || tab.id === 'pending') setCommunityPlatformFilter('all');
+                        if (tab.id === 'study' || tab.id === 'chat' || tab.id === 'pending') {
+                          setCommunityPlatformFilter('all');
+                        }
                       }}
                       className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                         active
@@ -4690,7 +4934,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 })}
               </div>
 
-              {communityCategoryFilter !== 'study' && communityCategoryFilter !== 'pending' && (
+              {(communityCategoryFilter === 'game' || communityCategoryFilter === 'all') && (
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-[11px] font-bold text-slate-500 dark:text-zinc-400 mr-1">
                     Nền tảng Game:
@@ -5007,7 +5251,11 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 ) {
                   return false;
                 }
-                if (communityCategoryFilter !== 'study' && communityPlatformFilter !== 'all') {
+                if (communityCategoryFilter === 'game' && communityPlatformFilter !== 'all') {
+                  if (comm.communityCategory !== 'game') return false;
+                  if ((comm.gamePlatform || 'Cross-Platform') !== communityPlatformFilter) return false;
+                }
+                if (communityCategoryFilter === 'all' && communityPlatformFilter !== 'all') {
                   if (comm.communityCategory !== 'game') return false;
                   if ((comm.gamePlatform || 'Cross-Platform') !== communityPlatformFilter) return false;
                 }
@@ -5106,6 +5354,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                     const humanMembers = (comm.members || []).filter((m) => !isAiEntity(m));
                     const isJoined = humanMembers.some((m) => m.id === activeUserId);
                     const isGame = comm.communityCategory === 'game';
+                    const isChat = comm.communityCategory === 'chat';
                     const platformLabel = comm.gamePlatform || (isGame ? 'Cross-Platform' : '');
 
                     return (
@@ -5125,14 +5374,20 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex items-center gap-2.5 min-w-0">
                               <div className="w-11 h-11 rounded-xl bg-emerald-500/12 border border-emerald-500/25 flex items-center justify-center text-xl shrink-0">
-                                {comm.avatarIcon || (isGame ? '🎮' : '📚')}
+                                {comm.avatarIcon || (isGame ? '🎮' : isChat ? '💬' : '📚')}
                               </div>
                               <div className="min-w-0">
                                 <h3 className="text-sm font-black text-slate-900 dark:text-white truncate">
                                   {comm.name}
                                 </h3>
                                 <div className="text-[11px] text-slate-500 dark:text-zinc-400 truncate mt-0.5">
-                                  <span>{isGame ? 'Cộng đồng Game' : 'Cộng đồng Học tập'}</span>
+                                  <span>
+                                    {isGame
+                                      ? 'Cộng đồng Game'
+                                      : isChat
+                                      ? 'Cộng đồng Trò chuyện'
+                                      : 'Cộng đồng Học tập'}
+                                  </span>
                                   {isGame && platformLabel && (
                                     <>
                                       <span aria-hidden="true"> · </span>
@@ -5166,7 +5421,10 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                         <div className="pt-2.5 border-t border-slate-100 dark:border-white/[0.06] flex flex-wrap items-center justify-between gap-2">
                           <span className="text-[11px] font-bold text-slate-500 dark:text-zinc-400 flex items-center gap-1 tabular-nums">
                             <Users className="w-3.5 h-3.5 text-emerald-500" />
-                            <span>{humanMembers.length} người thật · Không AI</span>
+                            <span>
+                              {humanMembers.length} người thật · @Max10 AI theo chủ đề{' '}
+                              {isGame ? 'Game' : isChat ? 'Trò chuyện' : 'Học tập'}
+                            </span>
                           </span>
 
                           <div className="flex items-center gap-1.5">
@@ -5330,11 +5588,13 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
                 <h2 className="text-sm sm:text-[15px] font-bold truncate">
                   {activeMode === 'group'
-                    ? discordChannel === 'ai_tutor'
-                      ? 'hoi-max10-ai'
+                    ? discordChannel === 'admin_news'
+                      ? 'thông-báo-admin'
+                      : discordChannel === 'ai_tutor'
+                      ? 'hỏi-bài-ai'
                       : discordChannel === 'duel'
-                      ? 'thi-dau-kien-thuc'
-                      : 'chat-chung'
+                      ? 'thi-đấu-kiến-thức'
+                      : 'thảo-luận-chung'
                     : activeConversationTitle}
                 </h2>
 
@@ -5365,8 +5625,10 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 <p className="hidden lg:block text-xs text-[#80848e] dark:text-[#949ba4] truncate">
                   {activeMode === 'group'
                     ? `${activeGroup?.name} · ${
-                        discordChannel === 'ai_tutor'
-                          ? 'Hỏi bài Gia sư @Max10 AI'
+                        discordChannel === 'admin_news'
+                          ? 'Cập nhật hệ thống & Trả lời trực tiếp từ Admin'
+                          : discordChannel === 'ai_tutor'
+                          ? 'Hỏi bài Gia sư @Max10 AI theo chủ đề'
                           : discordChannel === 'duel'
                           ? 'Đấu trường Thi đấu kiến thức'
                           : activeConversationStatus
@@ -5580,15 +5842,19 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 </div>
                 <h3 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
                   Chào mừng đến với #
-                  {discordChannel === 'ai_tutor'
-                    ? 'hoi-max10-ai'
+                  {discordChannel === 'admin_news'
+                    ? 'thông-báo-admin'
+                    : discordChannel === 'ai_tutor'
+                    ? 'hỏi-bài-ai'
                     : discordChannel === 'duel'
-                    ? 'thi-dau-kien-thuc'
-                    : 'chat-chung'}
+                    ? 'thi-đấu-kiến-thức'
+                    : 'thảo-luận-chung'}
                   !
                 </h3>
                 <p className="text-xs sm:text-sm text-[#4e5058] dark:text-[#b5bac1]">
-                  Đây là phần đầu của kênh trong <strong>{activeGroup.name}</strong>. Bấm vào ảnh đại diện thành viên để xem hồ sơ an toàn &amp; thách đấu!
+                  {discordChannel === 'admin_news'
+                    ? 'Kênh chính thức cập nhật tính năng Max10 AI & nhắn hỏi trực tiếp Quản trị viên (Tự động trả lời hoặc Admin trả lời).'
+                    : `Đây là phần đầu của kênh trong ${activeGroup.name}. Bấm vào ảnh đại diện thành viên để xem thẻ hồ sơ Discord, kết bạn & thách đấu!`}
                 </p>
                 {discordChannel === 'duel' && (
                   <div className="pt-1">
@@ -5687,23 +5953,25 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                   <button
                     key={h.id}
                     type="button"
-                    onClick={() => onOpenOfferModal?.()}
+                    onClick={() =>
+                      window.dispatchEvent(
+                        new CustomEvent('max10_open_holiday_gift', { detail: { holidayId: h.id } })
+                      )
+                    }
                     className="px-2.5 py-1.5 rounded-[4px] bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-600 dark:text-amber-300 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
                   >
                     <span>{h.petals?.[0] || '🎁'}</span>
                     <span>Quà {h.title}</span>
                   </button>
                 ))}
-                {getVisibleHolidays().length === 0 && onOpenOfferModal && (
-                  <button
-                    type="button"
-                    onClick={onOpenOfferModal}
-                    className="px-2.5 py-1.5 rounded-[4px] bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-600 dark:text-amber-300 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
-                  >
-                    <span>🎁</span>
-                    <span>Quà lễ &amp; Sự kiện</span>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setShowDecorationModal(true)}
+                  className="px-2.5 py-1.5 rounded-[4px] bg-[#5865f2]/15 hover:bg-[#5865f2]/25 border border-[#5865f2]/30 text-[#5865f2] dark:text-[#949cf7] text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Palette className="w-3.5 h-3.5" />
+                  <span>Trang trí hồ sơ</span>
+                </button>
                 {onOpenStoreModal && (
                   <button
                     type="button"
@@ -5745,7 +6013,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 )}
               </div>
 
-              {isRealAdmin && (
+              {isRealAdmin ? (
                 <div className="pt-2 border-t border-black/10 dark:border-white/[0.06] flex flex-wrap items-center justify-between gap-2 text-[11px]">
                   <span className="font-bold text-amber-500 flex items-center gap-1.5">
                     <Crown className="w-3.5 h-3.5" />
@@ -5754,14 +6022,36 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                       {adminPendingMentions.length > 0 ? ` · ${adminPendingMentions.length} câu hỏi chờ` : ''}
                     </span>
                   </span>
-                  <button
-                    type="button"
-                    disabled={isSavingAutoReply}
-                    onClick={() => handleSaveAdminAutoReply(!adminAutoReplyEnabled)}
-                    className="px-2.5 py-1 rounded-[4px] bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold cursor-pointer"
-                  >
-                    {adminAutoReplyEnabled ? 'Chuyển sang Tự trả lời' : 'Bật Tự động trả lời'}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setPublishUpdateAsAdmin((prev) => !prev)}
+                      className={`px-2.5 py-1 rounded-[4px] font-extrabold cursor-pointer transition-colors ${
+                        publishUpdateAsAdmin
+                          ? 'bg-[#248046] text-white'
+                          : isDark
+                          ? 'bg-[#1e1f22] text-[#dbdee1] border border-[#35363c]'
+                          : 'bg-white text-slate-700 border border-slate-200'
+                      }`}
+                      title="Bật để tin nhắn Admin tiếp theo được phát như Thông báo Cập nhật Hệ thống"
+                    >
+                      {publishUpdateAsAdmin ? '📢 Chế độ: Đăng cập nhật hệ thống' : '💬 Chế độ: Nhắn tin Admin'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSavingAutoReply}
+                      onClick={() => handleSaveAdminAutoReply(!adminAutoReplyEnabled)}
+                      className="px-2.5 py-1 rounded-[4px] bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold cursor-pointer"
+                    >
+                      {adminAutoReplyEnabled ? 'Chuyển sang Tự trả lời' : 'Bật Tự động trả lời'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="pt-2 border-t border-black/10 dark:border-white/[0.06] flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-[#949ba4]">
+                  <span>
+                    💬 Nhắn trực tiếp ở khung bên dưới để gửi câu hỏi tới <strong>Quản trị viên Max10</strong> (Admin sẽ tự động trả lời hoặc trả lời thủ công trực tiếp).
+                  </span>
                 </div>
               )}
             </div>
@@ -5789,6 +6079,14 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 { id: msg.senderId, name: msg.senderName },
                 { isDirectFriend: !isAdminSender, isGroupAdmin: isAdminSender }
               );
+
+              const msgDeco = resolveMemberDecoration(
+                msg.senderId,
+                isAdminSender ? 'admin' : isAiDm ? 'ai_tutor' : 'member',
+                isAiDm,
+                msg.senderName
+              );
+              const msgNp = getNameplateById(msgDeco.nameplateId);
 
               return (
                 <div
@@ -5822,6 +6120,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                               ? 'online'
                               : activeFriend?.presenceStatus || 'online'
                           }
+                          frameId={msgDeco.frameId}
                           size="md"
                           onClick={
                             !isAiDm && msg.senderId !== 'all_broadcast'
@@ -5848,51 +6147,46 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                     {/* Message Body Column */}
                     <div className="min-w-0 flex-1">
                       {!isGrouped && (
-                        <div className="flex items-center gap-1.5 flex-wrap leading-snug mb-0.5">
-                          <span
-                            onClick={
-                              !isAiDm && msg.senderId !== 'all_broadcast'
-                                ? () =>
-                                    handleOpenSafeMemberProfile(
-                                      {
-                                        id: msg.senderId,
-                                        name: msg.senderName,
-                                        avatar: msg.senderAvatar,
-                                        presenceStatus: activeFriend?.presenceStatus,
-                                      },
-                                      'Bạn bè 1-1'
-                                    )
-                                : undefined
-                            }
-                            className={`text-[14.5px] font-semibold ${
-                              !isAiDm && msg.senderId !== 'all_broadcast' ? 'hover:underline cursor-pointer' : ''
-                            } ${
-                              isAiDm
-                                ? 'text-[#5865f2] dark:text-[#949cf7]'
-                                : isAdminSender
-                                ? 'text-amber-600 dark:text-amber-400'
-                                : isMe
-                                ? 'text-[#23a559] dark:text-[#2dc770]'
-                                : 'text-slate-900 dark:text-white'
-                            }`}
+                        <div className="flex items-center gap-1.5 flex-wrap leading-snug mb-1">
+                          <NameplateBannerStrip
+                            nameplateId={msgDeco.nameplateId}
+                            compact
+                            className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg shadow-2xs max-w-full"
                           >
-                            {msg.senderName}
-                          </span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span
+                                onClick={
+                                  !isAiDm && msg.senderId !== 'all_broadcast'
+                                    ? () =>
+                                        handleOpenSafeMemberProfile(
+                                          {
+                                            id: msg.senderId,
+                                            name: msg.senderName,
+                                            avatar: msg.senderAvatar,
+                                            presenceStatus: activeFriend?.presenceStatus,
+                                          },
+                                          'Bạn bè 1-1'
+                                        )
+                                    : undefined
+                                }
+                                className={`text-[13.5px] font-black drop-shadow-xs ${
+                                  !isAiDm && msg.senderId !== 'all_broadcast' ? 'hover:underline cursor-pointer' : ''
+                                } ${msgNp.textColorClass}`}
+                              >
+                                {msg.senderName}
+                              </span>
 
-                          {isAiDm && (
-                            <span className="inline-flex items-center gap-0.5 px-1 py-[1px] rounded-[3px] bg-[#5865f2] text-white text-[9px] font-extrabold uppercase tracking-wide">
-                              <Check className="w-2.5 h-2.5" />
-                              <span>APP</span>
-                            </span>
-                          )}
-
-                          {!isAiDm && isAdminSender && (
-                            <span className="inline-flex items-center px-1 py-[1px] rounded-[3px] bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30 text-[9px] font-extrabold uppercase">
-                              ADMIN
-                            </span>
-                          )}
-
-                          {!isAiDm && <ClassificationSquare category={senderCat} />}
+                              <UserBadgesStrip
+                                role={isAdminSender ? 'admin' : isAiDm ? 'ai_tutor' : 'student'}
+                                isAi={isAiDm}
+                                countryCode={isMe ? countryCode : undefined}
+                                level={isMe ? currentUserLevel : isAdminSender ? 99 : undefined}
+                                badges={msgDeco.badges}
+                                maxCustomBadges={2}
+                                size="xs"
+                              />
+                            </div>
+                          </NameplateBannerStrip>
 
                           <span className="text-[11px] text-[#80848e] dark:text-[#949ba4] ml-0.5 tabular-nums">
                             {formatAccurateTime(msg.createdAt, msg.timestamp)}
@@ -6032,6 +6326,14 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 { isGroupAdmin: isGrpAdmin }
               );
 
+              const grpMsgDeco = resolveMemberDecoration(
+                msg.senderId,
+                isAi ? 'ai_tutor' : isGrpAdmin ? 'admin' : msg.senderRole,
+                isAi,
+                msg.senderName
+              );
+              const grpMsgNp = getNameplateById(grpMsgDeco.nameplateId);
+
               return (
                 <div
                   key={msg.id}
@@ -6058,6 +6360,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                           name={msg.senderName}
                           src={msg.senderAvatar}
                           presenceStatus={isMe ? userPresence : 'online'}
+                          frameId={grpMsgDeco.frameId}
                           size="md"
                           onClick={
                             !isAi
@@ -6081,44 +6384,43 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                     {/* Message Body Column */}
                     <div className="min-w-0 flex-1">
                       {!isGrouped && (
-                        <div className="flex items-center gap-1.5 flex-wrap leading-snug mb-0.5">
-                          <span
-                            onClick={
-                              !isAi
-                                ? () =>
-                                    handleOpenSafeMemberProfile({
-                                      id: msg.senderId,
-                                      name: msg.senderName,
-                                      avatar: msg.senderAvatar,
-                                      role: msg.senderRole,
-                                    })
-                                : undefined
-                            }
-                            className={`text-[14.5px] font-semibold ${
-                              !isAi ? 'hover:underline cursor-pointer' : ''
-                            } ${
-                              isAi
-                                ? 'text-[#5865f2] dark:text-[#949cf7]'
-                                : isGrpAdmin
-                                ? 'text-blue-600 dark:text-sky-400'
-                                : cat === 'teacher'
-                                ? 'text-emerald-600 dark:text-emerald-400'
-                                : isMe
-                                ? 'text-[#23a559] dark:text-[#2dc770]'
-                                : 'text-slate-900 dark:text-white'
-                            }`}
+                        <div className="flex items-center gap-1.5 flex-wrap leading-snug mb-1">
+                          <NameplateBannerStrip
+                            nameplateId={grpMsgDeco.nameplateId}
+                            compact
+                            className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg shadow-2xs max-w-full"
                           >
-                            {msg.senderName}
-                          </span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span
+                                onClick={
+                                  !isAi
+                                    ? () =>
+                                        handleOpenSafeMemberProfile({
+                                          id: msg.senderId,
+                                          name: msg.senderName,
+                                          avatar: msg.senderAvatar,
+                                          role: msg.senderRole,
+                                        })
+                                    : undefined
+                                }
+                                className={`text-[13.5px] font-black drop-shadow-xs ${
+                                  !isAi ? 'hover:underline cursor-pointer' : ''
+                                } ${grpMsgNp.textColorClass}`}
+                              >
+                                {msg.senderName}
+                              </span>
 
-                          {isAi && (
-                            <span className="inline-flex items-center gap-0.5 px-1 py-[1px] rounded-[3px] bg-[#5865f2] text-white text-[9px] font-extrabold uppercase tracking-wide">
-                              <Check className="w-2.5 h-2.5" />
-                              <span>APP</span>
-                            </span>
-                          )}
-
-                          {!isAi && <ClassificationSquare category={cat} />}
+                              <UserBadgesStrip
+                                role={isAi ? 'ai_tutor' : isGrpAdmin ? 'admin' : cat === 'teacher' ? 'teacher' : 'student'}
+                                isAi={isAi}
+                                countryCode={isMe ? countryCode : undefined}
+                                level={isMe ? currentUserLevel : isGrpAdmin ? 99 : undefined}
+                                badges={grpMsgDeco.badges}
+                                maxCustomBadges={2}
+                                size="xs"
+                              />
+                            </div>
+                          </NameplateBannerStrip>
 
                           <span className="text-[11px] text-[#80848e] dark:text-[#949ba4] ml-0.5 tabular-nums">
                             {formatAccurateTime(msg.createdAt, msg.timestamp)}
@@ -6441,11 +6743,13 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                   ? 'Đang phản hồi...'
                   : activeMode === 'group'
                   ? `Nhắn tin tới #${
-                      discordChannel === 'ai_tutor'
-                        ? 'hoi-max10-ai'
+                      discordChannel === 'admin_news'
+                        ? 'thông-báo-admin'
+                        : discordChannel === 'ai_tutor'
+                        ? 'hỏi-bài-ai'
                         : discordChannel === 'duel'
-                        ? 'thi-dau-kien-thuc'
-                        : 'chat-chung'
+                        ? 'thi-đấu-kiến-thức'
+                        : 'thảo-luận-chung'
                     }`
                   : `Nhắn tin tới @${activeConversationTitle}`
               }
@@ -6586,38 +6890,53 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                   (() => {
                     const humanMembers = activeGroup.members.filter((m) => !isAiEntity(m));
                     const admins = humanMembers.filter(
-                      (m) => m.role === 'admin' || activeGroup.createdBy === m.id
+                      (m) => m.role === 'admin' || activeGroup.createdBy === m.id || m.id === ADMIN_ID
                     );
-                    const teachers = humanMembers.filter(
-                      (m) =>
-                        m.role !== 'admin' &&
-                        activeGroup.createdBy !== m.id &&
-                        getSenderCategory(m) === 'teacher'
+                    const nonAdmins = humanMembers.filter(
+                      (m) => m.role !== 'admin' && activeGroup.createdBy !== m.id && m.id !== ADMIN_ID
                     );
-                    const others = humanMembers.filter(
-                      (m) =>
-                        m.role !== 'admin' &&
-                        activeGroup.createdBy !== m.id &&
-                        getSenderCategory(m) !== 'teacher'
+                    const onlineMembers = nonAdmins.filter(
+                      (m) => (m.id === activeUserId ? userPresence : m.presenceStatus || 'online') !== 'offline'
+                    );
+                    const offlineMembers = nonAdmins.filter(
+                      (m) => (m.id === activeUserId ? userPresence : m.presenceStatus || 'online') === 'offline'
                     );
 
-                    const renderMemberGroup = (title: string, list: GroupMember[]) => {
+                    const renderMemberGroup = (
+                      title: string,
+                      list: GroupMember[],
+                      forceOfflineStyle = false
+                    ) => {
                       if (list.length === 0) return null;
                       return (
-                        <div className="space-y-1">
-                          <div className="px-1.5 text-[11px] font-bold uppercase tracking-wider text-[#80848e] dark:text-[#949ba4]">
+                        <div className="space-y-1.5">
+                          <div className="px-1.5 text-[10.5px] font-extrabold uppercase tracking-wider text-[#80848e] dark:text-[#949ba4]">
                             {title} — {list.length}
                           </div>
                           {list.map((member, mIdx) => {
                             const isGrpAdmin =
-                              member.role === 'admin' || activeGroup.createdBy === member.id;
+                              member.role === 'admin' || activeGroup.createdBy === member.id || member.id === ADMIN_ID;
+                            const isSelfMember = member.id === activeUserId;
                             const cat = getSenderCategory(member, {
                               isGroupAdmin: isGrpAdmin,
                               isDirectFriend: isFriend(member.id),
                             });
+                            const memberStatus: UserPresenceStatus = isSelfMember
+                              ? userPresence
+                              : member.presenceStatus || 'online';
+                            const mDeco = resolveMemberDecoration(
+                              member.id,
+                              isGrpAdmin ? 'admin' : member.role,
+                              false,
+                              member.name
+                            );
+                            const mNp = getNameplateById(mDeco.nameplateId);
+
                             return (
-                              <div
+                              <NameplateBannerStrip
                                 key={`${member.id}-${mIdx}`}
+                                nameplateId={mDeco.nameplateId}
+                                compact
                                 onClick={() =>
                                   handleOpenSafeMemberProfile({
                                     id: member.id,
@@ -6625,45 +6944,55 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                                     avatar: member.avatar,
                                     role: member.role,
                                     school: member.school,
-                                    presenceStatus: member.presenceStatus,
+                                    presenceStatus: memberStatus,
                                   })
                                 }
-                                className={`group flex items-center justify-between gap-2 px-2 py-1.5 rounded-[5px] cursor-pointer transition-colors ${
-                                  isDark
-                                    ? 'hover:bg-[#35373c] text-[#dbdee1]'
-                                    : 'hover:bg-[#e3e5e8] text-slate-800'
+                                className={`rounded-xl px-2 py-1.5 shadow-xs ${
+                                  forceOfflineStyle ? 'opacity-65 hover:opacity-100' : ''
                                 }`}
                               >
-                                <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="flex items-center gap-2 min-w-0">
                                   <UserAvatarWithStatus
                                     name={member.name}
                                     src={member.avatar}
-                                    presenceStatus={member.presenceStatus || 'online'}
+                                    presenceStatus={memberStatus}
+                                    frameId={mDeco.frameId}
                                     size="sm"
                                   />
-                                  <div className="min-w-0">
-                                    <div className="text-[13px] font-semibold truncate flex items-center gap-1">
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1 flex-wrap">
                                       <span
-                                        className={`truncate ${
+                                        className={`text-[12.5px] font-black truncate drop-shadow-xs ${
                                           cat === 'admin'
-                                            ? 'text-blue-500 dark:text-sky-400'
+                                            ? 'text-amber-200'
                                             : cat === 'teacher'
-                                            ? 'text-emerald-600 dark:text-emerald-400'
-                                            : ''
+                                            ? 'text-emerald-200'
+                                            : mNp.textColorClass
                                         }`}
                                       >
                                         {member.name}
                                       </span>
                                     </div>
+                                    <div className="mt-0.5 flex items-center gap-1 flex-wrap">
+                                      <UserBadgesStrip
+                                        role={isGrpAdmin ? 'admin' : cat === 'teacher' ? 'teacher' : 'student'}
+                                        countryCode={isSelfMember ? countryCode : undefined}
+                                        level={isSelfMember ? currentUserLevel : isGrpAdmin ? 99 : undefined}
+                                        badges={mDeco.badges}
+                                        maxCustomBadges={2}
+                                        size="xs"
+                                      />
+                                    </div>
                                   </div>
                                 </div>
-                                <ClassificationSquare category={cat} showLabel={false} size="sm" />
-                              </div>
+                              </NameplateBannerStrip>
                             );
                           })}
                         </div>
                       );
                     };
+
+                    const aiDeco = resolveMemberDecoration('ai-max10-group', 'ai_tutor', true, 'Max10 AI');
 
                     return (
                       <>
@@ -6671,142 +7000,196 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                           <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
                             {activeGroup.name}
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => setShowAddMemberModal(true)}
-                            className="text-[11px] font-bold text-[#5865f2] dark:text-[#949cf7] hover:underline flex items-center gap-1 cursor-pointer shrink-0"
-                          >
-                            <UserPlus className="w-3 h-3" />
-                            <span>Mời bạn</span>
-                          </button>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setShowDecorationModal(true)}
+                              className="text-[11px] font-bold text-amber-500 hover:underline flex items-center gap-0.5 cursor-pointer"
+                              title="Tùy chỉnh Dải nền tên, Khung Avatar & Huy hiệu"
+                            >
+                              <Palette className="w-3 h-3" />
+                              <span>Trang trí</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowAddMemberModal(true)}
+                              className="text-[11px] font-bold text-[#5865f2] dark:text-[#949cf7] hover:underline flex items-center gap-1 cursor-pointer"
+                            >
+                              <UserPlus className="w-3 h-3" />
+                              <span>Mời bạn</span>
+                            </button>
+                          </div>
                         </div>
 
-                        {renderMemberGroup('Quản trị viên', admins)}
-                        {renderMemberGroup('Giáo viên', teachers)}
-                        {renderMemberGroup('Thành viên', others)}
+                        {renderMemberGroup('ADMIN', admins)}
 
-                        {/* Bot Section */}
-                        <div className="space-y-1">
-                          <div className="px-1.5 text-[11px] font-bold uppercase tracking-wider text-[#80848e] dark:text-[#949ba4]">
-                            Bot Học Tập — 1
+                        {/* GIA SƯ AI */}
+                        <div className="space-y-1.5">
+                          <div className="px-1.5 text-[10.5px] font-extrabold uppercase tracking-wider text-[#80848e] dark:text-[#949ba4]">
+                            GIA SƯ AI — 1
                           </div>
-                          <div
+                          <NameplateBannerStrip
+                            nameplateId={aiDeco.nameplateId}
+                            compact
                             onClick={() => {
                               setDiscordChannel('ai_tutor');
                               if (!inputMessage.toLowerCase().includes('@max10')) {
                                 setInputMessage('@Max10 AI ');
                               }
                             }}
-                            className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-[5px] cursor-pointer transition-colors ${
-                              isDark ? 'hover:bg-[#35373c] text-[#dbdee1]' : 'hover:bg-[#e3e5e8] text-slate-800'
-                            }`}
-                            title="Bấm để gọi @Max10 AI"
+                            className="rounded-xl px-2 py-1.5 shadow-xs"
                           >
-                            <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="flex items-center gap-2 min-w-0">
                               <UserAvatarWithStatus
                                 name="Max10 AI"
                                 src="/max10-avatar.jpg"
                                 presenceStatus="online"
+                                frameId={aiDeco.frameId}
                                 size="sm"
                               />
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-1">
-                                  <span className="text-[13px] font-semibold text-[#5865f2] dark:text-[#949cf7] truncate">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <span className="text-[12.5px] font-black text-white truncate drop-shadow-xs">
                                     Max10 AI
                                   </span>
-                                  <span className="px-1 py-[1px] rounded-[3px] bg-[#5865f2] text-white text-[8px] font-extrabold">
-                                    APP
-                                  </span>
+                                  <UserBadgesStrip
+                                    role="ai_tutor"
+                                    isAi
+                                    countryCode={countryCode}
+                                    badges={aiDeco.badges}
+                                    maxCustomBadges={1}
+                                    size="xs"
+                                  />
                                 </div>
-                                <div className="text-[10px] text-[#949ba4] truncate">Gõ @Max10 AI để hỏi</div>
+                                <div className="text-[10px] text-white/80 truncate">
+                                  Gia sư theo chủ đề {activeGroup.communityCategory === 'game' ? 'Game' : activeGroup.communityCategory === 'chat' ? 'Trò chuyện' : 'Học tập'}
+                                </div>
                               </div>
                             </div>
-                          </div>
+                          </NameplateBannerStrip>
                         </div>
+
+                        {renderMemberGroup('TRỰC TUYẾN', onlineMembers)}
+                        {renderMemberGroup('NGOẠI TUYẾN', offlineMembers, true)}
                       </>
                     );
                   })()
                 ) : activeMode === 'direct' && activeFriend ? (
-                  <div className="space-y-4">
-                    <div
-                      className={`p-3 rounded-[8px] border text-center space-y-2 ${
-                        isDark ? 'bg-[#1e1f22] border-[#111214]' : 'bg-white border-slate-200'
-                      }`}
-                    >
-                      <div className="mx-auto inline-block">
-                        <UserAvatarWithStatus
-                          name={activeFriend.name}
-                          src={activeFriend.avatar}
-                          presenceStatus={activeFriend.presenceStatus || 'online'}
-                          size="xl"
-                          onClick={
-                            activeFriend.id !== 'all_broadcast'
-                              ? () =>
-                                  handleOpenSafeMemberProfile(
-                                    {
-                                      id: activeFriend.id,
-                                      name: activeFriend.name,
-                                      avatar: activeFriend.avatar,
-                                      role: (activeFriend as any).role,
-                                      school: activeFriend.school,
-                                      presenceStatus: activeFriend.presenceStatus,
-                                    },
-                                    'Bạn bè 1-1'
-                                  )
-                              : undefined
-                          }
-                        />
-                      </div>
-                      <h3 className="text-sm font-black text-slate-900 dark:text-white">
-                        {activeConversationTitle}
-                      </h3>
-                      <p className="text-[11px] text-[#949ba4]">{activeConversationStatus}</p>
+                  (() => {
+                    const dmDeco = resolveMemberDecoration(
+                      activeFriend.id,
+                      (activeFriend as any).role,
+                      false,
+                      activeFriend.name
+                    );
+                    const dmNp = getNameplateById(dmDeco.nameplateId);
+                    return (
+                      <div className="space-y-4">
+                        <div
+                          className={`rounded-2xl border overflow-hidden text-center ${
+                            isDark ? 'bg-[#1e1f22] border-[#111214]' : 'bg-white border-slate-200'
+                          }`}
+                        >
+                          <NameplateBannerStrip nameplateId={dmDeco.nameplateId} className="px-3 pt-4 pb-3">
+                            <div className="mx-auto inline-block">
+                              <UserAvatarWithStatus
+                                name={activeFriend.name}
+                                src={activeFriend.avatar}
+                                presenceStatus={activeFriend.presenceStatus || 'online'}
+                                frameId={dmDeco.frameId}
+                                size="xl"
+                                onClick={
+                                  activeFriend.id !== 'all_broadcast'
+                                    ? () =>
+                                        handleOpenSafeMemberProfile(
+                                          {
+                                            id: activeFriend.id,
+                                            name: activeFriend.name,
+                                            avatar: activeFriend.avatar,
+                                            role: (activeFriend as any).role,
+                                            school: activeFriend.school,
+                                            presenceStatus: activeFriend.presenceStatus,
+                                          },
+                                          'Bạn bè 1-1'
+                                        )
+                                    : undefined
+                                }
+                              />
+                            </div>
+                            <h3 className={`text-sm font-black mt-2 ${dmNp.textColorClass}`}>
+                              {activeConversationTitle}
+                            </h3>
+                            <p className={`text-[11px] ${dmNp.subTextColorClass}`}>{activeConversationStatus}</p>
+                            <div className="mt-1.5 flex justify-center">
+                              <UserBadgesStrip
+                                role={(activeFriend as any).role === 'admin' ? 'admin' : 'student'}
+                                badges={dmDeco.badges}
+                                size="xs"
+                              />
+                            </div>
+                          </NameplateBannerStrip>
 
-                      {activeFriend.id !== 'all_broadcast' && (
-                        <div className="pt-1 flex flex-col gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleOpenSafeMemberProfile(
-                                {
-                                  id: activeFriend.id,
-                                  name: activeFriend.name,
-                                  avatar: activeFriend.avatar,
-                                  role: (activeFriend as any).role,
-                                  school: activeFriend.school,
-                                  presenceStatus: activeFriend.presenceStatus,
-                                },
-                                'Bạn bè 1-1'
-                              )
-                            }
-                            className="w-full py-1.5 px-2.5 rounded-[4px] bg-[#5865f2] hover:bg-[#4752c4] text-white text-xs font-bold cursor-pointer"
-                          >
-                            Xem hồ sơ công khai
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleStartDuelWithMember(
-                                buildSafePublicProfile({
-                                  id: activeFriend.id,
-                                  name: activeFriend.name,
-                                  avatar: activeFriend.avatar,
-                                  role: (activeFriend as any).role,
-                                  school: activeFriend.school,
-                                  presenceStatus: activeFriend.presenceStatus,
-                                  isFriend: isFriend(activeFriend.id),
-                                })
-                              )
-                            }
-                            className="w-full py-1.5 px-2.5 rounded-[4px] bg-[#248046] hover:bg-[#1a6334] text-white text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
-                          >
-                            <Swords className="w-3.5 h-3.5" />
-                            <span>Thách đấu kiến thức</span>
-                          </button>
+                          <div className="p-3 space-y-1.5">
+                            {activeFriend.id !== 'all_broadcast' && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleOpenSafeMemberProfile(
+                                      {
+                                        id: activeFriend.id,
+                                        name: activeFriend.name,
+                                        avatar: activeFriend.avatar,
+                                        role: (activeFriend as any).role,
+                                        school: activeFriend.school,
+                                        presenceStatus: activeFriend.presenceStatus,
+                                      },
+                                      'Bạn bè 1-1'
+                                    )
+                                  }
+                                  className="w-full py-1.5 px-2.5 rounded-[4px] bg-[#5865f2] hover:bg-[#4752c4] text-white text-xs font-bold cursor-pointer"
+                                >
+                                  Xem hồ sơ Discord
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleStartDuelWithMember(
+                                      buildSafePublicProfile({
+                                        id: activeFriend.id,
+                                        name: activeFriend.name,
+                                        avatar: activeFriend.avatar,
+                                        role: (activeFriend as any).role,
+                                        school: activeFriend.school,
+                                        presenceStatus: activeFriend.presenceStatus,
+                                        isFriend: isFriend(activeFriend.id),
+                                      })
+                                    )
+                                  }
+                                  className="w-full py-1.5 px-2.5 rounded-[4px] bg-[#248046] hover:bg-[#1a6334] text-white text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
+                                >
+                                  <Swords className="w-3.5 h-3.5" />
+                                  <span>Thách đấu kiến thức</span>
+                                </button>
+                              </>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setShowDecorationModal(true)}
+                              className={`w-full py-1.5 px-2.5 rounded-[4px] border text-xs font-bold flex items-center justify-center gap-1 cursor-pointer ${
+                                isDark
+                                  ? 'border-white/10 hover:bg-[#35373c] text-amber-300'
+                                  : 'border-slate-200 hover:bg-slate-100 text-[#5865f2]'
+                              }`}
+                            >
+                              <Palette className="w-3.5 h-3.5" />
+                              <span>Trang trí hồ sơ của tôi</span>
+                            </button>
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  </div>
+                      </div>
+                    );
+                  })()
                 ) : null
               ) : (
                 <>
@@ -6924,6 +7307,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           targetName={callModal.targetName}
           targetAvatar={callModal.targetAvatar}
           targetBadge={callModal.targetBadge}
+          roomCallKey={callModal.roomCallKey}
           participants={callModal.participants}
           userName={activeUserName}
           userAvatar={activeUserAvatar}
@@ -7193,7 +7577,9 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                     type="button"
                     onClick={() => {
                       setNewGroupMode('community');
-                      setNewGroupIcon(newCommunityCategory === 'game' ? '🎮' : '📚');
+                      setNewGroupIcon(
+                        newCommunityCategory === 'game' ? '🎮' : newCommunityCategory === 'chat' ? '💬' : '📚'
+                      );
                     }}
                     className={`py-2 px-2 rounded-xl text-[11px] font-extrabold transition-all cursor-pointer ${
                       newGroupMode === 'community'
@@ -7302,7 +7688,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                     <label className="block text-xs font-bold mb-1.5 text-slate-700 dark:text-zinc-300">
                       Chủ đề Cộng đồng:
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <button
                         type="button"
                         onClick={() => {
@@ -7317,8 +7703,25 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                             : 'border-slate-200 text-slate-700'
                         }`}
                       >
-                        <div className="text-sm font-black">📚 Học tập</div>
-                        <div className="text-[11px] opacity-80 mt-0.5">Hỏi đáp Toán, Văn, Anh, KHTN...</div>
+                        <div className="text-xs font-black">📚 Học tập</div>
+                        <div className="text-[10px] opacity-80 mt-0.5">Thảo luận Toán, Văn, Anh, KHTN</div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewCommunityCategory('chat');
+                          setNewGroupIcon('💬');
+                        }}
+                        className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                          newCommunityCategory === 'chat'
+                            ? 'border-sky-500 bg-sky-500/15 text-sky-600 dark:text-sky-300'
+                            : isDark
+                            ? 'border-zinc-700 text-zinc-300'
+                            : 'border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        <div className="text-xs font-black">💬 Trò chuyện</div>
+                        <div className="text-[10px] opacity-80 mt-0.5">Giao lưu &amp; tâm sự tự do</div>
                       </button>
                       <button
                         type="button"
@@ -7334,8 +7737,8 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                             : 'border-slate-200 text-slate-700'
                         }`}
                       >
-                        <div className="text-sm font-black">🎮 Cộng đồng Game</div>
-                        <div className="text-[11px] opacity-80 mt-0.5">Trò chơi điện tử Mobile, PC, Console, Web</div>
+                        <div className="text-xs font-black">🎮 Cộng đồng Game</div>
+                        <div className="text-[10px] opacity-80 mt-0.5">Trò chơi Mobile, PC, Console</div>
                       </button>
                     </div>
                   </div>
@@ -9176,17 +9579,19 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                   <label className="block text-xs font-bold mb-1">Danh mục</label>
                   <select
                     value={editCommForm.communityCategory}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const val = e.target.value;
                       setEditCommForm((f) => ({
                         ...f,
-                        communityCategory: e.target.value === 'study' ? 'study' : 'game',
-                      }))
-                    }
+                        communityCategory: val === 'study' ? 'study' : val === 'chat' ? 'chat' : 'game',
+                      }));
+                    }}
                     className={`w-full px-3 py-2 rounded-xl text-xs border outline-hidden ${
                       isDark ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-slate-300 text-slate-900'
                     }`}
                   >
                     <option value="game">Cộng đồng Game</option>
+                    <option value="chat">Cộng đồng Trò chuyện</option>
                     <option value="study">Cộng đồng Học tập</option>
                   </select>
                 </div>
@@ -9435,22 +9840,52 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         onClose={() => setProfileTargetMember(null)}
         member={profileTargetMember}
         currentUserId={activeUserId}
+        currentUserName={activeUserName}
+        currentUserAvatar={activeUserAvatar}
         contextLabel={profileContextLabel}
         isDark={isDark}
+        isFriendMember={Boolean(profileTargetMember && isFriend(profileTargetMember.id))}
+        countryCode={countryCode}
+        peerDecoration={
+          profileTargetMember
+            ? resolveMemberDecoration(
+                profileTargetMember.id,
+                profileTargetMember.roleType,
+                profileTargetMember.id.includes('max10-ai'),
+                profileTargetMember.name
+              )
+            : undefined
+        }
+        onToggleFriend={(target) => handleToggleFriend({ id: target.id, name: target.name, avatar: target.avatar })}
+        onOpenDecorationModal={() => setShowDecorationModal(true)}
         onStartDuel={(target) => {
           setProfileTargetMember(null);
           handleStartDuelWithMember(target, null);
         }}
-        onOpenDirectMessage={
-          isFriend(profileTargetMember?.id || '')
-            ? (target) => {
-                setProfileTargetMember(null);
-                setShowCommunitiesView(false);
-                setActiveMode('direct');
-                setActiveFriendId(target.id);
-              }
-            : undefined
-        }
+        onOpenDirectMessage={(target) => {
+          setProfileTargetMember(null);
+          setShowCommunitiesView(false);
+          setActiveMode('direct');
+          setActiveFriendId(target.id);
+        }}
+      />
+
+      {/* PROFILE DECORATION CUSTOMIZATION MODAL (NAMEPLATES, FRAMES & BADGES) */}
+      <ProfileDecorationModal
+        isOpen={showDecorationModal}
+        onClose={() => setShowDecorationModal(false)}
+        userId={activeUserId}
+        userName={activeUserName}
+        userAvatar={activeUserAvatar}
+        isAdmin={isRealAdmin}
+        isDark={isDark}
+        countryCode={countryCode}
+        onOpenAvatarModal={onOpenAvatarModal}
+        onSaved={(cfg) => {
+          setMyDecoration(cfg);
+          setToastMessage('✨ Đã lưu Trang trí hồ sơ Discord thành công!');
+          setTimeout(() => setToastMessage(''), 2500);
+        }}
       />
 
       {/* QUIZ DUEL ARENA MODAL (COMMUNITY / GROUP / FRIENDS) */}
@@ -9468,6 +9903,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           currentUserAvatar={activeUserAvatar}
           targetMember={duelModalState.targetMember}
           existingChallenge={duelModalState.existingChallenge}
+          countryCode={countryCode}
           onChallengeUpdated={handleDuelChallengeUpdated}
         />
       )}

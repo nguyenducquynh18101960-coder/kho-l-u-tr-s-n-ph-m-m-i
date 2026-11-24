@@ -5,16 +5,32 @@ import {
   MessageSquare,
   ShieldCheck,
   Trophy,
-  Award,
   GraduationCap,
   Calendar,
   Zap,
   Sparkles,
+  UserPlus,
+  UserCheck,
+  Send,
+  Award,
 } from 'lucide-react';
 import { PublicMemberProfile, UserPresenceStatus } from '../../types';
 import { UserAvatarWithStatus, PRESENCE_STATUS_CONFIG } from './UserAvatarWithStatus';
 import { safeFetchJson } from '../../utils/safeFetchJson';
 import { calculateLevel, formatLevelLabel } from '../../types/achievements';
+import {
+  BADGE_CATALOG,
+  UserDecorationConfig,
+  getMemberDecoration,
+  getNameplateById,
+  loadLocalDecorations,
+} from '../../data/profileDecorations';
+import {
+  NameplateBannerStrip,
+  NameplateEffectOverlay,
+  UserBadgesStrip,
+} from './ProfileDecorationSystem';
+import { CountryCode } from '../../data/countryCultures';
 
 export function scrubPrivateContactStrings(val?: string): string | undefined {
   if (!val) return undefined;
@@ -85,10 +101,17 @@ interface MemberProfileModalProps {
   onClose: () => void;
   member: PublicMemberProfile | null;
   currentUserId: string;
-  contextLabel?: string; // e.g. "Cộng đồng", "Nhóm học tập", "Bạn bè 1-1"
+  currentUserName?: string;
+  currentUserAvatar?: string;
+  contextLabel?: string;
   isDark: boolean;
+  isFriendMember?: boolean;
+  countryCode?: CountryCode;
+  peerDecoration?: UserDecorationConfig;
+  onToggleFriend?: (targetMember: PublicMemberProfile) => void;
   onStartDuel: (targetMember: PublicMemberProfile) => void;
-  onOpenDirectMessage?: (targetMember: PublicMemberProfile) => void;
+  onOpenDirectMessage?: (targetMember: PublicMemberProfile, initialMessage?: string) => void;
+  onOpenDecorationModal?: () => void;
 }
 
 export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
@@ -96,16 +119,30 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
   onClose,
   member,
   currentUserId,
+  currentUserName = 'Bạn học',
+  currentUserAvatar = '',
   contextLabel = 'Cộng đồng & Nhóm',
   isDark,
+  isFriendMember = false,
+  countryCode = 'VN',
+  peerDecoration,
+  onToggleFriend,
   onStartDuel,
   onOpenDirectMessage,
+  onOpenDecorationModal,
 }) => {
   const [profile, setProfile] = useState<PublicMemberProfile | null>(member);
   const [loadingProfile, setLoadingProfile] = useState(false);
+  const [localFriendState, setLocalFriendState] = useState(isFriendMember);
+  const [quickDmText, setQuickDmText] = useState('');
+  const [sendingQuickDm, setSendingQuickDm] = useState(false);
+  const [quickDmSent, setQuickDmSent] = useState(false);
 
   useEffect(() => {
     setProfile(member);
+    setLocalFriendState(isFriendMember);
+    setQuickDmText('');
+    setQuickDmSent(false);
     if (!isOpen || !member?.id) return;
 
     let cancelled = false;
@@ -118,7 +155,6 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
         const safeRemote = buildSafePublicProfile({
           ...member,
           ...res.profile,
-          // Keep friendly local name if server returned generic fallback
           name:
             res.profile.name && res.profile.name !== 'Thành viên Max10'
               ? res.profile.name
@@ -135,95 +171,210 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, member]);
+  }, [isOpen, member, isFriendMember]);
 
   if (!isOpen || !profile) return null;
 
   const isSelf = profile.id === currentUserId;
   const presenceConf = PRESENCE_STATUS_CONFIG[profile.presenceStatus] || PRESENCE_STATUS_CONFIG.online;
   const computedLevel = typeof profile.xp === 'number' ? calculateLevel(profile.xp) : null;
-  const displayLevel = profile.level ?? computedLevel?.level;
+  const displayLevel = profile.level ?? computedLevel?.level ?? (profile.roleType === 'admin' ? 99 : 1);
   const displayLevelTitle = profile.levelTitle || computedLevel?.title;
+
+  const decoration = isSelf
+    ? loadLocalDecorations(profile.roleType === 'admin')
+    : peerDecoration ||
+      getMemberDecoration({
+        id: profile.id,
+        role: profile.roleType === 'admin' ? 'admin' : profile.roleType === 'teacher' ? 'teacher' : 'member',
+        isAi: profile.id.includes('max10-ai'),
+      });
+  const npTemplate = getNameplateById(decoration.nameplateId);
+
+  const handleQuickDirectSend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = quickDmText.trim();
+    if (!text || sendingQuickDm || isSelf) return;
+    setSendingQuickDm(true);
+    try {
+      await fetch('/api/direct-messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          senderId: currentUserId,
+          senderName: currentUserName,
+          senderAvatar: currentUserAvatar,
+          recipientId: profile.id,
+          content: text,
+        }),
+      });
+      setQuickDmText('');
+      setQuickDmSent(true);
+      setTimeout(() => setQuickDmSent(false), 2600);
+    } catch {}
+    setSendingQuickDm(false);
+  };
+
+  const badgeObjects = decoration.badges
+    .map((id) => BADGE_CATALOG.find((b) => b.id === id))
+    .filter(Boolean);
 
   return (
     <div
-      className="fixed inset-0 z-[10050] flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in select-none"
+      className="fixed inset-0 z-[10050] flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in select-none"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`w-full max-w-md rounded-3xl border shadow-2xl overflow-hidden transition-all ${
+        className={`w-full max-w-md rounded-3xl border shadow-2xl overflow-hidden transition-all max-h-[92vh] flex flex-col ${
           isDark
-            ? 'bg-[#0e1422] border-white/15 text-slate-100'
+            ? 'bg-[#111214] border-white/15 text-slate-100'
             : 'bg-white border-slate-200 text-slate-900'
         }`}
       >
-        {/* Top Banner */}
-        <div className="relative px-5 pt-5 pb-10 bg-gradient-to-r from-emerald-700 via-teal-700 to-slate-900 text-white">
+        {/* Discord-style Large Cover Banner */}
+        <div
+          className="relative h-28 px-5 pt-4 pb-10 np-bg-animate overflow-hidden shrink-0"
+          style={{ backgroundImage: npTemplate.gradientCss }}
+        >
+          <NameplateEffectOverlay effectType={npTemplate.effectType} />
           <button
             type="button"
             onClick={onClose}
-            className="absolute top-3.5 right-3.5 p-2 rounded-xl bg-black/25 hover:bg-black/45 text-white transition-colors cursor-pointer"
+            className="absolute top-3.5 right-3.5 z-20 p-2 rounded-full bg-black/35 hover:bg-black/55 text-white transition-colors cursor-pointer"
             aria-label="Đóng hồ sơ thành viên"
           >
             <X className="w-4 h-4" />
           </button>
 
-          <div className="flex items-center gap-2 text-[11px] font-bold text-emerald-200">
+          <div className="relative z-10 flex items-center gap-1.5 text-[11px] font-bold text-white/95 drop-shadow-xs">
             <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-            <span>Hồ sơ thành viên</span>
-            <span aria-hidden="true">·</span>
-            <span>{contextLabel}</span>
+            <span>Hồ sơ Discord · {contextLabel}</span>
           </div>
         </div>
 
-        {/* Avatar Overlap + Identity */}
-        <div className="px-5 pb-5 -mt-8 relative z-10 space-y-4">
+        {/* Scrollable Body */}
+        <div className="px-5 pb-5 -mt-10 relative z-10 space-y-3.5 overflow-y-auto">
+          {/* Avatar with Animated Frame + Action Badges */}
           <div className="flex items-end justify-between gap-3">
-            <div className="p-1 rounded-full bg-white dark:bg-[#0e1422] shadow-lg">
+            <div className="p-1.5 rounded-full bg-white dark:bg-[#111214] shadow-xl">
               <UserAvatarWithStatus
                 name={profile.name}
                 src={profile.avatar}
                 presenceStatus={profile.presenceStatus}
+                frameId={decoration.frameId}
                 size="xl"
               />
             </div>
 
             <div className="flex items-center gap-1.5 pb-1">
-              <span
-                className={`text-[11px] font-extrabold px-2.5 py-1 rounded-lg border ${
-                  profile.roleType === 'admin'
-                    ? 'bg-blue-500/12 border-blue-500/30 text-blue-600 dark:text-blue-300'
-                    : profile.roleType === 'teacher'
-                    ? 'bg-emerald-500/12 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-                    : 'bg-amber-500/12 border-amber-500/30 text-amber-700 dark:text-amber-300'
-                }`}
-              >
-                {profile.roleLabel}
-              </span>
+              {!isSelf && onToggleFriend && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLocalFriendState((prev) => !prev);
+                    onToggleFriend(profile);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-colors ${
+                    localFriendState
+                      ? 'bg-[#248046] text-white hover:bg-[#1a6334]'
+                      : 'bg-[#5865f2] text-white hover:bg-[#4752c4]'
+                  }`}
+                >
+                  {localFriendState ? (
+                    <>
+                      <UserCheck className="w-3.5 h-3.5" />
+                      <span>Đã kết bạn</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span>Kết bạn</span>
+                    </>
+                  )}
+                </button>
+              )}
+
+              {isSelf && onOpenDecorationModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenDecorationModal();
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-[#5865f2] hover:bg-[#4752c4] text-white text-xs font-extrabold cursor-pointer"
+                >
+                  🎨 Trang trí hồ sơ
+                </button>
+              )}
             </div>
           </div>
 
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-lg font-black tracking-tight">{profile.name}</h3>
-              {isSelf && (
-                <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-                  (Bạn)
-                </span>
+          {/* Nameplate Strip Showcase */}
+          <NameplateBannerStrip nameplateId={decoration.nameplateId} className="rounded-2xl px-3.5 py-2.5 shadow-md">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <h3 className={`text-base font-black tracking-tight truncate ${npTemplate.textColorClass}`}>
+                    {profile.name}
+                  </h3>
+                  {isSelf && (
+                    <span className="text-[11px] font-bold text-white/90">(Bạn)</span>
+                  )}
+                </div>
+                <p className={`text-[11px] font-semibold mt-0.5 flex items-center gap-1.5 ${npTemplate.subTextColorClass}`}>
+                  <span>{presenceConf.iconEmoji}</span>
+                  <span>{presenceConf.shortLabel} · {profile.roleLabel}</span>
+                </p>
+              </div>
+              <UserBadgesStrip
+                role={profile.roleType === 'admin' ? 'admin' : profile.roleType === 'teacher' ? 'teacher' : 'student'}
+                isAi={profile.id.includes('max10-ai')}
+                countryCode={isSelf ? countryCode : undefined}
+                level={displayLevel}
+                badges={decoration.badges}
+                size="xs"
+              />
+            </div>
+          </NameplateBannerStrip>
+
+          {/* Badges List Card */}
+          <div
+            className={`p-3 rounded-2xl border space-y-2 ${
+              isDark ? 'bg-[#1e1f22] border-white/[0.08]' : 'bg-slate-50 border-slate-200/85'
+            }`}
+          >
+            <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-[#949ba4]">
+              <span className="flex items-center gap-1">
+                <Award className="w-3.5 h-3.5 text-amber-400" />
+                Huy hiệu nổi bật
+              </span>
+              <span>{npTemplate.previewEmoji} {npTemplate.name}</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {badgeObjects.length > 0 ? (
+                badgeObjects.map((b) => (
+                  <span
+                    key={b!.id}
+                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] font-bold ${
+                      isDark ? b!.colorClass : 'bg-white border-slate-200 text-slate-800'
+                    }`}
+                  >
+                    <span>{b!.emoji}</span>
+                    <span>{b!.name}</span>
+                  </span>
+                ))
+              ) : (
+                <span className="text-xs text-slate-400">Chưa gắn huy hiệu</span>
               )}
             </div>
-            <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5 flex items-center gap-1.5">
-              <span>{presenceConf.iconEmoji}</span>
-              <span>{presenceConf.sublabel}</span>
-            </p>
           </div>
 
           {/* Public Details Grid (ONLY non-sensitive public info) */}
           <div
-            className={`p-3.5 rounded-2xl border grid grid-cols-2 gap-3 text-xs ${
+            className={`p-3 rounded-2xl border grid grid-cols-2 gap-3 text-xs ${
               isDark
-                ? 'bg-white/[0.03] border-white/[0.08]'
+                ? 'bg-[#1e1f22] border-white/[0.08]'
                 : 'bg-slate-50 border-slate-200/85'
             }`}
           >
@@ -254,7 +405,7 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                 <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
                   Thành tích Thi Đấu
                 </div>
-                <div className="font-black tabular-nums mt-0.5 text-amber-600 dark:text-amber-400">
+                <div className="font-black tabular-nums mt-0.5 text-amber-500">
                   {profile.duelWins ?? 0} thắng / {profile.duelPlayed ?? 0} trận
                 </div>
               </div>
@@ -267,11 +418,8 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                   Cấp độ &amp; XP
                 </div>
                 <div className="font-bold tabular-nums mt-0.5">
-                  {displayLevel
-                    ? `Cấp ${formatLevelLabel(displayLevel)}${
-                        typeof profile.xp === 'number' ? ` · ${profile.xp.toLocaleString()} XP` : ''
-                      }`
-                    : 'Đang tích lũy XP'}
+                  Cấp {formatLevelLabel(displayLevel)}
+                  {typeof profile.xp === 'number' ? ` · ${profile.xp.toLocaleString()} XP` : ''}
                 </div>
                 {displayLevelTitle && (
                   <div className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
@@ -296,8 +444,8 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
 
           {profile.bio && (
             <div
-              className={`px-3.5 py-2.5 rounded-xl border text-xs leading-relaxed ${
-                isDark ? 'bg-white/[0.02] border-white/[0.07] text-zinc-300' : 'bg-slate-50 border-slate-200 text-slate-700'
+              className={`px-3.5 py-2 rounded-xl border text-xs leading-relaxed ${
+                isDark ? 'bg-[#1e1f22] border-white/[0.07] text-zinc-300' : 'bg-slate-50 border-slate-200 text-slate-700'
               }`}
             >
               <span className="font-bold text-slate-500 dark:text-zinc-400">Giới thiệu: </span>
@@ -305,22 +453,55 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
             </div>
           )}
 
-          {/* Explicit Privacy Protection Notice */}
+          {/* Inline Direct Message Box (Discord Popover Quick DM) */}
+          {!isSelf && (
+            <form onSubmit={handleQuickDirectSend} className="space-y-1.5">
+              <div
+                className={`flex items-center gap-1.5 p-1.5 rounded-xl border ${
+                  isDark ? 'bg-[#1e1f22] border-white/10' : 'bg-slate-100 border-slate-200'
+                }`}
+              >
+                <input
+                  type="text"
+                  value={quickDmText}
+                  onChange={(e) => setQuickDmText(e.target.value)}
+                  placeholder={`Nhắn tin trực tiếp tới @${profile.name}...`}
+                  className="flex-1 min-w-0 bg-transparent px-2 py-1 text-xs outline-none text-slate-900 dark:text-white placeholder-slate-400"
+                />
+                <button
+                  type="submit"
+                  disabled={!quickDmText.trim() || sendingQuickDm}
+                  className="px-2.5 py-1.5 rounded-lg bg-[#5865f2] hover:bg-[#4752c4] disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                  title="Gửi tin nhắn trực tiếp"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Gửi</span>
+                </button>
+              </div>
+              {quickDmSent && (
+                <div className="text-[11px] font-bold text-emerald-500 px-1">
+                  ✓ Đã gửi tin nhắn trực tiếp cho {profile.name}!
+                </div>
+              )}
+            </form>
+          )}
+
+          {/* Privacy Guarantee */}
           <div
-            className={`px-3 py-2 rounded-xl border flex items-center gap-2 text-[11px] font-semibold ${
+            className={`px-3 py-1.5 rounded-xl border flex items-center gap-2 text-[10px] font-semibold ${
               isDark
-                ? 'bg-emerald-500/8 border-emerald-500/25 text-emerald-300'
+                ? 'bg-emerald-500/8 border-emerald-500/20 text-emerald-300'
                 : 'bg-emerald-50 border-emerald-200 text-emerald-800'
             }`}
           >
-            <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
             <span>
-              Bảo mật riêng tư: Chỉ hiển thị thông tin công khai — ẩn hoàn toàn Mật khẩu, Gmail &amp; Số điện thoại.
+              Bảo mật riêng tư: Ẩn hoàn toàn Mật khẩu, Gmail &amp; Số điện thoại.
             </span>
           </div>
 
-          {/* Action Buttons: Thi đấu ngay + Nhắn tin 1-1 */}
-          <div className="flex flex-wrap items-center gap-2 pt-1">
+          {/* Primary Action Buttons */}
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => {
@@ -342,19 +523,19 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                 }}
                 className={`py-2.5 px-4 rounded-xl border font-bold text-xs sm:text-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
                   isDark
-                    ? 'bg-white/[0.05] border-white/10 hover:bg-white/10 text-zinc-200'
+                    ? 'bg-white/[0.06] border-white/10 hover:bg-white/12 text-zinc-200'
                     : 'bg-slate-100 border-slate-200 hover:bg-slate-200 text-slate-800'
                 }`}
               >
-                <MessageSquare className="w-4 h-4 shrink-0 text-emerald-500" />
-                <span>Nhắn tin 1-1</span>
+                <MessageSquare className="w-4 h-4 shrink-0 text-[#5865f2]" />
+                <span>Mở khung chat 1-1</span>
               </button>
             )}
           </div>
 
           {loadingProfile && (
             <div className="text-[10px] text-center text-slate-400 dark:text-zinc-500">
-              Đang đồng bộ thành tích thi đấu mới nhất...
+              Đang đồng bộ thành tích mới nhất...
             </div>
           )}
         </div>

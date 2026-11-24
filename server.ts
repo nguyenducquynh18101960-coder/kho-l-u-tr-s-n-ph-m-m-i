@@ -4,7 +4,8 @@ import fs from "fs";
 import { GoogleGenAI, Type, Modality, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
 import { registerVisualStudioRoutes } from "./server/visualStudio";
-import { registerSecurityRoutesAndMiddleware } from "./server/securityFirewall";
+import { registerSecurityRoutesAndMiddleware, MASTER_SECURITY_CODE } from "./server/securityFirewall";
+import { getCountryCulture } from "./src/data/countryCultures";
 
 dotenv.config();
 
@@ -1468,21 +1469,25 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
     try {
       const {
         text,
-        voice = "Kore", // 'Kore' (Nữ dịu dàng), 'Puck' (Nam trẻ), 'Fenrir' (Thầy giáo), 'Zephyr' (Năng động), 'Charon' (Trầm ấm)
+        voice = "Kore", // Female: 'Kore', 'Zephyr', 'Aoede', 'Leda' | Male: 'Puck', 'Fenrir', 'Charon', 'Orus'
+        gender,
         speed = 1.0,
+        lang = "vi-VN",
       } = req.body;
 
       if (!text || !text.trim()) {
         return res.status(400).json({ success: false, error: "Thiếu nội dung cần đọc bằng giọng nói AI." });
       }
 
+      const isViLang = !lang || String(lang).toLowerCase().startsWith("vi");
+
       // Clean markdown symbols, LaTeX formulas, bullet marks to ensure fluid, natural voice
       let cleanText = text
         .replace(/[*#_`~>\[\]]/g, " ")
-        .replace(/\$\$(.*?)\$\$/g, " công thức toán $1 ")
+        .replace(/\$\$(.*?)\$\$/g, isViLang ? " công thức toán $1 " : " $1 ")
         .replace(/\$(.*?)\$/g, " $1 ")
-        .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, " $1 trên $2 ")
-        .replace(/\\sqrt\{([^}]+)\}/g, " căn bậc hai của $1 ")
+        .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, isViLang ? " $1 trên $2 " : " $1 / $2 ")
+        .replace(/\\sqrt\{([^}]+)\}/g, isViLang ? " căn bậc hai của $1 " : " sqrt $1 ")
         .replace(/https?:\/\/\S+/g, "")
         .replace(/\s+/g, " ")
         .trim();
@@ -1492,8 +1497,16 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
         cleanText = cleanText.slice(0, 1200) + "...";
       }
 
-      const validVoices = ["Kore", "Puck", "Fenrir", "Zephyr", "Charon"];
-      const selectedVoice = validVoices.includes(voice) ? voice : "Kore";
+      const femaleVoices = ["Kore", "Zephyr", "Aoede", "Leda"];
+      const maleVoices = ["Puck", "Fenrir", "Charon", "Orus"];
+      const allValidVoices = [...femaleVoices, ...maleVoices];
+
+      let selectedVoice = allValidVoices.includes(voice) ? voice : "Kore";
+      if (gender === "female" && !femaleVoices.includes(selectedVoice)) {
+        selectedVoice = "Kore";
+      } else if (gender === "male" && !maleVoices.includes(selectedVoice)) {
+        selectedVoice = "Fenrir";
+      }
 
       const ai = getGenAIClient();
       const response = await ai.models.generateContent({
@@ -1644,6 +1657,12 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
       message: singleMessage,
       image = null, // { mimeType: string, data: string }
       userName = "Bạn học",
+      countryCode = "VN",
+      bilingualMode = true,
+      interactiveQuizMode = false,
+      quizSubject = "Toán",
+      quizRole = "tutor",
+      communityContext = null,
     } = req.body || {};
 
     const messages = [...incomingMessages];
@@ -1653,6 +1672,8 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
 
     const lastRawMsg = messages[messages.length - 1]?.content || "";
     const lastMsg = lastRawMsg.toLowerCase();
+    const bypassFastPaths = Boolean(interactiveQuizMode || communityContext);
+    const activeCountry = getCountryCulture(countryCode);
 
     // User Requirement: Khi gõ "thoat" để kết thúc hội thoại -> "Bot: Tạm biệt nhé!"
     const cleanCmd = lastMsg.trim().toLowerCase();
@@ -1674,6 +1695,7 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
 
       // Fast-path: Check payment receipt screenshot upload in Chat (User Requested: sau khi quét mã đã chuyển tiền thì phải chụp ảnh màn hình và gửi cho Max10 thì mới nâng cấp gói)
       if (
+        !bypassFastPaths &&
         image &&
         (lastMsg.includes("chuyển") ||
           lastMsg.includes("biên lai") ||
@@ -1714,13 +1736,14 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
 
       // Fast-path: Check creator questions
       if (
-        lastMsg.includes("ai tạo") ||
-        lastMsg.includes("ai làm") ||
-        lastMsg.includes("ai lập trình") ||
-        lastMsg.includes("tác giả") ||
-        lastMsg.includes("người tạo") ||
-        lastMsg.includes("ai phát triển") ||
-        lastMsg.includes("bạn là ai")
+        !bypassFastPaths &&
+        (lastMsg.includes("ai tạo") ||
+          lastMsg.includes("ai làm") ||
+          lastMsg.includes("ai lập trình") ||
+          lastMsg.includes("tác giả") ||
+          lastMsg.includes("người tạo") ||
+          lastMsg.includes("ai phát triển") ||
+          lastMsg.includes("bạn là ai"))
       ) {
         const studentName = (userName as string)?.trim() || "bạn";
         return res.json({
@@ -1731,7 +1754,8 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
 
       // Fast-path: Check payment / transfer / QR inquiries (User Requested: khi người ta muốn hỏi hay muốn chuyển tiền thì sẽ đưa ra một link đưa đến mã QR này)
       if (
-        lastMsg.includes("chuyển tiền") ||
+        !bypassFastPaths &&
+        (lastMsg.includes("chuyển tiền") ||
         lastMsg.includes("chuyển khoản") ||
         lastMsg.includes("mã qr") ||
         lastMsg.includes("ma qr") ||
@@ -1748,7 +1772,7 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
         lastMsg.includes("giá gói") ||
         lastMsg.includes("bảng giá") ||
         lastMsg.includes("stk") ||
-        lastMsg.includes("số tài khoản")
+        lastMsg.includes("số tài khoản"))
       ) {
         const studentName = (userName as string)?.trim() || "bạn";
         return res.json({
@@ -1766,13 +1790,14 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
 
       // Fast-path: Check User Request on Removing 6 characters, Speech by command, ChatGPT DALL-E 3 image generation, and Purging fake accounts for Mạc Khánh Duy
       const isCustomStudioOrAdminRequest =
-        lastMsg.includes("bỏ 6 nhân vật") ||
-        lastMsg.includes("theo lệnh thì mới cho giọng nói") ||
-        lastMsg.includes("bỏ các tài khoản giả") ||
-        lastMsg.includes("xóa tài khoản") ||
-        lastMsg.includes("reset tài khoản") ||
-        lastMsg.includes("duykobell123") ||
-        lastMsg.includes("mackhanhduy992012@gmail.com");
+        !bypassFastPaths &&
+        (lastMsg.includes("bỏ 6 nhân vật") ||
+          lastMsg.includes("theo lệnh thì mới cho giọng nói") ||
+          lastMsg.includes("bỏ các tài khoản giả") ||
+          lastMsg.includes("xóa tài khoản") ||
+          lastMsg.includes("reset tài khoản") ||
+          lastMsg.includes("duykobell123") ||
+          lastMsg.includes("mackhanhduy992012@gmail.com"));
 
       if (isCustomStudioOrAdminRequest) {
         try {
@@ -1818,6 +1843,7 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
 
       // Fast-path: Check comprehensive user prompt combining AI Video + Poster + Mindmap + Group Chat
       const isComprehensiveStudioPrompt =
+        !bypassFastPaths &&
         (lastMsg.includes("tạo video người ai nói") || lastMsg.includes("video người ai nói")) &&
         (lastMsg.includes("poster") ||
           lastMsg.includes("tạo ảnh") ||
@@ -1887,11 +1913,11 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
       }
 
       // Fast-path: Check combined Video + Image + Poster requests in Chat
-      const wantsCombined = isCombinedImageAndVideoRequest(lastMsg);
-      const wantsVideo = isVideoGenerationRequest(lastMsg);
-      const wantsPoster = isPosterGenerationRequest(lastMsg);
-      const wantsMindMap = isMindMapGenerationRequest(lastMsg);
-      const wantsImage = isImageGenerationRequest(lastMsg);
+      const wantsCombined = !bypassFastPaths && isCombinedImageAndVideoRequest(lastMsg);
+      const wantsVideo = !bypassFastPaths && isVideoGenerationRequest(lastMsg);
+      const wantsPoster = !bypassFastPaths && isPosterGenerationRequest(lastMsg);
+      const wantsMindMap = !bypassFastPaths && isMindMapGenerationRequest(lastMsg);
+      const wantsImage = !bypassFastPaths && isImageGenerationRequest(lastMsg);
 
       if (wantsCombined || (wantsVideo && (wantsImage || wantsPoster))) {
         try {
@@ -2161,11 +2187,77 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
 
       const ai = getGenAIClient();
       const useHighThinking = Boolean(
-        isThinking || mode === "grade_10_secret" || mode === "trap_detector" || Boolean(image?.data)
+        !interactiveQuizMode && (isThinking || mode === "grade_10_secret" || mode === "trap_detector" || Boolean(image?.data))
       );
 
-      const systemInstruction = `Bạn là "Max10 AI Ultra" — Siêu Trợ Lý AI Thế Hệ Mới (vận hành trên kiến trúc suy luận đỉnh cao Gemini 4) và Gia Sư Điểm 10 số 1 tại Việt Nam.
+      const countryStyleBlock = `
+BỘ CHỌN QUỐC GIA & NGÔN NGỮ ĐANG KÍCH HOẠT: ${activeCountry.flag} ${activeCountry.name} (${activeCountry.languageName})
+- Văn hóa, cách xưng hô & giọng điệu bản xứ: ${activeCountry.promptInstruction}
+- ${
+        activeCountry.code === "VN"
+          ? "Sử dụng Tiếng Việt chuẩn mực, thân thiện."
+          : bilingualMode
+          ? `CHẾ ĐỘ SONG NGỮ ĐANG BẬT: Hãy viết lời thoại chính bằng ${activeCountry.languageName} chuẩn bản xứ (đúng giọng điệu & xưng hô của người ${activeCountry.name}), sau đó kèm 1 dòng dịch/gợi ý ngắn gọn bằng Tiếng Việt (ví dụ: "🇻🇳 Dịch nghĩa: ...") để học sinh Việt Nam hiểu rõ ngay lập tức.`
+          : `CHẾ ĐỘ BẢN NGỮ HOÀN TOÀN: Trả lời 100% bằng ${activeCountry.languageName} chuẩn bản xứ của ${activeCountry.name} (chỉ giải thích ngắn bằng Tiếng Việt nếu người dùng yêu cầu).`
+      }`;
+
+      let systemInstruction = "";
+
+      if (communityContext && typeof communityContext === "object") {
+        const commCat = communityContext.category || "study";
+        const commName = communityContext.name || "Cộng đồng Max10";
+        if (commCat === "game") {
+          systemInstruction = `Bạn là "Max10 AI" khi tham gia thảo luận trong CỘNG ĐỒNG TRÒ CHƠI "${commName}"${
+            communityContext.gameTitle ? ` (Tựa game: ${communityContext.gameTitle}` : ""
+          }${communityContext.gamePlatform ? ` · Nền tảng: ${communityContext.gamePlatform}` : ""}${
+            communityContext.gameTitle ? ")" : ""
+          }.
+QUY TẮC CỘNG ĐỒNG GAME (BẮT BUỘC):
+1. Bạn CHỈ thảo luận về chủ đề TRÒ CHƠI ĐIỆN TỬ (gameplay, chiến thuật, đội hình, build nhân vật, tìm đồng đội, mẹo leo rank, sự kiện game, kỹ năng phản xạ, cân bằng học và chơi lành mạnh) phù hợp với cộng đồng "${commName}".
+2. KHÔNG tự ý biến cuộc trò chuyện thành bài giảng sách giáo khoa hay kiểm tra bài tập trừ khi thành viên chủ động hỏi bài học cụ thể.
+3. Giọng điệu vui vẻ, thân thiện như một người bạn game thủ am hiểu, lịch sự và tích cực (không nói tục). Trả lời ngắn gọn, súc tích, đúng trọng tâm câu hỏi của "${userName || "Thành viên"}".
+${countryStyleBlock}`;
+        } else if (commCat === "chat") {
+          systemInstruction = `Bạn là "Max10 AI" khi tham gia thảo luận trong CỘNG ĐỒNG TRÒ CHUYỆN TỰ DO "${commName}".
+QUY TẮC CỘNG ĐỒNG TRÒ CHUYỆN TỰ DO (BẮT BUỘC):
+1. Đây là không gian giao lưu trò chuyện tự do, thoải mái về đời sống, sở thích, phim ảnh, âm nhạc, câu chuyện vui, tâm sự tuổi học trò, kỹ năng mềm hoặc bất kỳ chủ đề giao lưu nào thành viên đang nói tới.
+2. Trò chuyện tự nhiên, gần gũi, hài hước duyên dáng và ấm áp như một người bạn thật — KHÔNG giảng bài khô khan hay ép chủ đề về bài tập trừ khi được hỏi.
+3. Tôn trọng quy tắc cộng đồng văn minh, trả lời súc tích 2–5 câu để cuộc trò chuyện trôi chảy.
+${countryStyleBlock}`;
+        } else {
+          systemInstruction = `Bạn là "Max10 AI" khi tham gia thảo luận trong CỘNG ĐỒNG HỌC TẬP "${commName}" (${grade}).
+QUY TẮC CỘNG ĐỒNG HỌC TẬP (BẮT BUỘC):
+1. Tập trung thảo luận sâu về HỌC TẬP, giải bài tập, phương pháp ôn thi, mẹo làm nhanh, công thức chuẩn SGK và giải đáp thắc mắc kiến thức các môn học cho "${userName || "Thành viên"}".
+2. Trình bày công thức rõ ràng (dùng x², √, ×, ÷, →, H₂O; không dùng mã LaTeX thô), súc tích vừa phải để dễ đọc trong khung chat nhóm.
+3. Khích lệ tinh thần thi đua học giỏi cùng các thành viên trong cộng đồng.
+${countryStyleBlock}`;
+        }
+      } else if (interactiveQuizMode) {
+        const userTurnsCount = messages.filter((m: any) => m.role === "user").length;
+        const estimatedLevel = Math.min(4, Math.max(1, Math.ceil(userTurnsCount / 2)));
+        const roleLabel =
+          quizRole === "deskmate"
+            ? "Bạn học cùng bàn thông minh, nhiệt tình, hay đố vui cùng tiến bộ"
+            : "Gia sư 1 kèm 1 tận tâm, kiên nhẫn và truyền cảm hứng";
+
+        systemInstruction = `Bạn đang ở CHẾ ĐỘ NÓI CHUYỆN & HỎI BÀI TƯƠNG TÁC (Interactive Quiz & Voice) với học sinh "${userName || "Bạn học"}" (${grade}).
+- VAI TRÒ CỦA BẠN: ${roleLabel}.
+- CHỦ ĐỀ HỎI BÀI ĐANG CHỌN: "${quizSubject}".
+${countryStyleBlock}
+
+QUY TẮC PHẢN HỒI BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI 100%):
+1. KHÔNG GIẢNG GIẢI DÀI DÒNG MỘT LÚC! Tổng độ dài mỗi lượt trả lời chỉ khoảng 2 đến 4 câu ngắn gọn, tự nhiên như lời nói trực tiếp để hệ thống đọc thành tiếng (Text-to-Speech) nghe thật hay.
+2. MỖI LƯỢT CHỈ ĐẶT ĐÚNG 1 CÂU HỎI NGẮN GỌN về chủ đề "${quizSubject}" (phù hợp ${grade}), rồi DỪNG LẠI đợi người dùng trả lời. Tuyệt đối KHÔNG hỏi 2 câu cùng lúc, KHÔNG tự trả lời hộ trước khi học sinh đáp.
+3. KHI HỌC SINH VỪA TRẢ LỜI CÂU TRƯỚC:
+   - Nếu đúng: Khen ngợi ngắn gọn 1 câu cụ thể, hào hứng -> Sau đó chuyển ngay sang 1 câu hỏi tiếp theo.
+   - Nếu sai hoặc chưa chắc / xin gợi ý: Động viên nhẹ nhàng, đưa ra 1 gợi ý nhỏ (hoặc giải thích tối đa 1 câu thật ngắn rồi cho thử câu tương tự/tiếp theo).
+   - Nếu người dùng mới bấm "Bắt đầu hỏi bài": Chào 1 câu ngắn theo văn hóa ${activeCountry.name} và hỏi ngay câu hỏi đầu tiên ở Mức 1 (Cơ bản).
+4. ĐỘ KHÓ TĂNG DẦN THEO NĂNG LỰC (Hiện tại ước lượng ở Mức ${estimatedLevel}/4: 1=Cơ bản dễ, 2=Thông hiểu, 3=Vận dụng, 4=Nâng cao): Nếu học sinh trả lời đúng liên tiếp hãy tăng nhẹ độ khó; nếu học sinh trả lời sai hãy giữ nguyên hoặc hạ nhẹ để củng cố tự tin.
+5. Định dạng dễ nghe cho giọng nói TTS: Tránh bảng biểu markdown, tránh code block, tránh ký hiệu rườm rà; viết ngắn, rõ ràng, kết thúc bằng dấu hỏi "?".`;
+      } else {
+        systemInstruction = `Bạn là "Max10 AI Ultra" — Siêu Trợ Lý AI Thế Hệ Mới (vận hành trên kiến trúc suy luận đỉnh cao Gemini 4) và Gia Sư Điểm 10 số 1 tại Việt Nam.
 Mục tiêu của bạn là giải quyết MỌI yêu cầu của "${userName || 'Bạn học'}" (${grade}, môn ${subject}) thông minh, chính xác, dễ hiểu và hữu ích hơn bất kỳ AI nào khác.
+${countryStyleBlock}
 
 1. NĂNG LỰC TOÀN DIỆN VƯỢT TRỘI:
    - Nếu là BÀI TẬP / ĐỀ THI / KIẾN THỨC CÁC MÔN (Toán, Ngữ Văn, Tiếng Anh, KHTN, Lý, Hóa, Sinh, Sử, Địa, GDCD, Tin học, Công nghệ...):
@@ -2175,7 +2267,7 @@ Mục tiêu của bạn là giải quyết MỌI yêu cầu của "${userName ||
        * **Cách 2 (Giải Nhanh / Mẹo Tư Duy / Thử Lại):** Mẹo làm nhanh trắc nghiệm hoặc cách kiểm tra ngược kết quả trong 10 giây.
      + Với trắc nghiệm: Chốt ngay "**Đáp án đúng: ...**" ở đầu, giải thích rõ vì sao đúng và bóc trần bẫy của các đáp án nhiễu.
      + Luôn có mục **"⚠️ CẢNH BÁO BẪY ĐIỂM 10"** chỉ ra lỗi sai 90% học sinh hay mất điểm oan.
-   - Nếu là YÊU CẦU ĐA NĂNG (lập trình code chạy được, viết văn/bài luận/email, dịch thuật tự nhiên Anh–Việt–Nhật–Hàn–Trung, tóm tắt tài liệu, lên kế hoạch, giải thích khoa học đời sống, tư duy sáng tạo):
+   - Nếu là YÊU CẦU ĐA NĂNG (lập trình code chạy được, viết văn/bài luận/email, dịch thuật tự nhiên Anh–Việt–Nhật–Hàn–Trung–Đức–Pháp, tóm tắt tài liệu, lên kế hoạch, giải thích khoa học đời sống, tư duy sáng tạo):
      + Trả lời sắc sảo, cấu trúc gọn đẹp bằng Markdown (tiêu đề rõ, bảng so sánh khi cần, code block có chú thích sạch sẽ), đi thẳng vào giải pháp tối ưu nhất, không nói chung chung.
 
 2. QUY TẮC KÝ HIỆU TOÁN & KHOA HỌC CHUẨN SGK VIỆT NAM (KHÔNG MÃ LATEX THÔ):
@@ -2187,18 +2279,19 @@ Mục tiêu của bạn là giải quyết MỌI yêu cầu của "${userName ||
    - TUYỆT ĐỐI KHÔNG để sót \\frac, \\sqrt, \\cdot, \\times, \\Rightarrow hay \\[...\\].
 
 3. TRẢI NGHIỆM TƯƠNG TÁC GÂY NGHIỆN:
-   - Gọi tên thân mật "${userName || 'bạn'}" tự nhiên, truyền cảm hứng.
+   - Gọi tên thân mật "${userName || 'bạn'}" tự nhiên, truyền cảm hứng theo đúng văn hóa & giọng điệu ${activeCountry.name}.
    - Nếu người dùng hỏi về nâng cấp gói/thanh toán/mã QR: giải thích ngắn gọn và gắn link:
      👉 [⚡ Mở Mã QR Gói Plus (100.000đ)](#chuyen-khoan-plus) · 👉 [👑 Mở Mã QR Gói Premium (500.000đ)](#chuyen-khoan-premium)
    - Cuối mỗi lời giải hoặc hướng dẫn quan trọng, luôn tặng kèm một mục ngắn **"🎯 Gợi ý bước tiếp theo"** (ví dụ: 1 câu hỏi thử sức tương tự hoặc mẹo nhớ 5 giây) để người dùng học sâu ngay lập tức.
 
 Chế độ hiện tại: ${
-        useHighThinking
-          ? "Max10 DeepThink (Suy luận nhiều lớp, soi bẫy từng chi tiết & tự kiểm chứng kết quả 100%)"
-          : mode === "all_in_one"
-          ? "Siêu trợ lý đa năng (Học tập, Lập trình, Sáng tạo, Dịch thuật & Giải quyết vấn đề)"
-          : "Max10 AI Turbo (Nhanh, súc tích, chuẩn xác, giải từng bước)"
-      }.`;
+          useHighThinking
+            ? "Max10 DeepThink (Suy luận nhiều lớp, soi bẫy từng chi tiết & tự kiểm chứng kết quả 100%)"
+            : mode === "all_in_one"
+            ? "Siêu trợ lý đa năng (Học tập, Lập trình, Sáng tạo, Dịch thuật & Giải quyết vấn đề)"
+            : "Max10 AI Turbo (Nhanh, súc tích, chuẩn xác, giải từng bước)"
+        }.`;
+      }
 
       // Build conversation contents
       const contentsPayload: any[] = [];
@@ -3916,6 +4009,37 @@ Yêu cầu kịch bản video gồm:
     deletedStarterCommunities?: string[];
     trendingSeededV1?: boolean;
     challenges?: any[];
+    loginLogs?: Array<{
+      id: string;
+      userId: string;
+      userName: string;
+      role: string;
+      provider?: string;
+      createdAt: number;
+      timeStr: string;
+    }>;
+    forcedLogoutAt?: Record<string, number>;
+    vipGifts?: Record<
+      string,
+      {
+        id: string;
+        xpBonus: number;
+        unlockedNameplates: string[];
+        unlockedFrames: string[];
+        equippedNameplateId?: string;
+        equippedFrameId?: string;
+        message?: string;
+        grantedAt: number;
+      }
+    >;
+    pinnedSystemBanner?: {
+      id: string;
+      title: string;
+      content: string;
+      severity: "info" | "warning" | "celebrate";
+      updatedAt: number;
+      author: string;
+    } | null;
   }
 
   const scrubSensitiveContactText = (val?: string): string | undefined => {
@@ -4068,7 +4192,30 @@ Yêu cầu kịch bản video gồm:
         onlyAdminCanAdd: false,
         code: "CD-HOCTAP",
         pinnedNotice:
-          "📚 Cộng đồng Học tập & Thi đấu Điểm 10 — Nhấp vào ảnh đại diện thành viên để xem hồ sơ hoặc thách đấu!",
+          "📚 Cộng đồng Học tập & Thi đấu Điểm 10 — Thảo luận bài vở cùng thành viên thật & gọi @Max10 AI khi cần giải bài!",
+        members: [adminMember],
+        mutedUsers: {},
+      },
+      {
+        id: "community-chat-max10",
+        name: "Cộng Đồng Trò Chuyện Tự Do Max10",
+        description:
+          "Không gian trò chuyện tự do, tâm sự tuổi học trò, chia sẻ sở thích, phim nhạc & giao lưu vui vẻ cùng bạn bè và @Max10 AI.",
+        grade: "Lớp 9",
+        subject: "Trò chuyện tự do",
+        avatarIcon: "💬",
+        createdAt: now - 290000,
+        createdBy: "admin-mac-khanh-duy",
+        createdByName: "Ban Quản Trị Max10",
+        createdByAdmin: true,
+        isCommunity: true,
+        communityCategory: "chat",
+        approvalStatus: "approved",
+        isPublic: true,
+        onlyAdminCanAdd: false,
+        code: "CD-TROCHUYEN",
+        pinnedNotice:
+          "💬 Cộng đồng Trò chuyện Tự do — Giao lưu thoải mái, văn minh & gọi @Max10 AI tán gẫu cùng mọi người!",
         members: [adminMember],
         mutedUsers: {},
       },
@@ -4638,8 +4785,89 @@ Yêu cầu kịch bản video gồm:
       db.users.push(userObj);
     }
 
+    // Record login/sync audit log (throttle same user within 60s)
+    if (!Array.isArray(db.loginLogs)) db.loginLogs = [];
+    const lastLog = db.loginLogs[0];
+    const nowMs = Date.now();
+    if (!lastLog || lastLog.userId !== userId || nowMs - lastLog.createdAt > 60000) {
+      db.loginLogs.unshift({
+        id: `log-${nowMs}-${Math.random().toString(36).slice(2, 6)}`,
+        userId,
+        userName: userObj.name,
+        role: userObj.role || "student",
+        provider: String(provider || "name"),
+        createdAt: nowMs,
+        timeStr: `${formatVietnamTime(nowMs)} · ${formatVietnamDate(nowMs)}`,
+      });
+      if (db.loginLogs.length > 200) {
+        db.loginLogs = db.loginLogs.slice(0, 200);
+      }
+    }
+
     saveSocialDb(db);
     res.json({ success: true, user: userObj });
+  });
+
+  // Live Session Heartbeat & God-Mode Check (forceLogout, locked, VIP gifts, pinned global banner)
+  app.get("/api/users/session-check", (req, res) => {
+    const userId = String(req.query.userId || "").trim();
+    const sessionStartedAt = Number(req.query.sessionStartedAt || 0);
+    const db = loadSocialDb();
+
+    let forceLogout = false;
+    let locked = false;
+    let vipGift = null;
+
+    if (userId) {
+      const user = (db.users || []).find((u: any) => u && u.id === userId);
+      const nowMs = Date.now();
+      if (user) {
+        const prevActive = Number(user.lastActive || 0);
+        user.lastActive = nowMs;
+        if (!user.presenceStatus || user.presenceStatus === "offline") {
+          user.presenceStatus = "online";
+        }
+        if (nowMs - prevActive > 30000) {
+          saveSocialDb(db);
+        }
+      }
+
+      const forcedTs = Number(db.forcedLogoutAt?.[userId] || 0);
+      if (forcedTs > 0 && forcedTs > sessionStartedAt && userId !== "admin-mac-khanh-duy") {
+        forceLogout = true;
+      }
+      const override = accountOverrides.get(userId);
+      if (override?.status === "locked" && userId !== "admin-mac-khanh-duy") {
+        locked = true;
+      }
+      if (db.vipGifts && db.vipGifts[userId]) {
+        vipGift = db.vipGifts[userId];
+      }
+    }
+
+    res.json({
+      success: true,
+      forceLogout,
+      locked,
+      vipGift,
+      pinnedBanner: db.pinnedSystemBanner || null,
+      serverTime: Date.now(),
+    });
+  });
+
+  app.post("/api/users/vip-gifts/ack", (req, res) => {
+    const { userId, giftId } = req.body || {};
+    if (!userId) {
+      return res.status(400).json({ success: false, error: "Thiếu userId" });
+    }
+    const db = loadSocialDb();
+    if (db.vipGifts && db.vipGifts[userId]) {
+      if (!giftId || db.vipGifts[userId].id === giftId) {
+        delete db.vipGifts[userId];
+        saveSocialDb(db);
+      }
+    }
+    res.json({ success: true });
   });
 
   // Real Class Registrations Endpoint (No fake teachers)
@@ -5173,7 +5401,8 @@ Yêu cầu kịch bản video gồm:
       (lowerDm.includes("@admin") ||
         lowerDm.includes("@mạc khánh duy") ||
         lowerDm.includes("@mac khanh duy") ||
-        recipientId === "admin-mac-khanh-duy")
+        recipientId === "admin-mac-khanh-duy" ||
+        recipientId === "all_broadcast")
     ) {
       if (!db.adminMentions) db.adminMentions = [];
       db.adminMentions.push({
@@ -5254,7 +5483,7 @@ Yêu cầu kịch bản video gồm:
     if (!includePending) {
       communities = communities.filter((g: any) => (g.approvalStatus || "approved") === "approved");
     }
-    if (category === "game" || category === "study") {
+    if (category === "game" || category === "study" || category === "chat") {
       communities = communities.filter((g: any) => g.communityCategory === category);
     }
     if (platform && platform !== "all") {
@@ -5275,7 +5504,7 @@ Yêu cầu kịch bản video gồm:
     res.json({ success: true, communities });
   });
 
-  // Propose a new Game/Study Community (User proposals go to pending queue; Admin is approved immediately)
+  // Propose a new Game/Study/Chat Community (User proposals go to pending queue; Admin is approved immediately)
   app.post("/api/communities/propose", (req, res) => {
     const {
       name,
@@ -5301,7 +5530,8 @@ Yêu cầu kịch bản video gồm:
     if (!db.groups) db.groups = [];
     const now = Date.now();
     const isAdminCreator = requesterId === "admin-mac-khanh-duy" || Boolean(isAdminRequester);
-    const resolvedCategory = communityCategory === "study" ? "study" : "game";
+    const resolvedCategory =
+      communityCategory === "study" ? "study" : communityCategory === "chat" ? "chat" : "game";
     const resolvedPlatform = resolvedCategory === "game" ? gamePlatform || "Cross-Platform" : undefined;
     const commId = "community-" + now + "-" + Math.random().toString(36).substring(2, 5);
     const commCode = "CD-" + Math.random().toString(36).substring(2, 6).toUpperCase();
@@ -5313,10 +5543,17 @@ Yêu cầu kịch bản video gồm:
         String(description || "").trim() ||
         (resolvedCategory === "game"
           ? `Cộng đồng Game ${String(gameTitle || name).trim()} (${resolvedPlatform}) cho thành viên người thật.`
+          : resolvedCategory === "chat"
+          ? "Cộng đồng trò chuyện tự do cho thành viên người thật."
           : "Cộng đồng học tập cho thành viên người thật."),
       grade: "Lớp 9",
-      subject: resolvedCategory === "game" ? `Trò chơi · ${resolvedPlatform}` : "Học tập",
-      avatarIcon: avatarIcon || (resolvedCategory === "game" ? "🎮" : "📚"),
+      subject:
+        resolvedCategory === "game"
+          ? `Trò chơi · ${resolvedPlatform}`
+          : resolvedCategory === "chat"
+          ? "Trò chuyện tự do"
+          : "Học tập",
+      avatarIcon: avatarIcon || (resolvedCategory === "game" ? "🎮" : resolvedCategory === "chat" ? "💬" : "📚"),
       createdAt: now,
       createdBy: isAdminCreator ? "admin-mac-khanh-duy" : requesterId,
       createdByName: requesterName || "Thành viên Max10",
@@ -5326,8 +5563,8 @@ Yêu cầu kịch bản video gồm:
       ...(resolvedPlatform ? { gamePlatform: resolvedPlatform } : {}),
       ...(gameTitle ? { gameTitle: String(gameTitle).trim() } : {}),
       ...(gameGenre ? { gameGenre: String(gameGenre).trim() } : {}),
-      isPinnedTrending: isAdminCreator ? Boolean(pinTrending) : false,
-      ...(isAdminCreator && pinTrending
+      isPinnedTrending: isAdminCreator && resolvedCategory === "game" ? Boolean(pinTrending) : false,
+      ...(isAdminCreator && resolvedCategory === "game" && pinTrending
         ? { pinnedTrendingAt: now, trendingBadge: String(trendingBadge || "Thịnh hành").trim() }
         : {}),
       approvalStatus: isAdminCreator ? "approved" : "pending",
@@ -5339,8 +5576,10 @@ Yêu cầu kịch bản video gồm:
       code: commCode,
       pinnedNotice:
         resolvedCategory === "game"
-          ? `🎮 Cộng đồng ${String(gameTitle || name).trim()} (${resolvedPlatform}) — Nơi giao lưu game thủ người thật!`
-          : `📚 Cộng đồng ${String(name).trim()} — Nơi giao lưu học tập người thật!`,
+          ? `🎮 Cộng đồng ${String(gameTitle || name).trim()} (${resolvedPlatform}) — Nơi giao lưu game thủ & bàn luận game cùng @Max10 AI!`
+          : resolvedCategory === "chat"
+          ? `💬 Cộng đồng ${String(name).trim()} — Trò chuyện tự do, vui vẻ cùng bạn bè & @Max10 AI!`
+          : `📚 Cộng đồng ${String(name).trim()} — Thảo luận học tập & hỏi bài cùng @Max10 AI!`,
       members: [
         {
           id: requesterId,
@@ -5464,7 +5703,10 @@ Yêu cầu kịch bản video gồm:
     }
 
     const current = db.groups[idx];
-    const nextCategory = communityCategory === "game" || communityCategory === "study" ? communityCategory : current.communityCategory;
+    const nextCategory =
+      communityCategory === "game" || communityCategory === "study" || communityCategory === "chat"
+        ? communityCategory
+        : current.communityCategory;
     const nextPlatform = nextCategory === "game" ? gamePlatform || current.gamePlatform || "Cross-Platform" : undefined;
     const nextPinned = typeof isPinnedTrending === "boolean" ? isPinnedTrending : current.isPinnedTrending;
 
@@ -5474,7 +5716,12 @@ Yêu cầu kịch bản video gồm:
       ...(description !== undefined ? { description: String(description).trim() } : {}),
       ...(avatarIcon !== undefined ? { avatarIcon } : {}),
       communityCategory: nextCategory,
-      subject: nextCategory === "game" ? `Trò chơi · ${nextPlatform}` : "Học tập",
+      subject:
+        nextCategory === "game"
+          ? `Trò chơi · ${nextPlatform}`
+          : nextCategory === "chat"
+          ? "Trò chuyện tự do"
+          : "Học tập",
       ...(nextPlatform ? { gamePlatform: nextPlatform } : {}),
       ...(gameTitle !== undefined ? { gameTitle: String(gameTitle).trim() } : {}),
       ...(gameGenre !== undefined ? { gameGenre: String(gameGenre).trim() } : {}),
@@ -5587,7 +5834,8 @@ Yêu cầu kịch bản video gồm:
     // Strictly exclude any AI entities from group/community members
     const initialMembers = rawMembers.filter((m: any) => !isServerAiEntity(m));
 
-    const resolvedCategory = communityCategory === "game" ? "game" : "study";
+    const resolvedCategory =
+      communityCategory === "game" ? "game" : communityCategory === "chat" ? "chat" : "study";
     const resolvedPlatform =
       resolvedCategory === "game" ? gamePlatform || "Cross-Platform" : undefined;
 
@@ -5599,6 +5847,8 @@ Yêu cầu kịch bản video gồm:
         (isCommunity
           ? resolvedCategory === "game"
             ? `Cộng đồng trò chơi (${resolvedPlatform}) & thi đấu cho người thật (do Admin lập)`
+            : resolvedCategory === "chat"
+            ? "Cộng đồng trò chuyện tự do cho nhiều người thật (do Admin lập)"
             : "Cộng đồng học tập cho nhiều người thật (do Admin lập)"
           : "Nhóm học tập và trao đổi bài")
       ).trim(),
@@ -5608,10 +5858,19 @@ Yêu cầu kịch bản video gồm:
         (isCommunity
           ? resolvedCategory === "game"
             ? `Trò chơi · ${resolvedPlatform}`
+            : resolvedCategory === "chat"
+            ? "Trò chuyện tự do"
             : "Học tập"
           : "Toán"),
       avatarIcon:
-        avatarIcon || (isCommunity ? (resolvedCategory === "game" ? "🎮" : "📚") : "📚"),
+        avatarIcon ||
+        (isCommunity
+          ? resolvedCategory === "game"
+            ? "🎮"
+            : resolvedCategory === "chat"
+            ? "💬"
+            : "📚"
+          : "📚"),
       createdAt: req.body.createdAt || Date.now(),
       createdBy,
       createdByName: createdByName || "Bạn",
@@ -5956,6 +6215,171 @@ Yêu cầu kịch bản video gồm:
     db.challenges[idx] = c;
     saveSocialDb(db);
     res.json({ success: true, challenge: c });
+  });
+
+  // AI Referee: Generate fresh 1v1 speed quiz questions using Gemini with structured JSON
+  app.post("/api/duel/generate-questions", async (req, res) => {
+    try {
+      const subject = String(req.body?.subject || "Tổng hợp THCS").trim();
+      const grade = String(req.body?.grade || "Lớp 9").trim();
+      const countryCode = String(req.body?.countryCode || "VN").trim();
+      const count = Math.min(8, Math.max(3, Number(req.body?.count || 5)));
+      const culture = getCountryCulture(countryCode as any);
+
+      const prompt = `Bạn là Trọng tài Gia sư AI của Đấu trường Tri thức Max10 THCS.
+Hãy tạo đúng ${count} câu hỏi trắc nghiệm tốc độ (4 đáp án A/B/C/D, chỉ 1 đáp án đúng) cho môn "${subject}", trình độ "${grade}".
+Phong cách văn hóa tham khảo: ${culture.name} (${culture.nativeName})${
+        countryCode !== "VN" && subject.toLowerCase().includes("anh")
+          ? " — có thể lồng ghép ngữ cảnh giao tiếp hoặc từ vựng quốc tế tự nhiên."
+          : "."
+      }
+Yêu cầu:
+- Câu hỏi ngắn gọn, rõ ràng, phù hợp thi đấu 20 giây/câu.
+- Không dùng mã LaTeX rườm rà ($), viết ký hiệu Unicode đẹp (x², √, →, H₂O, °).
+- Giải thích ngắn gọn 1 câu súc tích lý do chọn đáp án đúng.`;
+
+      const response = await generateContentWithRetry({
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              questions: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    question: { type: Type.STRING },
+                    options: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                    },
+                    correctIndex: { type: Type.INTEGER },
+                    explanation: { type: Type.STRING },
+                    subject: { type: Type.STRING },
+                  },
+                  required: ["question", "options", "correctIndex", "explanation", "subject"],
+                },
+              },
+            },
+            required: ["questions"],
+          },
+        },
+      });
+
+      const parsed = JSON.parse(response.text || "{}");
+      const rawList = Array.isArray(parsed.questions) ? parsed.questions : [];
+      const sanitized = rawList
+        .filter((q: any) => q && q.question && Array.isArray(q.options) && q.options.length === 4)
+        .slice(0, count)
+        .map((q: any, i: number) => ({
+          id: `ai-duel-q-${Date.now()}-${i}`,
+          subject: String(q.subject || subject),
+          question: String(q.question).trim(),
+          options: q.options.map((o: any) => String(o).trim()),
+          correctIndex: Math.min(3, Math.max(0, Number(q.correctIndex) || 0)),
+          explanation: String(q.explanation || "Đáp án chính xác theo kiến thức chuẩn THCS.").trim(),
+        }));
+
+      if (sanitized.length === 0) {
+        return res.status(502).json({ success: false, error: "AI referee returned empty list" });
+      }
+      res.json({ success: true, questions: sanitized, generatedBy: "ai_referee" });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "Failed to generate AI duel questions" });
+    }
+  });
+
+  // Duel Arena Leaderboard aggregated from real completed challenges
+  app.get("/api/challenges/leaderboard", (_req, res) => {
+    const db = loadSocialDb();
+    const challenges = Array.isArray(db.challenges) ? db.challenges : [];
+    const usersById = new Map<string, any>();
+    (db.users || []).forEach((u: any) => {
+      if (u?.id) usersById.set(u.id, u);
+    });
+
+    const boardMap = new Map<
+      string,
+      {
+        userId: string;
+        name: string;
+        avatar: string;
+        wins: number;
+        draws: number;
+        losses: number;
+        played: number;
+        totalCorrect: number;
+        points: number;
+      }
+    >();
+
+    const ensureEntry = (uid: string, fallbackName: string, fallbackAvatar?: string) => {
+      let existing = boardMap.get(uid);
+      if (!existing) {
+        const userDoc = usersById.get(uid);
+        existing = {
+          userId: uid,
+          name: userDoc?.name || fallbackName || "Thành viên Max10",
+          avatar: userDoc?.avatar || fallbackAvatar || "",
+          wins: 0,
+          draws: 0,
+          losses: 0,
+          played: 0,
+          totalCorrect: 0,
+          points: 0,
+        };
+        boardMap.set(uid, existing);
+      }
+      return existing;
+    };
+
+    challenges.forEach((c: any) => {
+      if (!c) return;
+      if (c.status === "completed" && c.challengerId && c.opponentId) {
+        const cEntry = ensureEntry(c.challengerId, c.challengerName, c.challengerAvatar);
+        const oEntry = ensureEntry(c.opponentId, c.opponentName, c.opponentAvatar);
+        const cScore = Number(c.challengerScore || 0);
+        const oScore = Number(c.opponentScore || 0);
+
+        cEntry.played += 1;
+        oEntry.played += 1;
+        cEntry.totalCorrect += cScore;
+        oEntry.totalCorrect += oScore;
+
+        if (c.winnerId === c.challengerId) {
+          cEntry.wins += 1;
+          cEntry.points += 100 + cScore * 10;
+          oEntry.losses += 1;
+          oEntry.points += 20 + oScore * 10;
+        } else if (c.winnerId === c.opponentId) {
+          oEntry.wins += 1;
+          oEntry.points += 100 + oScore * 10;
+          cEntry.losses += 1;
+          cEntry.points += 20 + cScore * 10;
+        } else {
+          cEntry.draws += 1;
+          oEntry.draws += 1;
+          cEntry.points += 50 + cScore * 10;
+          oEntry.points += 50 + oScore * 10;
+        }
+      } else if (c.challengerId && typeof c.challengerScore === "number") {
+        const cEntry = ensureEntry(c.challengerId, c.challengerName, c.challengerAvatar);
+        cEntry.totalCorrect += Number(c.challengerScore || 0);
+        cEntry.points += 15 + Number(c.challengerScore || 0) * 8;
+      }
+    });
+
+    const leaderboard = Array.from(boardMap.values())
+      .map((entry) => ({
+        ...entry,
+        winRate: entry.played > 0 ? Math.round((entry.wins / entry.played) * 100) : 0,
+      }))
+      .sort((a, b) => b.points - a.points || b.wins - a.wins || b.totalCorrect - a.totalCorrect)
+      .slice(0, 30);
+
+    res.json({ success: true, leaderboard });
   });
 
   // Recent notifications endpoint across direct messages, groups, and community
@@ -6429,6 +6853,281 @@ Yêu cầu kịch bản video gồm:
     }
   });
 
+  // ==========================================
+  // 👑 ADMIN GOD-MODE ENDPOINTS (Strictly Protected by MASTER_SECURITY_CODE)
+  // ==========================================
+  const isVerifiedAdminRequest = (req: express.Request): boolean => {
+    const headerCode = String(req.headers["x-max10-master-code"] || "").trim();
+    const headerUser = String(req.headers["x-max10-user-id"] || "").trim();
+    return headerCode === MASTER_SECURITY_CODE || headerUser === "admin-mac-khanh-duy";
+  };
+
+  app.get("/api/admin/godmode/overview", (req, res) => {
+    if (!isVerifiedAdminRequest(req)) {
+      return res.status(403).json({
+        success: false,
+        error: "Truy cập God-Mode bị từ chối: Yêu cầu quyền Quản trị viên Mạc Khánh Duy!",
+      });
+    }
+    try {
+      const db = loadSocialDb();
+      const teacherData = getTeacherSystemData();
+      const now = Date.now();
+
+      const liveUsersById = new Map<string, any>();
+      (db.users || []).forEach((u: any) => {
+        if (u?.id) liveUsersById.set(u.id, u);
+      });
+
+      const enrichedAccounts: any[] = [
+        {
+          id: SUPER_ADMIN_ACCOUNT.id,
+          name: SUPER_ADMIN_ACCOUNT.name,
+          emailOrPhone: SUPER_ADMIN_ACCOUNT.email,
+          role: "admin",
+          plan: "premium",
+          status: "active",
+          avatar: SUPER_ADMIN_ACCOUNT.avatar,
+          isOnline: true,
+          lastActiveMs: now,
+          lastActiveText: "Đang online (Chủ sở hữu)",
+          decoration: profileDecorationsStore.get(SUPER_ADMIN_ACCOUNT.id) || null,
+        },
+      ];
+
+      (teacherData.teachers || []).forEach((t: any) => {
+        if (!t?.id || t.id === SUPER_ADMIN_ACCOUNT.id || t.id.startsWith("mock") || t.id === "gv-thuy") return;
+        const liveU = liveUsersById.get(t.id);
+        const override = accountOverrides.get(t.id);
+        const lastMs = Number(liveU?.lastActive || 0);
+        const isOnline = Boolean(lastMs > 0 && now - lastMs < 120000 && liveU?.presenceStatus !== "offline");
+        enrichedAccounts.push({
+          id: t.id,
+          name: t.name,
+          emailOrPhone: t.emailOrPhone,
+          role: "teacher",
+          plan: override?.plan || liveU?.plan || "premium",
+          status: override?.status || "active",
+          avatar: (t as any).avatar || liveU?.avatar || "",
+          isOnline,
+          lastActiveMs: lastMs,
+          lastActiveText: isOnline
+            ? "Đang trực tuyến"
+            : lastMs > 0
+            ? `${formatVietnamTime(lastMs)} (${formatVietnamDate(lastMs)})`
+            : "Ngoại tuyến",
+          decoration: profileDecorationsStore.get(t.id) || null,
+        });
+      });
+
+      (db.users || []).forEach((u: any) => {
+        if (
+          !u?.id ||
+          u.id === SUPER_ADMIN_ACCOUNT.id ||
+          u.id.startsWith("mock") ||
+          u.id.startsWith("fake") ||
+          u.id.startsWith("std-") ||
+          u.id === "user-quynh" ||
+          enrichedAccounts.some((a) => a.id === u.id)
+        ) {
+          return;
+        }
+        const override = accountOverrides.get(u.id);
+        const lastMs = Number(u.lastActive || 0);
+        const isOnline = Boolean(lastMs > 0 && now - lastMs < 120000 && u.presenceStatus !== "offline");
+        enrichedAccounts.push({
+          id: u.id,
+          name: u.name,
+          emailOrPhone: u.email || u.phone || "Tài khoản nội bộ",
+          role: u.role === "teacher" ? "teacher" : "student",
+          plan: override?.plan || u.plan || "free",
+          status: override?.status || "active",
+          avatar: u.avatar || "",
+          isOnline,
+          lastActiveMs: lastMs,
+          lastActiveText: isOnline
+            ? "Đang trực tuyến"
+            : lastMs > 0
+            ? `${formatVietnamTime(lastMs)} (${formatVietnamDate(lastMs)})`
+            : "Ngoại tuyến",
+          decoration: profileDecorationsStore.get(u.id) || null,
+        });
+      });
+
+      const groupsById = new Map<string, string>();
+      (db.groups || []).forEach((g: any) => {
+        if (g?.id) groupsById.set(g.id, g.name || g.id);
+      });
+
+      const moderationMessages: any[] = [];
+      Object.entries(db.groupMessages || {}).forEach(([groupId, msgs]) => {
+        if (!Array.isArray(msgs)) return;
+        msgs.forEach((m: any) => {
+          if (!m?.id || !m?.content) return;
+          moderationMessages.push({
+            groupId,
+            groupName: groupsById.get(groupId) || "Nhóm / Cộng đồng",
+            msgId: m.id,
+            senderId: m.senderId || "",
+            senderName: m.senderName || "Thành viên",
+            content: String(m.content),
+            createdAt: Number(m.createdAt || 0),
+            timestamp: m.timestamp || (m.createdAt ? formatVietnamTime(m.createdAt) : ""),
+          });
+        });
+      });
+      moderationMessages.sort((a, b) => b.createdAt - a.createdAt);
+
+      res.json({
+        success: true,
+        accounts: enrichedAccounts,
+        onlineCount: enrichedAccounts.filter((a) => a.isOnline).length,
+        loginLogs: (db.loginLogs || []).slice(0, 60),
+        pinnedBanner: db.pinnedSystemBanner || null,
+        vipGifts: db.vipGifts || {},
+        moderationMessages: moderationMessages.slice(0, 60),
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "God-Mode overview failed" });
+    }
+  });
+
+  app.post("/api/admin/accounts/force-logout", (req, res) => {
+    if (!isVerifiedAdminRequest(req)) {
+      return res.status(403).json({ success: false, error: "Không có quyền Quản trị viên!" });
+    }
+    const accountId = String(req.body?.accountId || "").trim();
+    if (!accountId || accountId === "admin-mac-khanh-duy") {
+      return res.status(400).json({ success: false, error: "Không thể đá đăng xuất tài khoản này!" });
+    }
+    const db = loadSocialDb();
+    if (!db.forcedLogoutAt) db.forcedLogoutAt = {};
+    db.forcedLogoutAt[accountId] = Date.now();
+    const u = (db.users || []).find((item: any) => item.id === accountId);
+    if (u) {
+      u.presenceStatus = "offline";
+      u.lastActive = 0;
+    }
+    saveSocialDb(db);
+    res.json({ success: true, accountId, message: "Đã gửi lệnh đăng xuất bắt buộc tới thiết bị người dùng!" });
+  });
+
+  app.post("/api/admin/accounts/gift-vip", (req, res) => {
+    if (!isVerifiedAdminRequest(req)) {
+      return res.status(403).json({ success: false, error: "Không có quyền Quản trị viên!" });
+    }
+    const {
+      accountId,
+      xpBonus = 0,
+      unlockedNameplates = [],
+      unlockedFrames = [],
+      equippedNameplateId,
+      equippedFrameId,
+      message,
+    } = req.body || {};
+
+    if (!accountId || typeof accountId !== "string") {
+      return res.status(400).json({ success: false, error: "Thiếu accountId nhận quà VIP!" });
+    }
+
+    const safeXp = Math.min(50000, Math.max(0, Math.round(Number(xpBonus) || 0)));
+    const db = loadSocialDb();
+    if (!db.vipGifts) db.vipGifts = {};
+
+    const cleanNameplates = Array.isArray(unlockedNameplates)
+      ? unlockedNameplates.map((id: any) => String(id).trim()).filter(Boolean)
+      : [];
+    const cleanFrames = Array.isArray(unlockedFrames)
+      ? unlockedFrames.map((id: any) => String(id).trim()).filter(Boolean)
+      : [];
+
+    if (equippedNameplateId && !cleanNameplates.includes(String(equippedNameplateId))) {
+      cleanNameplates.push(String(equippedNameplateId));
+    }
+    if (equippedFrameId && !cleanFrames.includes(String(equippedFrameId))) {
+      cleanFrames.push(String(equippedFrameId));
+    }
+
+    const giftRecord = {
+      id: `vip-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      xpBonus: safeXp,
+      unlockedNameplates: cleanNameplates,
+      unlockedFrames: cleanFrames,
+      equippedNameplateId: equippedNameplateId ? String(equippedNameplateId) : undefined,
+      equippedFrameId: equippedFrameId ? String(equippedFrameId) : undefined,
+      message: message ? String(message).slice(0, 240) : "Quà tặng VIP từ Quản trị viên Mạc Khánh Duy!",
+      grantedAt: Date.now(),
+    };
+
+    db.vipGifts[accountId] = giftRecord;
+    saveSocialDb(db);
+
+    if (equippedNameplateId || equippedFrameId) {
+      const prevDec = profileDecorationsStore.get(accountId) || {
+        nameplateId: "hoc_ba_diem_10",
+        frameId: "diem10_champion",
+        badges: ["hoc_ba_10"],
+      };
+      profileDecorationsStore.set(accountId, {
+        ...prevDec,
+        ...(equippedNameplateId ? { nameplateId: String(equippedNameplateId) } : {}),
+        ...(equippedFrameId ? { frameId: String(equippedFrameId) } : {}),
+      });
+    }
+
+    res.json({ success: true, gift: giftRecord });
+  });
+
+  app.post("/api/admin/system-pin", (req, res) => {
+    if (!isVerifiedAdminRequest(req)) {
+      return res.status(403).json({ success: false, error: "Không có quyền Quản trị viên!" });
+    }
+    const { action = "pin", title = "", content = "", severity = "info" } = req.body || {};
+    const db = loadSocialDb();
+
+    if (action === "clear") {
+      db.pinnedSystemBanner = null;
+      saveSocialDb(db);
+      return res.json({ success: true, pinnedBanner: null });
+    }
+
+    const cleanContent = String(content || "").trim();
+    if (!cleanContent) {
+      return res.status(400).json({ success: false, error: "Nội dung ghim toàn hệ thống không được trống!" });
+    }
+
+    const validSeverity = ["info", "warning", "celebrate"].includes(severity) ? severity : "info";
+    db.pinnedSystemBanner = {
+      id: `pin-${Date.now()}`,
+      title: String(title || "Thông báo từ Quản trị viên Max10 AI").trim().slice(0, 100),
+      content: cleanContent.slice(0, 360),
+      severity: validSeverity,
+      updatedAt: Date.now(),
+      author: "Mạc Khánh Duy",
+    };
+    saveSocialDb(db);
+    res.json({ success: true, pinnedBanner: db.pinnedSystemBanner });
+  });
+
+  app.delete("/api/admin/moderation/messages/:groupId/:msgId", (req, res) => {
+    if (!isVerifiedAdminRequest(req)) {
+      return res.status(403).json({ success: false, error: "Không có quyền Quản trị viên!" });
+    }
+    const groupId = decodeURIComponent(req.params.groupId || "");
+    const msgId = decodeURIComponent(req.params.msgId || "");
+    const db = loadSocialDb();
+    if (!db.groupMessages || !Array.isArray(db.groupMessages[groupId])) {
+      return res.status(404).json({ success: false, error: "Không tìm thấy phòng hoặc tin nhắn!" });
+    }
+    const before = db.groupMessages[groupId].length;
+    db.groupMessages[groupId] = db.groupMessages[groupId].filter((m: any) => m.id !== msgId);
+    if (db.groupMessages[groupId].length === before) {
+      return res.status(404).json({ success: false, error: "Tin nhắn đã bị xóa hoặc không tồn tại!" });
+    }
+    saveSocialDb(db);
+    res.json({ success: true, deletedId: msgId });
+  });
+
   // Dedicated Poster Generation API Endpoint
   // (User Requested: "cho tạo poster và video phải có ảnh mô phỏng chuyển động theo lời nói và tạo ảnh phải đúng yêu cầu nếu làm sai thì biết rồi đấy")
   app.post("/api/poster/generate", async (req, res) => {
@@ -6523,8 +7222,24 @@ Yêu cầu kịch bản video gồm:
   // REAL-TIME VIDEO / AUDIO CALL SIGNALING & 15s RINGING TIMEOUT
   // ==========================================
   const RING_TIMEOUT_MS = 15000;
+  interface WhiteboardStrokeRecord {
+    id: string;
+    color: string;
+    size: number;
+    points: Array<{ x: number; y: number }>;
+  }
+
+  interface CallWhiteboardState {
+    activeDrawerId: string | null;
+    activeDrawerName: string | null;
+    lockUpdatedAt: number;
+    strokes: WhiteboardStrokeRecord[];
+    clearedAt: number;
+  }
+
   interface CallSessionRecord {
     callId: string;
+    roomKey?: string;
     callerId: string;
     callerName: string;
     callerAvatar?: string;
@@ -6546,13 +7261,42 @@ Yêu cầu kịch bản video gồm:
     callerMedia: { isMuted: boolean; isVideoOff: boolean };
     calleeMedia: { isMuted: boolean; isVideoOff: boolean };
     chatMessages: Array<{ id: string; senderId: string; senderName: string; text: string; time: string }>;
+    whiteboard: CallWhiteboardState;
   }
+
+  const createEmptyWhiteboard = (): CallWhiteboardState => ({
+    activeDrawerId: null,
+    activeDrawerName: null,
+    lockUpdatedAt: 0,
+    strokes: [],
+    clearedAt: 0,
+  });
+
+  // Profile decorations store (Nameplates, Avatar Frames, Badges)
+  const profileDecorationsStore = new Map<string, any>();
+
+  app.get("/api/profile/decorations", (_req, res) => {
+    const map: Record<string, any> = {};
+    for (const [uid, dec] of profileDecorationsStore.entries()) {
+      map[uid] = dec;
+    }
+    res.json({ success: true, decorations: map });
+  });
+
+  app.post("/api/profile/decorations", (req, res) => {
+    const { userId, decoration } = req.body || {};
+    if (!userId || !decoration) {
+      return res.status(400).json({ success: false, error: "Thiếu userId hoặc decoration" });
+    }
+    profileDecorationsStore.set(String(userId), decoration);
+    res.json({ success: true, decoration });
+  });
 
   const activeCallSessions = new Map<string, CallSessionRecord>();
 
   const refreshCallRecord = (call: CallSessionRecord): CallSessionRecord => {
     const now = Date.now();
-    if (call.status === "ringing" && now >= call.expiresAt) {
+    if (call.status === "ringing" && !call.roomKey && now >= call.expiresAt) {
       call.status = "timeout";
       call.endedAt = now;
     }
@@ -6580,6 +7324,90 @@ Yêu cầu kịch bản video gồm:
       }
     }
   };
+
+  // 0. Discord Voice/Video Channel Shared Room Join (connects peers immediately without ring timeout)
+  app.post("/api/calls/room-join", (req, res) => {
+    cleanupOldCallSessions();
+    const {
+      roomKey,
+      userId,
+      userName,
+      userAvatar,
+      roomName,
+      callType = "video",
+      mediaState,
+    } = req.body || {};
+
+    if (!roomKey || !userId) {
+      return res.status(400).json({ success: false, error: "Thiếu roomKey hoặc userId" });
+    }
+
+    const normalizedKey = String(roomKey).trim();
+    const now = Date.now();
+    let existing: CallSessionRecord | undefined;
+    for (const c of activeCallSessions.values()) {
+      if (c.roomKey === normalizedKey && c.status !== "ended" && c.status !== "cancelled" && c.status !== "declined" && c.status !== "timeout") {
+        existing = c;
+        break;
+      }
+    }
+
+    if (!existing) {
+      const callId = "room-" + normalizedKey.replace(/[^a-zA-Z0-9_-]/g, "_") + "-" + now;
+      const session: CallSessionRecord = {
+        callId,
+        roomKey: normalizedKey,
+        callerId: String(userId),
+        callerName: String(userName || "Bạn học"),
+        callerAvatar: userAvatar || "",
+        calleeId: normalizedKey,
+        calleeName: String(roomName || "Phòng Thoại & Video"),
+        calleeAvatar: "",
+        roomType: "group",
+        callType: callType === "voice" ? "voice" : "video",
+        status: "accepted",
+        createdAt: now,
+        acceptedAt: now,
+        expiresAt: now + 3600 * 1000,
+        callerCandidates: [],
+        calleeCandidates: [],
+        callerMedia: mediaState || { isMuted: false, isVideoOff: callType === "voice" },
+        calleeMedia: { isMuted: false, isVideoOff: callType === "voice" },
+        chatMessages: [],
+        whiteboard: createEmptyWhiteboard(),
+      };
+      activeCallSessions.set(callId, session);
+      return res.json({ success: true, role: "caller", call: session });
+    }
+
+    // Same user re-joining or refreshing
+    if (existing.callerId === String(userId)) {
+      if (mediaState) existing.callerMedia = mediaState;
+      return res.json({ success: true, role: "caller", call: existing });
+    }
+
+    // Second peer joins the active room -> becomes callee & connects WebRTC immediately
+    if (existing.calleeId === normalizedKey || existing.calleeId === String(userId)) {
+      existing.calleeId = String(userId);
+      existing.calleeName = String(userName || "Bạn học");
+      existing.calleeAvatar = userAvatar || "";
+      existing.status = "accepted";
+      existing.acceptedAt = existing.acceptedAt || now;
+      if (mediaState) existing.calleeMedia = mediaState;
+      return res.json({ success: true, role: "callee", call: existing });
+    }
+
+    // Additional participant resets callee slot for fresh WebRTC handshake if needed
+    existing.calleeId = String(userId);
+    existing.calleeName = String(userName || "Bạn học");
+    existing.calleeAvatar = userAvatar || "";
+    existing.offer = undefined;
+    existing.answer = undefined;
+    existing.callerCandidates = [];
+    existing.calleeCandidates = [];
+    if (mediaState) existing.calleeMedia = mediaState;
+    return res.json({ success: true, role: "callee", call: existing });
+  });
 
   // 1. Caller starts a call -> server sets 15s expiration window
   app.post("/api/calls/start", (req, res) => {
@@ -6632,6 +7460,7 @@ Yêu cầu kịch bản video gồm:
       callerMedia: callerMedia || { isMuted: false, isVideoOff: callType === "voice" },
       calleeMedia: { isMuted: false, isVideoOff: callType === "voice" },
       chatMessages: [],
+      whiteboard: createEmptyWhiteboard(),
     };
     activeCallSessions.set(callId, session);
     res.json({ success: true, call: session, remainingMs: RING_TIMEOUT_MS });
@@ -6789,6 +7618,94 @@ Yêu cầu kịch bản video gồm:
     }
 
     res.json({ success: true, call });
+  });
+
+  // 5b. Authoritative Single-Drawer Whiteboard Lock & Stroke Sync
+  app.post("/api/calls/:callId/whiteboard", (req, res) => {
+    const call = activeCallSessions.get(req.params.callId);
+    if (!call) {
+      return res.status(404).json({ success: false, error: "Không tìm thấy cuộc gọi" });
+    }
+    const { action, userId, userName, stroke } = req.body || {};
+    const uid = String(userId || "").trim();
+    const uname = String(userName || "Thành viên").trim();
+    if (!uid) {
+      return res.status(400).json({ success: false, error: "Thiếu userId" });
+    }
+
+    const wb = call.whiteboard;
+    const now = Date.now();
+
+    if (action === "claim") {
+      // Only 1 drawer allowed at a time! Lock succeeds only if free, already self, or stale (> 120s)
+      const isStale = wb.activeDrawerId && now - wb.lockUpdatedAt > 120 * 1000;
+      if (!wb.activeDrawerId || wb.activeDrawerId === uid || isStale) {
+        wb.activeDrawerId = uid;
+        wb.activeDrawerName = uname;
+        wb.lockUpdatedAt = now;
+        return res.json({ success: true, whiteboard: wb });
+      }
+      return res.json({
+        success: false,
+        error: `${wb.activeDrawerName || "Người khác"} đang giữ quyền vẽ. Chỉ 1 người được vẽ lúc này!`,
+        whiteboard: wb,
+      });
+    }
+
+    if (action === "release") {
+      if (wb.activeDrawerId === uid) {
+        wb.activeDrawerId = null;
+        wb.activeDrawerName = null;
+        wb.lockUpdatedAt = now;
+      }
+      return res.json({ success: true, whiteboard: wb });
+    }
+
+    if (action === "stroke") {
+      if (wb.activeDrawerId && wb.activeDrawerId !== uid) {
+        return res.status(403).json({
+          success: false,
+          error: `Chỉ ${wb.activeDrawerName || "người đang giữ bút"} được phép vẽ!`,
+          whiteboard: wb,
+        });
+      }
+      // Auto-assign lock if currently empty
+      if (!wb.activeDrawerId) {
+        wb.activeDrawerId = uid;
+        wb.activeDrawerName = uname;
+      }
+      wb.lockUpdatedAt = now;
+      if (stroke && Array.isArray(stroke.points) && stroke.points.length > 0) {
+        const exists = wb.strokes.some((s) => s.id === stroke.id);
+        if (!exists) {
+          wb.strokes.push({
+            id: String(stroke.id || "st-" + now + "-" + Math.random().toString(36).slice(2, 6)),
+            color: String(stroke.color || "#3b82f6"),
+            size: Math.max(1, Math.min(20, Number(stroke.size) || 3)),
+            points: stroke.points.slice(0, 600),
+          });
+          if (wb.strokes.length > 400) {
+            wb.strokes = wb.strokes.slice(-400);
+          }
+        }
+      }
+      return res.json({ success: true, whiteboard: wb });
+    }
+
+    if (action === "clear") {
+      if (wb.activeDrawerId && wb.activeDrawerId !== uid) {
+        return res.status(403).json({
+          success: false,
+          error: `Chỉ ${wb.activeDrawerName || "người đang giữ bút"} mới được xóa bảng!`,
+          whiteboard: wb,
+        });
+      }
+      wb.strokes = [];
+      wb.clearedAt = now;
+      return res.json({ success: true, whiteboard: wb });
+    }
+
+    return res.status(400).json({ success: false, error: "Hành động whiteboard không hợp lệ" });
   });
 
   // 6. End or timeout call

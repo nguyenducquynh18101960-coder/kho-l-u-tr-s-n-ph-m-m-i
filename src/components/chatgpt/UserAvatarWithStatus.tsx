@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { UserPresenceStatus } from '../../types';
+import { AvatarFrameId, getAvatarFrameById } from '../../data/profileDecorations';
 
 export interface UserAvatarWithStatusProps {
   src?: string;
   name: string;
   presenceStatus?: UserPresenceStatus;
+  frameId?: AvatarFrameId;
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
   isEditable?: boolean;
@@ -18,6 +20,7 @@ export const PRESENCE_STATUS_CONFIG: Record<
   UserPresenceStatus,
   {
     label: string;
+    shortLabel: string;
     sublabel: string;
     colorClass: string;
     ringClass: string;
@@ -27,34 +30,38 @@ export const PRESENCE_STATUS_CONFIG: Record<
   }
 > = {
   online: {
-    label: 'Đang online (Chấm xanh)',
-    sublabel: 'Đang online, sẵn sàng học tập & trò chuyện',
+    label: 'Online (Xanh lá)',
+    shortLabel: 'Online',
+    sublabel: 'Đang trực tuyến, sẵn sàng học tập & trò chuyện',
     colorClass: 'bg-emerald-500',
     ringClass: 'ring-emerald-400/30',
     iconEmoji: '🟢',
     badgeBg: 'bg-emerald-100 dark:bg-emerald-950/80',
     badgeText: 'text-emerald-700 dark:text-emerald-300',
   },
-  dnd: {
-    label: 'Không làm phiền (Dấu chấm đỏ)',
-    sublabel: 'Không làm phiền nhưng vẫn nhận được tin nhắn và tin nhắn được',
-    colorClass: 'bg-rose-500',
-    ringClass: 'ring-rose-400/30',
-    iconEmoji: '🔴',
-    badgeBg: 'bg-rose-100 dark:bg-rose-950/80',
-    badgeText: 'text-rose-700 dark:text-rose-300',
-  },
   gaming: {
-    label: 'Trò chơi (Chấm vàng)',
-    sublabel: 'Đang chơi trò chơi / mini-game giải trí',
+    label: 'Đang học bài (Vàng)',
+    shortLabel: 'Đang học bài',
+    sublabel: 'Đang tập trung ôn bài hoặc giải đề thi',
     colorClass: 'bg-amber-400',
     ringClass: 'ring-amber-400/30',
     iconEmoji: '🟡',
     badgeBg: 'bg-amber-100 dark:bg-amber-950/80',
     badgeText: 'text-amber-800 dark:text-amber-300',
   },
+  dnd: {
+    label: 'Bận (Đỏ)',
+    shortLabel: 'Bận',
+    sublabel: 'Đang bận — hạn chế làm phiền',
+    colorClass: 'bg-rose-500',
+    ringClass: 'ring-rose-400/30',
+    iconEmoji: '🔴',
+    badgeBg: 'bg-rose-100 dark:bg-rose-950/80',
+    badgeText: 'text-rose-700 dark:text-rose-300',
+  },
   offline: {
-    label: 'Đang ngoại tuyến (Chấm xám)',
+    label: 'Offline (Xám)',
+    shortLabel: 'Offline',
     sublabel: 'Đang ngoại tuyến / Tạm thời không hoạt động',
     colorClass: 'bg-slate-400 dark:bg-zinc-500',
     ringClass: 'ring-slate-400/30',
@@ -69,26 +76,31 @@ const SIZE_CLASSES = {
     container: 'w-6 h-6',
     dot: 'w-2 h-2 -bottom-0.5 -right-0.5 border',
     text: 'text-[10px]',
+    framePad: 'p-[1.5px]',
   },
   sm: {
     container: 'w-8 h-8',
     dot: 'w-2.5 h-2.5 -bottom-0.5 -right-0.5 border-[1.5px]',
     text: 'text-xs',
+    framePad: 'p-[2px]',
   },
   md: {
     container: 'w-10 h-10',
     dot: 'w-3 h-3 -bottom-0.5 -right-0.5 border-2',
     text: 'text-sm',
+    framePad: 'p-[2.5px]',
   },
   lg: {
     container: 'w-12 h-12',
     dot: 'w-3.5 h-3.5 bottom-0 right-0 border-2',
     text: 'text-base',
+    framePad: 'p-[2.5px]',
   },
   xl: {
     container: 'w-16 h-16',
     dot: 'w-4 h-4 bottom-0 right-0 border-2',
     text: 'text-xl',
+    framePad: 'p-[3px]',
   },
 };
 
@@ -96,6 +108,7 @@ export const UserAvatarWithStatus: React.FC<UserAvatarWithStatusProps> = ({
   src,
   name,
   presenceStatus = 'online',
+  frameId = 'none',
   size = 'md',
   className = '',
   isEditable = false,
@@ -107,6 +120,7 @@ export const UserAvatarWithStatus: React.FC<UserAvatarWithStatusProps> = ({
   const [showMenu, setShowMenu] = useState(false);
   const sizeConfig = SIZE_CLASSES[size];
   const statusInfo = PRESENCE_STATUS_CONFIG[presenceStatus] || PRESENCE_STATUS_CONFIG.online;
+  const frameTemplate = frameId && frameId !== 'none' ? getAvatarFrameById(frameId) : null;
 
   const initials = (name || 'Bạn')
     .trim()
@@ -126,11 +140,11 @@ export const UserAvatarWithStatus: React.FC<UserAvatarWithStatusProps> = ({
 
   return (
     <div className={`relative inline-block shrink-0 ${className}`}>
-      {/* Avatar Container */}
+      {/* Animated Outer Avatar Frame Ring */}
       <div
         role={onClick ? 'button' : undefined}
         tabIndex={onClick ? 0 : undefined}
-        title={title || (onClick ? `Xem hồ sơ & Thi đấu cùng ${name}` : undefined)}
+        title={title || (onClick ? `Xem hồ sơ & Kết nối cùng ${name}` : undefined)}
         onClick={onClick}
         onKeyDown={
           onClick
@@ -142,26 +156,48 @@ export const UserAvatarWithStatus: React.FC<UserAvatarWithStatusProps> = ({
               }
             : undefined
         }
-        className={`${sizeConfig.container} rounded-full overflow-hidden bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center border border-slate-200 dark:border-zinc-700 shadow-2xs select-none ${
-          onClick
-            ? 'cursor-pointer hover:ring-2 hover:ring-emerald-400/80 hover:scale-105 transition-all'
-            : ''
-        }`}
+        className={`relative rounded-full flex items-center justify-center select-none ${
+          frameTemplate ? `${sizeConfig.framePad}` : ''
+        } ${onClick ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`}
+        style={
+          frameTemplate
+            ? {
+                boxShadow: frameTemplate.glowShadowCss !== 'none' ? frameTemplate.glowShadowCss : undefined,
+              }
+            : undefined
+        }
       >
-        {src ? (
-          <img
-            src={src}
-            alt={name}
-            className="w-full h-full object-cover"
-            referrerPolicy="no-referrer"
-            onError={(e) => {
-              // Fallback to initials if image fails
-              (e.currentTarget as HTMLElement).style.display = 'none';
-            }}
+        {frameTemplate && (
+          <span
+            aria-hidden="true"
+            className={`absolute inset-0 rounded-full pointer-events-none ${
+              frameTemplate.spin ? 'avatar-frame-spin' : 'avatar-frame-breathe'
+            }`}
+            style={{ background: frameTemplate.ringGradientCss }}
           />
-        ) : (
-          <span className={sizeConfig.text}>{initials}</span>
         )}
+
+        <div
+          className={`relative z-10 ${sizeConfig.container} rounded-full overflow-hidden bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center border ${
+            frameTemplate
+              ? 'border-slate-900/70 dark:border-[#1e1f22]'
+              : 'border-slate-200 dark:border-zinc-700'
+          } shadow-2xs`}
+        >
+          {src ? (
+            <img
+              src={src}
+              alt={name}
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                (e.currentTarget as HTMLElement).style.display = 'none';
+              }}
+            />
+          ) : (
+            <span className={sizeConfig.text}>{initials}</span>
+          )}
+        </div>
       </div>
 
       {/* Status Dot under Avatar */}
@@ -181,7 +217,7 @@ export const UserAvatarWithStatus: React.FC<UserAvatarWithStatusProps> = ({
               }`
             : undefined
         }
-        className={`absolute rounded-full border-white dark:border-zinc-900 transition-transform ${
+        className={`absolute z-20 rounded-full border-white dark:border-zinc-900 transition-transform ${
           sizeConfig.dot
         } ${statusInfo.colorClass} ${
           isEditable ? 'cursor-pointer hover:scale-125 focus:outline-hidden ring-2 ' + statusInfo.ringClass : ''

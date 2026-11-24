@@ -17,6 +17,9 @@ import {
   PenLine,
   PanelLeft,
   RotateCw,
+  Mic,
+  Globe,
+  Check,
 } from 'lucide-react';
 import { GradeLevel } from '../../types';
 import { BackgroundTheme } from '../../types/theme';
@@ -25,6 +28,7 @@ import { loadStudentAchievements, StudentAchievementStats } from '../../data/ini
 import { calculateLevel, formatLevelLabel, MAX_LEVEL } from '../../types/achievements';
 import { getUserInitials } from './UserNameModal';
 import { MainTabId, HubSpaceId, getSpaceFromTab } from './Sidebar';
+import { CountryCode, COUNTRY_CULTURES, getCountryCulture } from '../../data/countryCultures';
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -38,7 +42,6 @@ interface HeaderProps {
   activeTab: MainTabId;
   activeSpace?: HubSpaceId;
   onSelectTab: (tab: MainTabId) => void;
-  onOpenOfferModal: () => void;
   onOpenIntroModal?: () => void;
   activeTheme?: BackgroundTheme;
   onOpenThemeModal?: () => void;
@@ -58,6 +61,12 @@ interface HeaderProps {
   hasUnreadNotifications?: boolean;
   historyCount?: number;
   onLogout?: () => void;
+  countryCode?: CountryCode;
+  onSelectCountry?: (code: CountryCode) => void;
+  bilingualMode?: boolean;
+  onToggleBilingualMode?: () => void;
+  quizVoiceMode?: boolean;
+  onToggleQuizVoiceMode?: () => void;
 }
 
 const SPACE_LABELS: Record<HubSpaceId, string> = {
@@ -96,9 +105,17 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAdminNotifications,
   hasUnreadNotifications = false,
   onLogout,
+  countryCode = 'VN',
+  onSelectCountry,
+  bilingualMode = true,
+  onToggleBilingualMode,
+  quizVoiceMode = false,
+  onToggleQuizVoiceMode,
 }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showCountryMenu, setShowCountryMenu] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  const countryRef = useRef<HTMLDivElement>(null);
 
   const [achievementStats, setAchievementStats] = useState<StudentAchievementStats>(() =>
     loadStudentAchievements()
@@ -121,10 +138,15 @@ export const Header: React.FC<HeaderProps> = ({
       if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
         setShowProfileMenu(false);
       }
+      if (countryRef.current && !countryRef.current.contains(event.target as Node)) {
+        setShowCountryMenu(false);
+      }
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const currentCountry = getCountryCulture(countryCode);
 
   const currentSpace = activeSpace || getSpaceFromTab(activeTab);
   const currentXp = achievementStats.totalXp;
@@ -202,13 +224,142 @@ export const Header: React.FC<HeaderProps> = ({
         </select>
       </div>
 
-      {/* Right: Study Metrics (10 Ngày streak · 7 Huy hiệu · Điểm số) + Thông báo từ Admin + Profile */}
+      {/* Right: Quick Quiz/Voice Mode + Country Selector + Study Metrics + Spin + Notifications + Profile */}
       <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        {/* Quick Toggle: Hỏi bài cùng Gia sư AI (Interactive Quiz & Voice) */}
+        {onToggleQuizVoiceMode && (
+          <button
+            type="button"
+            onClick={onToggleQuizVoiceMode}
+            className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              quizVoiceMode && activeTab === 'chat'
+                ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm shadow-indigo-600/25'
+                : isDark
+                ? 'bg-indigo-500/12 border-indigo-500/30 hover:bg-indigo-500/20 text-indigo-300'
+                : 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100 text-indigo-700'
+            }`}
+            title="Chuyển nhanh chế độ Nói chuyện & Hỏi bài cùng Gia sư AI"
+          >
+            <Mic className={`w-3.5 h-3.5 shrink-0 ${quizVoiceMode && activeTab === 'chat' ? 'animate-pulse' : ''}`} />
+            <span className="hidden xl:inline">Hỏi bài cùng Gia sư AI</span>
+            <span className="hidden sm:inline xl:hidden">Hỏi bài AI</span>
+            {quizVoiceMode && activeTab === 'chat' && (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 shrink-0" />
+            )}
+          </button>
+        )}
+
+        {/* Country & Language Selector Dropdown */}
+        {onSelectCountry && (
+          <div className="relative shrink-0" ref={countryRef}>
+            <button
+              type="button"
+              onClick={() => setShowCountryMenu((prev) => !prev)}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                countryCode !== 'VN'
+                  ? isDark
+                    ? 'bg-teal-500/15 border-teal-500/35 text-teal-300 hover:bg-teal-500/25'
+                    : 'bg-teal-50 border-teal-200 text-teal-800 hover:bg-teal-100'
+                  : isDark
+                  ? 'bg-white/[0.04] border-white/[0.08] hover:bg-white/[0.08] text-zinc-200'
+                  : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-700'
+              }`}
+              title={`Quốc gia & Ngôn ngữ AI: ${currentCountry.name} (${currentCountry.languageName})`}
+            >
+              <span className="text-sm leading-none shrink-0">{currentCountry.flag}</span>
+              <span className="hidden md:inline max-w-[90px] truncate">{currentCountry.shortName}</span>
+              <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
+            </button>
+
+            {showCountryMenu && (
+              <div
+                className={`absolute right-0 top-full mt-2 w-72 sm:w-80 rounded-2xl p-2 border shadow-2xl z-50 text-xs ${
+                  isDark
+                    ? 'bg-[#101622] border-white/10 text-slate-100'
+                    : 'bg-white border-slate-200 text-slate-800'
+                }`}
+              >
+                <div className="px-2.5 py-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>Quốc gia &amp; Văn hóa AI</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400">Giọng &amp; Xưng hô</span>
+                </div>
+
+                <div className="max-h-64 overflow-y-auto space-y-1 pr-0.5">
+                  {COUNTRY_CULTURES.map((c) => {
+                    const isSelected = c.code === countryCode;
+                    return (
+                      <button
+                        key={c.code}
+                        type="button"
+                        onClick={() => {
+                          onSelectCountry(c.code);
+                          setShowCountryMenu(false);
+                        }}
+                        className={`w-full flex items-start justify-between gap-2 p-2 rounded-xl text-left transition-colors cursor-pointer ${
+                          isSelected
+                            ? isDark
+                              ? 'bg-emerald-500/15 border border-emerald-500/35 text-emerald-300'
+                              : 'bg-emerald-50 border border-emerald-200 text-emerald-900'
+                            : isDark
+                            ? 'hover:bg-white/[0.06] border border-transparent'
+                            : 'hover:bg-slate-50 border border-transparent'
+                        }`}
+                      >
+                        <div className="flex items-start gap-2 min-w-0">
+                          <span className="text-base leading-none mt-0.5 shrink-0">{c.flag}</span>
+                          <div className="min-w-0">
+                            <div className="font-extrabold flex items-center gap-1.5 truncate">
+                              <span>{c.name}</span>
+                              <span className="text-[10px] font-semibold opacity-75">· {c.nativeName}</span>
+                            </div>
+                            <div className="text-[10px] opacity-75 truncate mt-0.5">{c.toneStyle}</div>
+                          </div>
+                        </div>
+                        {isSelected && <Check className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {onToggleBilingualMode && countryCode !== 'VN' && (
+                  <div className="mt-2 pt-2 border-t border-slate-200/80 dark:border-white/[0.08] px-1">
+                    <button
+                      type="button"
+                      onClick={onToggleBilingualMode}
+                      className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl text-[11px] font-bold transition-colors cursor-pointer ${
+                        bilingualMode
+                          ? 'bg-indigo-500/12 text-indigo-600 dark:text-indigo-300'
+                          : isDark
+                          ? 'bg-white/[0.04] text-zinc-300'
+                          : 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      <span>Song ngữ (Kèm dịch Tiếng Việt)</span>
+                      <span
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
+                          bilingualMode
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-slate-400/30 text-slate-600 dark:text-zinc-300'
+                        }`}
+                      >
+                        {bilingualMode ? 'BẬT' : 'BẢN NGỮ'}
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Study Metrics Pill */}
         <button
           type="button"
           onClick={onOpenAchievementsModal || (() => onSelectTab('achievements'))}
-          className={`hidden lg:inline-flex items-center gap-2.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+          className={`hidden 2xl:inline-flex items-center gap-2.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
             isDark
               ? 'bg-white/[0.04] border-white/[0.08] hover:border-emerald-500/40 text-zinc-200'
               : 'bg-slate-50 border-slate-200/85 hover:border-emerald-300 text-slate-700'
@@ -249,7 +400,7 @@ export const Header: React.FC<HeaderProps> = ({
           title="Mở Màn Hình Quay XP Lên Cấp"
         >
           <RotateCw className="w-3.5 h-3.5 shrink-0" />
-          <span className="hidden sm:inline">Quay XP Lên Cấp</span>
+          <span className="hidden lg:inline">Quay XP Lên Cấp</span>
         </button>
 
         {/* Thông báo từ Admin Slide-Out Drawer Trigger */}
