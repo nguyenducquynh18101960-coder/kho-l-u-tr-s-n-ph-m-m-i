@@ -88,12 +88,16 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
       const gRaw = localStorage.getItem(STORAGE_KEY_GROUPS);
       if (gRaw) {
         const parsedG = JSON.parse(gRaw);
-        if (Array.isArray(parsedG)) setGroups(parsedG);
+        if (Array.isArray(parsedG)) {
+          setGroups((prev) => (JSON.stringify(prev) === gRaw ? prev : parsedG));
+        }
       }
       const fRaw = localStorage.getItem(STORAGE_KEY_FRIENDS);
       if (fRaw) {
         const parsedF = JSON.parse(fRaw);
-        if (Array.isArray(parsedF)) setFriends(parsedF);
+        if (Array.isArray(parsedF)) {
+          setFriends((prev) => (JSON.stringify(prev) === fRaw ? prev : parsedF));
+        }
       }
     } catch {}
   };

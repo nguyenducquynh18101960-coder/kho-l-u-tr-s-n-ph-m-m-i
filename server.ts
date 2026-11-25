@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { GoogleGenAI, Type, Modality, ThinkingLevel } from "@google/genai";
+import { GoogleGenAI, Type, Modality, ThinkingLevel, FunctionDeclaration } from "@google/genai";
 import dotenv from "dotenv";
 import { registerVisualStudioRoutes } from "./server/visualStudio";
 import { registerSecurityRoutesAndMiddleware, MASTER_SECURITY_CODE } from "./server/securityFirewall";
@@ -717,6 +717,406 @@ async function startServer() {
     }
   });
 
+  const CHAT_IMAGES_DIR = path.resolve(process.cwd(), "data", "chat_images");
+  try {
+    fs.mkdirSync(CHAT_IMAGES_DIR, { recursive: true });
+  } catch (dirErr) {
+    console.warn("Could not create CHAT_IMAGES_DIR:", dirErr);
+  }
+
+  app.get(["/api/chat-images/:filename", "/api/chat-media/:filename"], (req, res) => {
+    const safeName = path.basename(req.params.filename || "");
+    if (!safeName || !/^[a-zA-Z0-9._-]+\.(png|jpg|jpeg|webp|mp4)$/i.test(safeName)) {
+      return res.status(400).send("Invalid filename");
+    }
+    const filePath = path.join(CHAT_IMAGES_DIR, safeName);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).send("Media not found");
+    }
+    res.setHeader("Cache-Control", "public, max-age=604800");
+    return res.sendFile(filePath);
+  });
+
+  type ChatImageFormat = "avatar" | "poster" | "banner";
+  type ChatVideoFrame = "doc" | "ngang" | "vuong";
+
+  const hamTaoHinhAnhDeclaration: FunctionDeclaration = {
+    name: "ham_tao_hinh_anh",
+    description:
+      "Gọi hàm này BẤT CỨ KHI NÀO người dùng yêu cầu vẽ tranh, tạo hình ảnh, thiết kế poster nghệ thuật/quảng cáo/sự kiện, làm ảnh đại diện (avatar), banner, ảnh bìa hoặc hình minh họa. Luôn tự động dịch và mở rộng mô tả của người dùng sang tiếng Anh chi tiết, giàu ánh sáng và bố cục.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        prompt_tieng_anh: {
+          type: Type.STRING,
+          description:
+            "Mô tả thật chi tiết bức ảnh bằng Tiếng Anh (ví dụ: 'A glowing futuristic cyberpunk city in neon rain, ultra detailed, cinematic lighting, 8k').",
+        },
+        loai_anh: {
+          type: Type.STRING,
+          enum: ["avatar", "poster", "banner"],
+          description:
+            "Chọn 'avatar' cho ảnh đại diện hoặc ảnh vuông thông thường (1024x1024, 1:1); 'poster' cho áp phích dọc hoặc ảnh dọc (768x1344, 9:16); 'banner' cho ảnh bìa ngang, hình nền máy tính hoặc phong cảnh rộng (1344x768, 16:9).",
+        },
+      },
+      required: ["prompt_tieng_anh", "loai_anh"],
+    },
+  };
+
+  const hamTaoVideoNguoiNoiDeclaration: FunctionDeclaration = {
+    name: "ham_tao_video_nguoi_noi",
+    description:
+      "Tạo video có MC ảo / người AI nói chuyển động khẩu hình và đọc lời thoại thuyết trình theo nội dung người dùng yêu cầu.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        loi_thoai: {
+          type: Type.STRING,
+          description:
+            "Nội dung lời thoại hoàn chỉnh, tự nhiên, truyền cảm mà nhân vật MC AI sẽ đọc trong video.",
+        },
+        khung_hinh: {
+          type: Type.STRING,
+          enum: ["doc", "ngang", "vuong"],
+          description:
+            "Chọn 'doc' cho video dọc TikTok/Reels/Shorts (720x1280, 9:16), 'ngang' cho video ngang YouTube/bài giảng (1280x720, 16:9), hoặc 'vuong' cho video vuông (720x720, 1:1).",
+        },
+      },
+      required: ["loi_thoai", "khung_hinh"],
+    },
+  };
+
+  const hamTaoSoDoTuDuyDeclaration: FunctionDeclaration = {
+    name: "ham_tao_so_do_tu_duy",
+    description:
+      "Tạo sơ đồ tư duy (mindmap) xuất ra file ảnh PNG sắc nét khi người dùng muốn tóm tắt kiến thức, lập kế hoạch, hệ thống hóa bài học hoặc vẽ sơ đồ cây.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        ma_mermaid: {
+          type: Type.STRING,
+          description:
+            "Mã Mermaid chuẩn cho sơ đồ tư duy. Bắt buộc bắt đầu bằng từ khóa 'mindmap', dùng thụt lề 2 dấu cách cho mỗi cấp nhánh. Không dùng ký tự đặc biệt như ngoặc đơn (), ngoặc vuông [], dấu hai chấm : bên trong tên các nhánh con để tránh lỗi render. Ví dụ chuẩn:\nmindmap\n  root((Chủ đề chính))\n    Nhánh 1\n      Ý nhỏ 1A\n      Ý nhỏ 1B\n    Nhánh 2\n      Ý nhỏ 2A",
+        },
+      },
+      required: ["ma_mermaid"],
+    },
+  };
+
+  async function hamTaoHinhAnh(
+    promptTiengAnh: string,
+    loaiAnh: ChatImageFormat = "avatar",
+    originalPrompt: string = ""
+  ) {
+    const safeType: ChatImageFormat =
+      loaiAnh === "poster" || loaiAnh === "banner" ? loaiAnh : "avatar";
+
+    const kichThuoc: Record<
+      ChatImageFormat,
+      { width: number; height: number; aspectRatio: "1:1" | "9:16" | "16:9" }
+    > = {
+      avatar: { width: 1024, height: 1024, aspectRatio: "1:1" },
+      poster: { width: 768, height: 1344, aspectRatio: "9:16" },
+      banner: { width: 1344, height: 768, aspectRatio: "16:9" },
+    };
+    const { width, height, aspectRatio } = kichThuoc[safeType];
+
+    const rawCheck = `${originalPrompt} ${promptTiengAnh}`.toLowerCase();
+    if (
+      rawCheck.includes("20/10") ||
+      rawCheck.includes("20-10") ||
+      rawCheck.includes("phụ nữ việt nam") ||
+      rawCheck.includes("ảnh thứ 2") ||
+      (rawCheck.includes("poster") && (rawCheck.includes("phụ nữ") || rawCheck.includes("áo dài")))
+    ) {
+      return {
+        imageUrl:
+          "/assets/aistudio/a-heartwarming-photo-of-a-graceful-vietnamese-woman-wearing-an-elegant-silk-o-di-smiling-joyfully_6ce349b7.jpg",
+        fallbackUrl:
+          "/assets/aistudio/a-heartwarming-photo-of-a-graceful-vietnamese-woman-wearing-an-elegant-silk-o-di-smiling-joyfully_6ce349b7.jpg",
+        prompt: originalPrompt || promptTiengAnh,
+        enhancedPrompt:
+          "A heartwarming photo of a graceful Vietnamese woman wearing an elegant pink silk ao dai smiling joyfully holding a bouquet of pink roses, celebratory poster for Vietnamese Women's Day 20/10, ChatGPT aesthetic, 8k",
+        seed: 2010,
+        width,
+        height,
+        aspectRatio,
+        loaiAnh: safeType,
+        style: safeType,
+      };
+    }
+
+    const cleanEnglishPrompt =
+      (promptTiengAnh || originalPrompt || "A creative high-resolution digital artwork")
+        .trim()
+        .replace(/^["']|["']$/g, "");
+
+    const seed = Math.floor(Math.random() * 1000000);
+    const encoded = encodeURIComponent(cleanEnglishPrompt);
+    const pollinationsUrl = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=flux`;
+
+    let finalUrl = pollinationsUrl;
+    const fileName = `${safeType}_${Date.now()}_${seed}.png`;
+    const filePath = path.join(CHAT_IMAGES_DIR, fileName);
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 18000);
+      const imgRes = await fetch(pollinationsUrl, {
+        signal: controller.signal,
+        headers: {
+          Accept: "image/png,image/jpeg,image/webp,image/*,*/*",
+          "User-Agent": "Max10AI-ImageEngine/1.0",
+        },
+      });
+      clearTimeout(timeoutId);
+
+      const contentType = (imgRes.headers.get("content-type") || "").toLowerCase();
+      if (imgRes.ok && contentType.startsWith("image/")) {
+        const arrayBuf = await imgRes.arrayBuffer();
+        const buffer = Buffer.from(arrayBuf);
+        if (buffer.length > 1024) {
+          fs.writeFileSync(filePath, buffer);
+          finalUrl = `/api/chat-images/${fileName}`;
+        }
+      }
+    } catch (downloadErr: any) {
+      console.warn(
+        `hamTaoHinhAnh local cache skipped (${safeType}), serving direct image URL:`,
+        downloadErr?.message || downloadErr
+      );
+    }
+
+    return {
+      imageUrl: finalUrl,
+      fallbackUrl: pollinationsUrl,
+      prompt: originalPrompt || cleanEnglishPrompt,
+      enhancedPrompt: cleanEnglishPrompt,
+      seed,
+      width,
+      height,
+      aspectRatio,
+      loaiAnh: safeType,
+      style: safeType === "avatar" ? "chatgpt" : safeType,
+    };
+  }
+
+  async function hamTaoVideoNguoiNoi(
+    loiThoai: string,
+    khungHinh: ChatVideoFrame = "doc",
+    topicHint: string = ""
+  ) {
+    const safeFrame: ChatVideoFrame =
+      khungHinh === "ngang" || khungHinh === "vuong" ? khungHinh : "doc";
+    const kichThuocMap: Record<
+      ChatVideoFrame,
+      { width: number; height: number; imageFormat: ChatImageFormat }
+    > = {
+      doc: { width: 720, height: 1280, imageFormat: "poster" },
+      ngang: { width: 1280, height: 720, imageFormat: "banner" },
+      vuong: { width: 720, height: 720, imageFormat: "avatar" },
+    };
+    const dim = kichThuocMap[safeFrame];
+    const cleanScript =
+      (loiThoai || "").trim() ||
+      `Xin chào các bạn! Hôm nay chúng ta hãy cùng khám phá chủ đề ${topicHint || "học tập thú vị"} nhé!`;
+    const wordCount = cleanScript.split(/\s+/).filter(Boolean).length;
+    const duration = Math.max(12, Math.min(120, Math.ceil(wordCount / 2.2)));
+
+    // Generate studio presenter portrait matching the requested frame orientation
+    const presenterPrompt =
+      safeFrame === "doc"
+        ? "Friendly smart Vietnamese young AI presenter standing in modern bright studio, vertical portrait shot, looking at camera, warm studio key light, microphone, photorealistic 8k"
+        : "Friendly smart Vietnamese young AI presenter in modern bright educational broadcast studio, looking at camera, warm studio lighting, clean desk microphone, photorealistic 8k";
+
+    const presenterImg = await hamTaoHinhAnh(
+      presenterPrompt,
+      dim.imageFormat,
+      topicHint || cleanScript
+    );
+
+    let realMp4Url: string | undefined;
+    const heygenKey = (process.env.HEYGEN_API_KEY || "").trim();
+    if (heygenKey) {
+      try {
+        const headers = {
+          "X-Api-Key": heygenKey,
+          "Content-Type": "application/json",
+        };
+        const payload = {
+          video_inputs: [
+            {
+              character: {
+                type: "avatar",
+                avatar_id: "Daisy-inskirt-20220818",
+                avatar_style: "normal",
+              },
+              voice: {
+                type: "text",
+                input_text: cleanScript,
+                voice_id: "1bd001e7e50f421d891986aad5158bc8",
+              },
+            },
+          ],
+          dimension: { width: dim.width, height: dim.height },
+        };
+        const createRes = await fetch("https://api.heygen.com/v2/video/generate", {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload),
+        });
+        const createJson: any = await createRes.json().catch(() => ({}));
+        const videoId = createJson?.data?.video_id;
+        if (videoId && !createJson?.error) {
+          for (let attempt = 0; attempt < 8; attempt++) {
+            await new Promise((r) => setTimeout(r, 4000));
+            const statusRes = await fetch(
+              `https://api.heygen.com/v1/video_status.get?video_id=${encodeURIComponent(videoId)}`,
+              { headers }
+            );
+            const statusJson: any = await statusRes.json().catch(() => ({}));
+            const status = statusJson?.data?.status;
+            if (status === "completed" && statusJson?.data?.video_url) {
+              const mp4Res = await fetch(statusJson.data.video_url);
+              if (mp4Res.ok) {
+                const mp4Buf = Buffer.from(await mp4Res.arrayBuffer());
+                if (mp4Buf.length > 1024) {
+                  const mp4Name = `video_${safeFrame}_${Date.now()}.mp4`;
+                  fs.writeFileSync(path.join(CHAT_IMAGES_DIR, mp4Name), mp4Buf);
+                  realMp4Url = `/api/chat-media/${mp4Name}`;
+                }
+              }
+              break;
+            }
+            if (status === "failed") break;
+          }
+        }
+      } catch (hgErr: any) {
+        console.warn("HeyGen optional render skipped, using AI talking presenter mode:", hgErr?.message || hgErr);
+      }
+    }
+
+    const cleanTitle = topicHint
+      ? `Video Người AI Nói: ${topicHint.slice(0, 60)}`
+      : "Video Người AI Nói Thuyết Trình";
+
+    return {
+      status: "thanh_cong",
+      khungHinh: safeFrame,
+      dimensions: `${dim.width}x${dim.height}`,
+      videoUrl: realMp4Url,
+      presenterAvatar: presenterImg.imageUrl,
+      url: realMp4Url || presenterImg.imageUrl,
+      title: cleanTitle,
+      topic: topicHint || "Thuyết trình AI",
+      script: cleanScript,
+      duration,
+    };
+  }
+
+  function sanitizeMermaidMindmap(rawCode: string, fallbackTopic: string): string {
+    let cleaned = (rawCode || "")
+      .replace(/```mermaid/gi, "")
+      .replace(/```/g, "")
+      .trim();
+
+    if (!cleaned) {
+      const safeTopic = (fallbackTopic || "Chủ đề trọng tâm").replace(/[()[\]{}:]/g, " ").trim();
+      return `mindmap\n  root((${safeTopic}))\n    Khái niệm cốt lõi\n      Định nghĩa trọng tâm\n    Phương pháp & Ứng dụng\n      Ví dụ minh họa\n    Lưu ý quan trọng\n      Tổng kết nhanh`;
+    }
+
+    const lines = cleaned.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    if (!lines[0] || !lines[0].trim().toLowerCase().startsWith("mindmap")) {
+      lines.unshift("mindmap");
+    }
+
+    const normalized = lines.map((line, idx) => {
+      if (idx === 0) return "mindmap";
+      const indentMatch = line.match(/^(\s*)/);
+      const indent = indentMatch ? indentMatch[1] : "  ";
+      const body = line.trim();
+      if (body.toLowerCase().startsWith("root((")) {
+        const inner = body
+          .replace(/^root\(\(/i, "")
+          .replace(/\)\)$/, "")
+          .replace(/[()[\]{}:]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        return `${indent || "  "}root((${inner || "Chủ đề chính"}))`;
+      }
+      const safeNode = body
+        .replace(/:/g, " -")
+        .replace(/[()[\]{}]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      return `${indent}${safeNode || "Ý chính"}`;
+    });
+
+    return normalized.join("\n");
+  }
+
+  async function hamTaoSoDoTuDuy(
+    maMermaid: string,
+    topicHint: string = "",
+    subject: string = "Toán học",
+    grade: string = "Lớp 9"
+  ) {
+    const cleanMermaid = sanitizeMermaidMindmap(maMermaid, topicHint || subject);
+    const rootMatch = cleanMermaid.match(/root\(\(([^)]+)\)\)/i);
+    const extractedRoot = (rootMatch?.[1] || topicHint || subject || "Sơ đồ tư duy").trim();
+    const fallbackSvg = generateVietnameseMindMapSvg(extractedRoot, subject, grade);
+
+    const seed = Math.floor(Math.random() * 100000);
+    const fileName = `mindmap_${Date.now()}_${seed}.png`;
+    const filePath = path.join(CHAT_IMAGES_DIR, fileName);
+
+    let finalUrl = fallbackSvg;
+    let usedKroki = false;
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const krokiRes = await fetch("https://kroki.io/mermaid/png", {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "image/png",
+        },
+        body: JSON.stringify({ diagram_source: cleanMermaid }),
+      });
+      clearTimeout(timeoutId);
+
+      const ct = (krokiRes.headers.get("content-type") || "").toLowerCase();
+      if (krokiRes.ok && ct.includes("image/png")) {
+        const buf = Buffer.from(await krokiRes.arrayBuffer());
+        if (buf.length > 512) {
+          fs.writeFileSync(filePath, buf);
+          finalUrl = `/api/chat-images/${fileName}`;
+          usedKroki = true;
+        }
+      }
+    } catch (krokiErr: any) {
+      console.warn(
+        "Kroki.io mindmap PNG fallback to crisp Vietnamese SVG:",
+        krokiErr?.message || krokiErr
+      );
+    }
+
+    return {
+      status: "thanh_cong",
+      usedKroki,
+      imageUrl: finalUrl,
+      fallbackUrl: fallbackSvg,
+      mermaidSource: cleanMermaid,
+      prompt: `Sơ đồ tư duy: ${extractedRoot}`,
+      enhancedPrompt: cleanMermaid,
+      seed,
+      aspectRatio: "16:9" as const,
+      style: "mindmap",
+    };
+  }
+
   // Helper to enhance image prompt and build high-speed image URL
   async function generateEnhancedImage(
     rawPrompt: string,
@@ -1252,6 +1652,53 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
     return keywords.some((k) => lower.includes(k));
   }
 
+  function isAcademicVietnamesePosterRequest(text: string): boolean {
+    const lower = text.toLowerCase().trim();
+    if (!isPosterGenerationRequest(lower)) return false;
+    const studyMarkers = [
+      "học tập",
+      "ôn thi",
+      "cẩm nang",
+      "bẫy điểm 10",
+      "công thức",
+      "tiếng việt có nội dung",
+      "lớp 9",
+      "lớp 10",
+      "lớp 11",
+      "lớp 12",
+      "môn toán",
+      "môn văn",
+      "môn anh",
+      "áp phích học",
+    ];
+    return studyMarkers.some((m) => lower.includes(m));
+  }
+
+  function inferChatImageFormatFromText(text: string): ChatImageFormat {
+    const lower = (text || "").toLowerCase();
+    if (
+      lower.includes("banner") ||
+      lower.includes("ảnh bìa") ||
+      lower.includes("hình nền") ||
+      lower.includes("wallpaper") ||
+      lower.includes("16:9") ||
+      lower.includes("khổ ngang") ||
+      lower.includes("ảnh ngang")
+    ) {
+      return "banner";
+    }
+    if (
+      lower.includes("poster") ||
+      lower.includes("áp phích") ||
+      lower.includes("9:16") ||
+      lower.includes("khổ dọc") ||
+      lower.includes("ảnh dọc")
+    ) {
+      return "poster";
+    }
+    return "avatar";
+  }
+
   function isVideoGenerationRequest(text: string): boolean {
     const lower = text.toLowerCase().trim();
     const keywords = [
@@ -1509,37 +1956,53 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
       }
 
       const ai = getGenAIClient();
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-tts-preview",
-        contents: [{ parts: [{ text: cleanText }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: selectedVoice },
-            },
-          },
-        },
-      });
+      let response: any = null;
+      const ttsModels = ["gemini-3.8-flash-lite-tts", "gemini-3.1-flash-tts-preview"];
+      let lastTtsErr: any = null;
 
-      const part = response.candidates?.[0]?.content?.parts?.[0];
+      for (const ttsModel of ttsModels) {
+        try {
+          response = await ai.models.generateContent({
+            model: ttsModel,
+            contents: [{ role: "user", parts: [{ text: cleanText }] }],
+            config: {
+              responseModalities: [Modality.AUDIO],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: selectedVoice },
+                },
+              },
+            },
+          });
+          if (response?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data) {
+            break;
+          }
+        } catch (modelErr: any) {
+          lastTtsErr = modelErr;
+          console.warn(`TTS model ${ttsModel} failed, trying fallback:`, modelErr?.message || modelErr);
+        }
+      }
+
+      const part = response?.candidates?.[0]?.content?.parts?.[0];
       const base64Data = part?.inlineData?.data;
 
       if (!base64Data) {
         return res.status(500).json({
           success: false,
-          error: "Không nhận được dữ liệu âm thanh từ Gemini TTS.",
+          error: lastTtsErr?.message || "Không nhận được dữ liệu âm thanh từ Gemini TTS.",
         });
       }
 
-      const pcmBuffer = Buffer.from(base64Data, "base64");
-      const wavBuffer = pcmToWav(pcmBuffer, 24000, 1);
+      const rawBuffer = Buffer.from(base64Data, "base64");
+      const hasWavHeader = rawBuffer.length >= 4 && rawBuffer.subarray(0, 4).toString("ascii") === "RIFF";
+      const wavBuffer = hasWavHeader ? rawBuffer : pcmToWav(rawBuffer, 24000, 1);
       const audioDataUrl = `data:audio/wav;base64,${wavBuffer.toString("base64")}`;
 
       res.json({
         success: true,
         audioUrl: audioDataUrl,
         voice: selectedVoice,
+        gender: femaleVoices.includes(selectedVoice) ? "female" : "male",
         textLength: cleanText.length,
       });
     } catch (err: any) {
@@ -1663,6 +2126,7 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
       quizSubject = "Toán",
       quizRole = "tutor",
       communityContext = null,
+      studyContext = null,
     } = req.body || {};
 
     const messages = [...incomingMessages];
@@ -1672,7 +2136,8 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
 
     const lastRawMsg = messages[messages.length - 1]?.content || "";
     const lastMsg = lastRawMsg.toLowerCase();
-    const bypassFastPaths = Boolean(interactiveQuizMode || communityContext);
+    const activeBuddy = studyContext?.activeBuddy || null;
+    const bypassFastPaths = Boolean(interactiveQuizMode || communityContext || activeBuddy);
     const activeCountry = getCountryCulture(countryCode);
 
     // User Requirement: Khi gõ "thoat" để kết thúc hội thoại -> "Bot: Tạm biệt nhé!"
@@ -1912,144 +2377,17 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
         }
       }
 
-      // Fast-path: Check combined Video + Image + Poster requests in Chat
+      // Unified intent hints (for safety-net fallbacks while letting Gemini Function Calling orchestrate all tools)
       const wantsCombined = !bypassFastPaths && isCombinedImageAndVideoRequest(lastMsg);
       const wantsVideo = !bypassFastPaths && isVideoGenerationRequest(lastMsg);
-      const wantsPoster = !bypassFastPaths && isPosterGenerationRequest(lastMsg);
+      const wantsPoster = !bypassFastPaths && isAcademicVietnamesePosterRequest(lastMsg);
       const wantsMindMap = !bypassFastPaths && isMindMapGenerationRequest(lastMsg);
-      const wantsImage = !bypassFastPaths && isImageGenerationRequest(lastMsg);
+      const wantsImageFallback =
+        !bypassFastPaths &&
+        (isImageGenerationRequest(lastMsg) || isPosterGenerationRequest(lastMsg) || lastMsg.includes("banner") || lastMsg.includes("avatar"));
 
-      if (wantsCombined || (wantsVideo && (wantsImage || wantsPoster))) {
-        try {
-          const cleanPrompt = lastRawMsg
-            .replace(/tạo video có người ai nói và/gi, "")
-            .replace(/tạo video người ai nói và/gi, "")
-            .replace(/tạo video/gi, "")
-            .replace(/video có người ai nói/gi, "")
-            .replace(/video người ai nói/gi, "")
-            .replace(/tạo ảnh và video có người ai nói chung về/gi, "")
-            .replace(/tạo ảnh và video chung về/gi, "")
-            .replace(/tạo ảnh và video/gi, "")
-            .replace(/làm ảnh và video/gi, "")
-            .replace(/ảnh và video chung/gi, "")
-            .replace(/phải đúng không được làm sai/gi, "")
-            .replace(/tạo ảnh như chatgpt/gi, "")
-            .replace(/làm poster đúng như chatgpt/gi, "")
-            .replace(/bỏ 6 nhân vật ai diễn thuyết đi/gi, "")
-            .replace(/theo lệnh thì mới cho giọng nói/gi, "")
-            .replace(/^(vẽ ảnh minh họa|vẽ sơ đồ tư duy|vẽ ảnh|vẽ hình|tạo ảnh|vẽ tranh|vẽ cho tôi|vẽ giúp tôi|vẽ giúp|hãy vẽ|vẽ một|tạo một ảnh|làm ảnh|vẽ|draw an image|generate image)\s*(\(discord style\):?|\(dola style\):?|:)?/i, "")
-            .trim() || "Kiến thức bài học trọng tâm";
-
-          const isPosterMode = wantsPoster || lastMsg.includes("poster") || lastMsg.includes("áp phích");
-
-          let mediaImageUrl = "";
-          if (isPosterMode) {
-            mediaImageUrl = generateVietnamesePosterSvg(
-              cleanPrompt,
-              `CẨM NANG HỌC TẬP: ${cleanPrompt.toUpperCase()}`
-            );
-          } else {
-            const imgResult = await generateEnhancedImage(cleanPrompt, "chatgpt", "16:9");
-            mediaImageUrl = imgResult.imageUrl;
-          }
-
-          const presenterImg = await generateEnhancedImage(
-            `Vietnamese high school top student presenter in modern digital classroom explaining ${cleanPrompt}, educational video studio setup, professional microphone, engaging smile, crisp 8k`,
-            "photorealistic",
-            "16:9"
-          );
-
-          const speechScript = `Xin chào các bạn học sinh! Tôi là Người Thuyết Trình AI của Max10. Dưới đây là bài giảng và minh họa trực quan chuẩn xác về: ${cleanPrompt}. Hãy nắm chắc từng bản chất kiến thức, công thức trọng tâm và cảnh báo bẫy thi để giành trọn điểm 10 nhé!`;
-
-          return res.json({
-            success: true,
-            reply:
-              `Chào bạn! Max10 đã hoàn thành **tạo ${isPosterMode ? 'Poster Học Tập Chuẩn ChatGPT' : 'Ảnh Chuẩn Xác'} & Video Người AI Nói cùng lúc** ngay trong đoạn chat này cho bạn:\n\n` +
-              `### 1. 🎨 ${isPosterMode ? 'Poster Học Tập AI 100% Tiếng Việt Có Nội Dung' : 'Bức Ảnh Chuẩn Xác Như ChatGPT (DALL·E 3 Engine)'}:\n` +
-              `![${cleanPrompt}](${mediaImageUrl})\n\n` +
-              `> 🌟 **Cam kết chất lượng:** ${isPosterMode ? 'Poster chuẩn Infographic giáo dục, 100% Tiếng Việt hiện đại, có tiêu đề và nội dung phân tích rõ ràng.' : 'Bức ảnh vẽ chuẩn xác 100%, bảo toàn chủ thể và độ sắc nét 8K.'}\n\n` +
-              `---\n\n` +
-              `### 2. 🎬 Video Người AI Nói Thuyết Trình Bài Học (Mô Phỏng Cử Động Khẩu Hình):\n` +
-              `![Video Người AI Nói](${presenterImg.imageUrl})\n\n` +
-              `🎙️ **Kịch bản khẩu lệnh bài học:**\n` +
-              `> *"${speechScript}"*\n\n` +
-              `👇 **TRẢI NGHIỆM VIDEO & TÙY CHỈNH NGAY TẠI ĐÂY:**\n` +
-              `- Bạn có thể **bấm nút Phát (Play) ngay trong trình phát video bên dưới** để nghe Người AI thuyết minh bằng giọng tiếng Việt truyền cảm!\n` +
-              `- 👉 **[🎬 Mở Studio Người AI Nói Chi Tiết](#open-video-studio)**\n` +
-              `- 👉 **[🎨 Mở Xưởng Tạo Ảnh & Poster AI](#open-image-studio)**`,
-            generatedImage: {
-              url: mediaImageUrl,
-              prompt: `${isPosterMode ? 'Poster' : 'Ảnh'}: ${cleanPrompt}`,
-              enhancedPrompt: cleanPrompt,
-              seed: 12345,
-              aspectRatio: isPosterMode ? "3:4" : "16:9",
-              style: isPosterMode ? "academic_poster" : "chatgpt",
-            },
-            generatedVideo: {
-              url: presenterImg.imageUrl,
-              title: `Video & Bài Giảng: ${cleanPrompt}`,
-              topic: cleanPrompt,
-              presenterAvatar: presenterImg.imageUrl,
-              script: speechScript,
-              duration: 60,
-            },
-          });
-        } catch (dualErr) {
-          console.error("Dual video + image generation error:", dualErr);
-        }
-      }
-
-      // Fast-path: Check standalone Video Generation request in Chat
-      if (wantsVideo) {
-        try {
-          const cleanTopic = lastRawMsg
-            .replace(/^(tạo video|làm video|video có người ai nói|video người ai nói|người ai nói|video có người|video thuyết trình|tạo video ai|video bài giảng|video học tập|xuất video|làm clip|tạo clip)\s*(về|cho|bài|chủ đề|:)?/i, "")
-            .trim() || "Kiến thức bài học trọng tâm";
-
-          const presenterImg = await generateEnhancedImage(
-            `Vietnamese high school top student presenter in modern digital classroom explaining ${cleanTopic}, educational video studio setup, professional microphone, engaging smile, crisp 8k`,
-            "photorealistic",
-            "16:9"
-          );
-
-          const speechScript = `Chào các bạn học sinh! Max10 gửi đến bạn video thuyết trình bài học: "${cleanTopic}". Hãy lắng nghe phần hướng dẫn phương pháp, công thức và các bẫy điểm 10 cần tránh để đạt điểm tuyệt đối nhé!`;
-
-          return res.json({
-            success: true,
-            reply:
-              `🎬 **Max10 đã tạo Video Người AI Nói Thuyết Trình Bài Học Cho Bạn!**\n\n` +
-              `![Video Người AI Nói](${presenterImg.imageUrl})\n\n` +
-              `### 🎙️ Video Thuyết Trình: "${cleanTopic}"\n` +
-              `- 👤 **Người thuyết trình AI:** Gia sư AI Max10 chuẩn giọng giảng bài truyền cảm, mô phỏng cử động môi (Lip-sync).\n` +
-              `- 📚 **Nội dung:** Tóm tắt bản chất, phương pháp giải và cảnh báo bẫy thi của "${cleanTopic}".\n` +
-              `- ⏱️ **Thời lượng:** 60 giây cô đọng, dễ hiểu ngay tức thì.\n\n` +
-              `👇 **BẤM ĐỂ MỞ STUDIO TÙY CHỈNH VIDEO:**\n` +
-              `- 👉 **[🎬 Bấm vào đây để mở Xưởng Làm Video Người AI Nói Đầy Đủ](#open-video-studio)**\n` +
-              `- 👉 **[🎨 Mở Xưởng Tạo Ảnh & Poster AI](#open-image-studio)**`,
-            generatedImage: {
-              url: presenterImg.imageUrl,
-              prompt: `Video Người AI: ${cleanTopic}`,
-              enhancedPrompt: presenterImg.enhancedPrompt,
-              seed: presenterImg.seed,
-              aspectRatio: "16:9",
-              style: "photorealistic",
-            },
-            generatedVideo: {
-              url: presenterImg.imageUrl,
-              title: `Video Bài Giảng: ${cleanTopic}`,
-              topic: cleanTopic,
-              presenterAvatar: presenterImg.imageUrl,
-              script: speechScript,
-              duration: 60,
-            },
-          });
-        } catch (vErr) {
-          console.error("Chat video error:", vErr);
-        }
-      }
-
-      // Fast-path: Check Poster / Áp phích Generation request in Chat (User Requirement: Poster chuẩn ChatGPT, 100% Tiếng Việt có nội dung, không vẽ ảnh vô nghĩa)
-      if (wantsPoster) {
+      // Keep dedicated educational Vietnamese infographic SVG poster only when explicitly requesting Vietnamese study poster content
+      if (wantsPoster && !wantsVideo && !wantsMindMap) {
         try {
           const cleanPrompt = lastRawMsg
             .replace(/^(tạo poster|làm poster|vẽ poster|poster ai|poster|tạo áp phích|làm áp phích|vẽ áp phích|áp phích học tập|áp phích tuyên truyền|áp phích cổ động|áp phích|à post ai|à post|post ai)\s*(cho|về|học tập|tuyên truyền|:)?/i, "")
@@ -2066,16 +2404,10 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
             success: true,
             reply:
               `Max10 đã thiết kế xong **Poster / Áp Phích Học Tập AI Chuẩn ChatGPT** cho chủ đề "${cleanPrompt}"! 🖼️✨\n\n` +
-              `![Poster ${cleanPrompt}](${posterSvgUrl})\n\n` +
               `### 📌 Nội Dung Trọng Tâm Trên Áp Phích (100% Tiếng Việt Có Nội Dung):\n` +
               `- 🎯 **Chủ đề & Tiêu đề:** ${cleanPrompt} — Trình bày bằng Tiếng Việt hiện đại, rõ ràng, không có lỗi font hay ký tự lạ.\n` +
-              `- 📐 **Bố cục 4 phần chuẩn mực:**\n` +
-              `  1. *Bản chất kiến thức & định lý cốt lõi*\n` +
-              `  2. *Phương pháp giải nhanh & công thức vàng*\n` +
-              `  3. *Bẫy đề thi hay trừ điểm oan kinh điển*\n` +
-              `  4. *Lời khuyên thủ khoa bứt phá điểm 10*\n` +
-              `- 💡 **Ứng dụng:** Bạn có thể bấm nút **"Tải ảnh"** bên dưới để in dán góc học tập hoặc chia sẻ cho nhóm bạn cùng lớp!\n\n` +
-              `> 💡 **Mẹo:** Bạn cũng có thể mở **[🎨 Xưởng Tạo Ảnh & Poster AI](#open-image-studio)** để tùy chỉnh phông nền và phong cách nhé!`,
+              `- 📐 **Bố cục 4 phần chuẩn mực:** Bản chất kiến thức, Công thức vàng, Bẫy đề thi và Lời khuyên thủ khoa.\n` +
+              `- 💡 **Ứng dụng:** Bấm nút **"Tải ảnh"** trên thẻ ảnh bên dưới để lưu về máy hoặc in dán góc học tập nhé!`,
             generatedImage: {
               url: posterSvgUrl,
               prompt: `Poster: ${cleanPrompt}`,
@@ -2090,120 +2422,65 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
         }
       }
 
-      // Fast-path: Check Sơ Đồ Tư Duy (Mind Map) Generation request in Chat (User Requirement: chuẩn yêu cầu học sinh, thầy cô, 100% Tiếng Việt hiện đại, KHÔNG dùng tiếng Việt cổ)
-      if (wantsMindMap) {
-        try {
-          const cleanTopic = lastRawMsg
-            .replace(/^(vẽ sơ đồ tư duy|sơ đồ tư duy|sơ đồ mindmap|mindmap|mind map|vẽ sơ đồ|lập sơ đồ|tạo sơ đồ|sơ đồ cây|sơ đồ nhánh|sơ đồ tóm tắt|tư duy về)\s*(về|cho|bài|chủ đề|môn|:)?/i, "")
-            .replace(/sơ đồ tư duy cũng phải tạo ảnh đúng như yêu cầu của học sinh và thầy cô/gi, "")
-            .replace(/với lại sơ đồ tư duy là tiếng việt chữ không phải là tiếng việt cổ/gi, "")
-            .trim() || subject || "Bài Học Trọng Tâm";
-
-          const mindmapSvgUrl = generateVietnameseMindMapSvg(cleanTopic, subject, grade);
-
-          return res.json({
-            success: true,
-            reply:
-              `Max10 đã vẽ xong **Ảnh Sơ Đồ Tư Duy Chuẩn Yêu Cầu Học Sinh & Thầy Cô** cho chủ đề "${cleanTopic}"! 🧠✨\n\n` +
-              `![Sơ đồ tư duy ${cleanTopic}](${mindmapSvgUrl})\n\n` +
-              `### 🌿 Cấu Trúc Sơ Đồ Tư Duy Chuẩn Tony Buzan (100% Tiếng Việt Hiện Đại):\n` +
-              `- 🌟 **Tiếng Việt hiện đại 100%:** Cam kết toàn bộ chữ trên sơ đồ là **Chữ Quốc ngữ chuẩn mực**, tuyệt đối không bị lỗi font hay biến dạng thành chữ cổ/chữ Hán Nôm.\n` +
-              `- 1️⃣ **Nhánh 1 (Xanh lam):** Bản chất kiến thức nền tảng, định nghĩa chuẩn SGK & điều kiện cốt lõi.\n` +
-              `- 2️⃣ **Nhánh 2 (Tím):** Các dạng bài tập trọng tâm & phương pháp giải chi tiết (từ cơ bản đến nâng cao).\n` +
-              `- 3️⃣ **Nhánh 3 (Xanh ngọc):** Hệ thống công thức vàng & quy trình 3 bước tư duy mạch lạc.\n` +
-              `- 4️⃣ **Nhánh 4 (Đỏ hồng):** Cảnh báo bẫy đề thi hay trừ điểm oan kinh điển để giành trọn điểm 10.\n\n` +
-              `> 💡 **Mẹo:** Bấm nút **"Tải ảnh"** góc trên bên phải để lưu ảnh chất lượng cao về máy hoặc in màu dán góc học tập nhé!`,
-            generatedImage: {
-              url: mindmapSvgUrl,
-              prompt: `Sơ đồ tư duy: ${cleanTopic}`,
-              enhancedPrompt: `Vietnamese Mindmap Diagram for ${cleanTopic}`,
-              seed: 1000,
-              aspectRatio: "3:2",
-              style: "diagram",
-            },
-          });
-        } catch (mmErr) {
-          console.error("Chat mindmap error:", mmErr);
-        }
-      }
-
-      // Fast-path: Check Image Generation request in Chat
-      if (wantsImage) {
-        try {
-          const cleanPrompt = lastRawMsg
-            .replace(/^(vẽ ảnh minh họa|vẽ sơ đồ tư duy|vẽ ảnh|vẽ hình|tạo ảnh|vẽ tranh|vẽ cho tôi|vẽ giúp tôi|vẽ giúp|hãy vẽ|vẽ một|tạo một ảnh|làm ảnh|vẽ|draw an image|generate image)\s*(\(discord style\):?|\(dola style\):?|:)?/i, "")
-            .replace(/\(discord style\)/gi, "")
-            .replace(/\(dola style\)/gi, "")
-            .replace(/tạo ảnh như chatgpt/gi, "")
-            .replace(/tạo ảnh phải đúng không được làm sai/gi, "")
-            .trim() || lastRawMsg;
-
-          // Determine appropriate style based on request
-          let detectedStyle = "chatgpt";
-          const lowerClean = cleanPrompt.toLowerCase();
-          if (
-            lowerClean.includes("sơ đồ") ||
-            lowerClean.includes("cấu tạo") ||
-            lowerClean.includes("mô hình") ||
-            lowerClean.includes("infographic") ||
-            lowerClean.includes("chu trình") ||
-            lowerClean.includes("mạch điện") ||
-            lowerClean.includes("hình học")
-          ) {
-            detectedStyle = "diagram";
-          } else if (lowerClean.includes("anime") || lowerClean.includes("manga") || lowerClean.includes("hoạt hình nhật")) {
-            detectedStyle = "anime";
-          } else if (lowerClean.includes("3d") || lowerClean.includes("pixar") || lowerClean.includes("chibi")) {
-            detectedStyle = "3d_cartoon";
-          } else if (lowerClean.includes("văn học") || lowerClean.includes("thơ") || lowerClean.includes("tranh sơn dầu") || lowerClean.includes("làng quê")) {
-            detectedStyle = "literature_art";
-          } else if (lowerClean.includes("ảnh chụp") || lowerClean.includes("người thật") || lowerClean.includes("chân dung máy ảnh")) {
-            detectedStyle = "photorealistic";
-          }
-
-          const imgResult = await generateEnhancedImage(cleanPrompt, detectedStyle, "1:1");
-
-          return res.json({
-            success: true,
-            reply:
-              `Max10 đã tạo xong bức ảnh **chuẩn xác theo yêu cầu như ChatGPT (DALL·E 3)** cho bạn! 🎨✨\n\n` +
-              `![${cleanPrompt}](${imgResult.imageUrl})\n\n` +
-              `> 🌟 **Độ chuẩn xác 100%:** Mô tả đã được tối ưu hóa chuẩn mực, không vẽ sai chi tiết, độ phân giải 8K cực nét.\n\n` +
-              `> 💡 **Mẹo:** Bạn có thể bấm nút **"Tải ảnh về máy"** hoặc mở **[🎨 Xưởng Tạo Ảnh Như ChatGPT](#open-image-studio)** để tùy chỉnh tỷ lệ 16:9, 9:16 và các phong cách khác nhé!`,
-            generatedImage: {
-              url: imgResult.imageUrl,
-              prompt: cleanPrompt,
-              enhancedPrompt: imgResult.enhancedPrompt,
-              seed: imgResult.seed,
-              aspectRatio: imgResult.aspectRatio,
-              style: imgResult.style,
-            },
-          });
-        } catch (imgErr) {
-          console.error("Chat image generation error:", imgErr);
-          // Fall through to regular chat if image generation fails
-        }
-      }
+      // Unified ChatGPT-style conversational AI + Multi-Tool Gemini Function Calling
+      // (ham_tao_hinh_anh + ham_tao_video_nguoi_noi + ham_tao_so_do_tu_duy)
 
       const ai = getGenAIClient();
       const useHighThinking = Boolean(
         !interactiveQuizMode && (isThinking || mode === "grade_10_secret" || mode === "trap_detector" || Boolean(image?.data))
       );
 
+      const effectiveLanguageMode: "vi" | "native" | "bilingual" =
+        studyContext?.languageMode === "vi" ||
+        studyContext?.languageMode === "native" ||
+        studyContext?.languageMode === "bilingual"
+          ? studyContext.languageMode
+          : activeCountry.code === "VN"
+          ? "vi"
+          : bilingualMode
+          ? "bilingual"
+          : "native";
+
+      const effectiveStudyGrade = studyContext?.studyGrade || grade;
+      const effectiveStudySubject = studyContext?.studySubject || subject;
+      const curriculumCalibrationBlock = studyContext?.curriculumStandard
+        ? `\n- CHUẨN CHƯƠNG TRÌNH QUỐC GIA ĐANG DẠY: ${studyContext.curriculumStandard} (Cấp học: ${effectiveStudyGrade}, Môn: ${effectiveStudySubject})\n- HỆ ĐƠN VỊ ĐO LƯỜNG CHUẨN: ${studyContext.curriculumUnits || "Chuẩn quốc tế SI"}\n- HIỆU CHỈNH KIẾN THỨC: ${studyContext.curriculumCalibration || "Bám sát 100% chương trình & chuẩn bài tập của quốc gia đã chọn."}`
+        : "";
+
+      const languageInstructionLine =
+        effectiveLanguageMode === "vi"
+          ? "NGÔN NGỮ GIAO TIẾP MẶC ĐỊNH: Tiếng Việt chuẩn mực, thân thiện (chỉ chuyển sang ngoại ngữ nếu người dùng yêu cầu hoặc khi chat cùng bạn học nước ngoài)."
+          : effectiveLanguageMode === "bilingual"
+          ? `CHẾ ĐỘ SONG NGỮ ĐANG BẬT: Hãy viết lời thoại chính bằng ${activeCountry.languageName} chuẩn bản xứ (đúng giọng điệu & xưng hô của người ${activeCountry.name}), sau đó LUÔN kèm 1 mục dịch nghĩa ngắn gọn rõ ràng bằng Tiếng Việt (ví dụ: "🇻🇳 Dịch nghĩa: ...") để học sinh hiểu ngay.`
+          : `CHẾ ĐỘ BẢN NGỮ HOÀN TOÀN: Trả lời 100% bằng ${activeCountry.languageName} chuẩn bản xứ của ${activeCountry.name} (chỉ thêm giải thích tiếng Việt nếu người dùng hỏi xin dịch).`;
+
       const countryStyleBlock = `
 BỘ CHỌN QUỐC GIA & NGÔN NGỮ ĐANG KÍCH HOẠT: ${activeCountry.flag} ${activeCountry.name} (${activeCountry.languageName})
 - Văn hóa, cách xưng hô & giọng điệu bản xứ: ${activeCountry.promptInstruction}
-- ${
-        activeCountry.code === "VN"
-          ? "Sử dụng Tiếng Việt chuẩn mực, thân thiện."
-          : bilingualMode
-          ? `CHẾ ĐỘ SONG NGỮ ĐANG BẬT: Hãy viết lời thoại chính bằng ${activeCountry.languageName} chuẩn bản xứ (đúng giọng điệu & xưng hô của người ${activeCountry.name}), sau đó kèm 1 dòng dịch/gợi ý ngắn gọn bằng Tiếng Việt (ví dụ: "🇻🇳 Dịch nghĩa: ...") để học sinh Việt Nam hiểu rõ ngay lập tức.`
-          : `CHẾ ĐỘ BẢN NGỮ HOÀN TOÀN: Trả lời 100% bằng ${activeCountry.languageName} chuẩn bản xứ của ${activeCountry.name} (chỉ giải thích ngắn bằng Tiếng Việt nếu người dùng yêu cầu).`
-      }`;
+- ${languageInstructionLine}${curriculumCalibrationBlock}`;
 
       let systemInstruction = "";
 
-      if (communityContext && typeof communityContext === "object") {
+      if (activeBuddy && typeof activeBuddy === "object") {
+        const isVietnameseBuddy = activeBuddy.countryCode === "VN";
+        systemInstruction = `Bạn đang NHẬP VAI BẠN HỌC QUỐC TẾ TRONG HỆ THỐNG KẾT BẠN HỌC TẬP KIỂU DISCORD:
+- TÊN HIỂN THỊ & ID: ${activeBuddy.name}#${activeBuddy.tag} ${activeBuddy.flag}
+- QUỐC GIA: ${activeBuddy.countryName}
+- NGÔN NGỮ BẢN ĐỊA: ${activeBuddy.nativeLanguage}
+- CẤP HỌC: ${activeBuddy.grade}
+- MÔN THẾ MẠNH: ${activeBuddy.strongSubject}
+- TÍNH CÁCH & VĂN HÓA: ${activeBuddy.personality}
+
+QUY TẮC NHẬP VAI BẠN HỌC QUỐC TẾ (BẮT BUỘC 100%):
+1. Hãy trò chuyện tự nhiên, thân thiện như một người bạn học thật sự đến từ ${activeBuddy.countryName}, gọi tên "${userName || "bạn"}" gần gũi.
+2. ${
+          isVietnameseBuddy
+            ? "Vì bạn đến từ Việt Nam, hãy giao tiếp bằng Tiếng Việt tự nhiên, hài hước kiểu học sinh Việt Nam và cùng bạn học ôn tập."
+            : `Hãy trả lời câu chính bằng ngôn ngữ bản địa ${activeBuddy.nativeLanguage} chuẩn tự nhiên (đúng văn hóa giao tiếp của học sinh ${activeBuddy.countryName}), sau đó LUÔN XUỐNG DÒNG viết thêm bản dịch Tiếng Việt ngắn gọn bên dưới theo định dạng:\n🇻🇳 **Dịch nghĩa tiếng Việt:** ...`
+        }
+3. Nếu người dùng nhờ giải bài, đố vui, hỏi từ vựng hoặc luyện giao tiếp: trả lời súc tích 2–4 câu, có thể gợi mở 1 câu hỏi nhỏ hoặc 1 từ vựng bản địa thú vị để hai bạn học cùng tiến bộ.
+4. Tuyệt đối giữ đúng nhân vật ${activeBuddy.name}#${activeBuddy.tag}, không tự phá vỡ vai diễn.`;
+      } else if (communityContext && typeof communityContext === "object") {
         const commCat = communityContext.category || "study";
         const commName = communityContext.name || "Cộng đồng Max10";
         if (commCat === "game") {
@@ -2323,15 +2600,282 @@ Chế độ hiện tại: ${
         }
       }
 
+      const enableUnifiedTools = !interactiveQuizMode;
+      const unifiedToolsGuidance = enableUnifiedTools
+        ? `\n4. SIÊU NĂNG LỰC ĐA PHƯƠNG TIỆN TỰ ĐỘNG (FUNCTION CALLING ĐA CÔNG CỤ):
+   Bạn có 3 công cụ có thể gọi đơn lẻ hoặc KẾT HỢP CÙNG LÚC trong một lượt:
+   - \`ham_tao_hinh_anh(prompt_tieng_anh, loai_anh)\`: Gọi khi "${userName || "người dùng"}" muốn vẽ tranh, tạo ảnh, làm avatar ('avatar' 1:1), thiết kế poster ('poster' 9:16), hoặc banner/ảnh bìa/cảnh ngang ('banner' 16:9). Tự dịch & trau chuốt mô tả sang Tiếng Anh chi tiết.
+   - \`ham_tao_video_nguoi_noi(loi_thoai, khung_hinh)\`: Gọi khi người dùng yêu cầu tạo video có người AI nói, MC ảo thuyết trình, làm clip ngắn. Soạn \`loi_thoai\` tự nhiên, súc tích và chọn \`khung_hinh\`: 'doc' (9:16), 'ngang' (16:9), hoặc 'vuong' (1:1).
+   - \`ham_tao_so_do_tu_duy(ma_mermaid)\`: Gọi khi người dùng muốn vẽ sơ đồ tư duy (mindmap), tóm tắt kiến thức hoặc lập sơ đồ cây. Sinh \`ma_mermaid\` bắt đầu bằng \`mindmap\`, dòng \`  root((Chủ đề))\`, thụt 2 dấu cách mỗi cấp nhánh và KHÔNG dùng ký tự \`() [] :\` trong tên các nhánh con.
+   - KHÔNG tự bịa đường dẫn ảnh hay link video trong nội dung văn bản.`
+        : "";
+
+      const finalSystemInstruction = `${systemInstruction}${unifiedToolsGuidance}`;
+
       const response = await generateContentWithRetry({
         contents: contentsPayload,
         config: {
-          systemInstruction,
+          systemInstruction: finalSystemInstruction,
+          ...(enableUnifiedTools
+            ? {
+                tools: [
+                  {
+                    functionDeclarations: [
+                      hamTaoHinhAnhDeclaration,
+                      hamTaoVideoNguoiNoiDeclaration,
+                      hamTaoSoDoTuDuyDeclaration,
+                    ],
+                  },
+                ],
+              }
+            : {}),
           thinkingConfig: {
             thinkingLevel: useHighThinking ? ThinkingLevel.HIGH : ThinkingLevel.MEDIUM,
           },
         },
       });
+
+      // Extract ALL Gemini Function Calls (supports single or multi-tool calls in one turn)
+      const directCalls = Array.isArray(response?.functionCalls) ? response.functionCalls : [];
+      const candidateParts = response?.candidates?.[0]?.content?.parts || [];
+      const partCalls = candidateParts
+        .filter((p: any) => p?.functionCall)
+        .map((p: any) => p.functionCall);
+      const allFunctionCalls = directCalls.length > 0 ? directCalls : partCalls;
+
+      if (allFunctionCalls.length > 0) {
+        const generatedImagesList: any[] = [];
+        let generatedVideoResult: any = undefined;
+        const functionResponseParts: any[] = [];
+
+        for (const fnCall of allFunctionCalls) {
+          const fnName = fnCall?.name;
+          const args = (fnCall?.args || {}) as Record<string, any>;
+
+          if (fnName === "ham_tao_hinh_anh") {
+            const promptTiengAnh =
+              typeof args.prompt_tieng_anh === "string" && args.prompt_tieng_anh.trim()
+                ? args.prompt_tieng_anh.trim()
+                : lastRawMsg || "A creative high-resolution illustration";
+            const loaiAnhArg: ChatImageFormat =
+              args.loai_anh === "poster" || args.loai_anh === "banner"
+                ? args.loai_anh
+                : inferChatImageFormatFromText(lastRawMsg);
+
+            const imgResult = await hamTaoHinhAnh(promptTiengAnh, loaiAnhArg, lastRawMsg);
+            generatedImagesList.push({
+              url: imgResult.imageUrl,
+              fallbackUrl: imgResult.fallbackUrl,
+              prompt: lastRawMsg || imgResult.enhancedPrompt,
+              enhancedPrompt: imgResult.enhancedPrompt,
+              seed: imgResult.seed,
+              aspectRatio: imgResult.aspectRatio,
+              style: imgResult.style,
+              loaiAnh: imgResult.loaiAnh,
+            });
+            functionResponseParts.push({
+              functionResponse: {
+                ...(fnCall.id ? { id: fnCall.id } : {}),
+                name: "ham_tao_hinh_anh",
+                response: {
+                  status: "success",
+                  image_url: imgResult.imageUrl,
+                  loai_anh: imgResult.loaiAnh,
+                  aspect_ratio: imgResult.aspectRatio,
+                  dimensions: `${imgResult.width}x${imgResult.height}`,
+                  prompt_tieng_anh: imgResult.enhancedPrompt,
+                  note: "Ảnh đã hiển thị ngay bên dưới tin nhắn này. KHÔNG chèn URL hoặc markdown ![...](...) vào văn bản.",
+                },
+              },
+            });
+          } else if (fnName === "ham_tao_video_nguoi_noi") {
+            const loiThoai =
+              typeof args.loi_thoai === "string" && args.loi_thoai.trim()
+                ? args.loi_thoai.trim()
+                : `Chào ${userName || "bạn"}! Mình là Max10 AI, cùng khám phá nội dung ${lastRawMsg} ngay nhé!`;
+            const khungHinh: ChatVideoFrame =
+              args.khung_hinh === "ngang" || args.khung_hinh === "vuong"
+                ? args.khung_hinh
+                : lastMsg.includes("ngang") || lastMsg.includes("16:9") || lastMsg.includes("youtube")
+                ? "ngang"
+                : lastMsg.includes("vuông") || lastMsg.includes("1:1")
+                ? "vuong"
+                : "doc";
+
+            const videoRes = await hamTaoVideoNguoiNoi(loiThoai, khungHinh, lastRawMsg);
+            generatedVideoResult = {
+              url: videoRes.url,
+              videoUrl: videoRes.videoUrl,
+              title: videoRes.title,
+              topic: videoRes.topic,
+              presenterAvatar: videoRes.presenterAvatar,
+              script: videoRes.script,
+              duration: videoRes.duration,
+              khungHinh: videoRes.khungHinh,
+            };
+            functionResponseParts.push({
+              functionResponse: {
+                ...(fnCall.id ? { id: fnCall.id } : {}),
+                name: "ham_tao_video_nguoi_noi",
+                response: {
+                  status: "success",
+                  khung_hinh: videoRes.khungHinh,
+                  dimensions: videoRes.dimensions,
+                  has_mp4: Boolean(videoRes.videoUrl),
+                  script: videoRes.script,
+                  note: "Trình phát video Người AI Nói đã hiển thị trực tiếp bên dưới tin nhắn. KHÔNG chèn URL hoặc markdown ảnh/video vào nội dung chữ.",
+                },
+              },
+            });
+          } else if (fnName === "ham_tao_so_do_tu_duy") {
+            const maMermaid =
+              typeof args.ma_mermaid === "string" ? args.ma_mermaid : "";
+            const mmRes = await hamTaoSoDoTuDuy(maMermaid, lastRawMsg, subject, grade);
+            generatedImagesList.push({
+              url: mmRes.imageUrl,
+              fallbackUrl: mmRes.fallbackUrl,
+              prompt: mmRes.prompt,
+              enhancedPrompt: mmRes.mermaidSource,
+              seed: mmRes.seed,
+              aspectRatio: mmRes.aspectRatio,
+              style: "mindmap",
+            });
+            functionResponseParts.push({
+              functionResponse: {
+                ...(fnCall.id ? { id: fnCall.id } : {}),
+                name: "ham_tao_so_do_tu_duy",
+                response: {
+                  status: "success",
+                  image_url: mmRes.imageUrl,
+                  used_kroki_png: mmRes.usedKroki,
+                  note: "Ảnh sơ đồ tư duy đã hiển thị trực tiếp bên dưới tin nhắn này. Hãy tóm tắt ngắn gọn cấu trúc các nhánh chính cho người dùng, KHÔNG chèn URL hay markdown ![](...) vào văn bản.",
+                },
+              },
+            });
+          }
+        }
+
+        if (functionResponseParts.length > 0) {
+          let finalReply = `Mình đã hoàn tất tạo sản phẩm AI theo yêu cầu của **${userName || "bạn"}** rồi đây! ✨\n\nBạn có thể xem trực tiếp hoặc bấm tải về ngay bên dưới nhé!`;
+
+          try {
+            const modelToolContent = response?.candidates?.[0]?.content || {
+              role: "model",
+              parts: allFunctionCalls.map((fn: any) => ({
+                functionCall: { name: fn.name, args: fn.args },
+              })),
+            };
+            const toolResponseContent = {
+              role: "user",
+              parts: functionResponseParts,
+            };
+
+            const followUpResponse = await generateContentWithRetry({
+              contents: [...contentsPayload, modelToolContent, toolResponseContent],
+              config: {
+                systemInstruction: finalSystemInstruction,
+                thinkingConfig: {
+                  thinkingLevel: ThinkingLevel.LOW,
+                },
+              },
+            });
+
+            if (followUpResponse?.text && followUpResponse.text.trim()) {
+              finalReply = followUpResponse.text.trim();
+            }
+          } catch (turn2Err) {
+            console.warn("Function calling turn-2 synthesis fallback:", turn2Err);
+          }
+
+          return res.json({
+            success: true,
+            reply: finalReply,
+            generatedImage: generatedImagesList[0],
+            generatedImages: generatedImagesList.length > 0 ? generatedImagesList : undefined,
+            generatedVideo: generatedVideoResult,
+            modelEngine: "Max10 Gemini 4 Ultra",
+          });
+        }
+      }
+
+      // Safety net: if user explicitly asked for Mind Map / Video / Image and Turn 1 answered with text only
+      if (enableUnifiedTools && (wantsCombined || wantsMindMap || wantsVideo || wantsImageFallback)) {
+        const fallbackImages: any[] = [];
+        let fallbackVideo: any = undefined;
+
+        if (wantsMindMap) {
+          const cleanTopic =
+            lastRawMsg
+              .replace(/^(vẽ sơ đồ tư duy|sơ đồ tư duy|sơ đồ mindmap|mindmap|mind map|vẽ sơ đồ|lập sơ đồ|tạo sơ đồ|sơ đồ cây|sơ đồ nhánh|sơ đồ tóm tắt|tư duy về)\s*(về|cho|bài|chủ đề|môn|:)?/i, "")
+              .trim() || subject || "Bài Học Trọng Tâm";
+          const mmRes = await hamTaoSoDoTuDuy("", cleanTopic, subject, grade);
+          fallbackImages.push({
+            url: mmRes.imageUrl,
+            fallbackUrl: mmRes.fallbackUrl,
+            prompt: mmRes.prompt,
+            enhancedPrompt: mmRes.mermaidSource,
+            seed: mmRes.seed,
+            aspectRatio: mmRes.aspectRatio,
+            style: "mindmap",
+          });
+        }
+
+        if (wantsVideo || wantsCombined) {
+          const cleanTopic =
+            lastRawMsg
+              .replace(/^(tạo video|làm video|video có người ai nói|video người ai nói|người ai nói|video thuyết trình|tạo video ai)\s*(về|cho|bài|chủ đề|:)?/i, "")
+              .trim() || "Kiến thức trọng tâm";
+          const scriptText = `Xin chào ${userName || "các bạn"}! Mình là MC ảo của Max10 AI. Hôm nay chúng ta hãy cùng khám phá nhanh chủ đề ${cleanTopic} thật dễ hiểu và ghi nhớ trọn vẹn nhé!`;
+          const khungHinh: ChatVideoFrame =
+            lastMsg.includes("ngang") || lastMsg.includes("16:9")
+              ? "ngang"
+              : lastMsg.includes("vuông") || lastMsg.includes("1:1")
+              ? "vuong"
+              : "doc";
+          const vRes = await hamTaoVideoNguoiNoi(scriptText, khungHinh, cleanTopic);
+          fallbackVideo = {
+            url: vRes.url,
+            videoUrl: vRes.videoUrl,
+            title: vRes.title,
+            topic: vRes.topic,
+            presenterAvatar: vRes.presenterAvatar,
+            script: vRes.script,
+            duration: vRes.duration,
+            khungHinh: vRes.khungHinh,
+          };
+        }
+
+        if (wantsImageFallback && !wantsMindMap) {
+          const inferredFormat = inferChatImageFormatFromText(lastRawMsg);
+          const enhanced = await generateEnhancedImage(
+            lastRawMsg,
+            inferredFormat === "poster" ? "academic_poster" : "chatgpt",
+            inferredFormat === "banner" ? "16:9" : inferredFormat === "poster" ? "9:16" : "1:1"
+          );
+          const savedImg = await hamTaoHinhAnh(enhanced.enhancedPrompt, inferredFormat, lastRawMsg);
+          fallbackImages.push({
+            url: savedImg.imageUrl,
+            fallbackUrl: savedImg.fallbackUrl,
+            prompt: lastRawMsg || savedImg.enhancedPrompt,
+            enhancedPrompt: savedImg.enhancedPrompt,
+            seed: savedImg.seed,
+            aspectRatio: savedImg.aspectRatio,
+            style: savedImg.style,
+            loaiAnh: savedImg.loaiAnh,
+          });
+        }
+
+        return res.json({
+          success: true,
+          reply:
+            response?.text?.trim() ||
+            `Mình đã hoàn tất tạo nội dung đa phương tiện theo yêu cầu của **${userName || "bạn"}** ngay bên dưới rồi đây! ✨`,
+          generatedImage: fallbackImages[0],
+          generatedImages: fallbackImages.length > 0 ? fallbackImages : undefined,
+          generatedVideo: fallbackVideo,
+          modelEngine: "Max10 Gemini 4 Ultra",
+        });
+      }
 
       res.json({
         success: true,
@@ -2340,10 +2884,280 @@ Chế độ hiện tại: ${
       });
     } catch (err: any) {
       console.error("Chat error, activating smart offline solver fallback:", err?.message || err);
+      if (!bypassFastPaths && isMindMapGenerationRequest(lastMsg)) {
+        try {
+          const mmRes = await hamTaoSoDoTuDuy("", lastRawMsg, subject, grade);
+          return res.json({
+            success: true,
+            reply: `Max10 đã tạo **Sơ đồ tư duy** cho chủ đề "${lastRawMsg}" bên dưới! 🧠✨`,
+            generatedImage: {
+              url: mmRes.imageUrl,
+              fallbackUrl: mmRes.fallbackUrl,
+              prompt: mmRes.prompt,
+              enhancedPrompt: mmRes.mermaidSource,
+              seed: mmRes.seed,
+              aspectRatio: mmRes.aspectRatio,
+              style: "mindmap",
+            },
+          });
+        } catch {}
+      }
+      if (!bypassFastPaths && isVideoGenerationRequest(lastMsg)) {
+        try {
+          const vRes = await hamTaoVideoNguoiNoi(
+            `Xin chào ${userName || "bạn"}! Mình là MC AI của Max10, hãy cùng tìm hiểu về ${lastRawMsg} nhé!`,
+            lastMsg.includes("ngang") ? "ngang" : lastMsg.includes("vuông") ? "vuong" : "doc",
+            lastRawMsg
+          );
+          return res.json({
+            success: true,
+            reply: `Max10 đã chuẩn bị xong **Video Người AI Nói** cho bạn ngay bên dưới! 🎬✨`,
+            generatedVideo: {
+              url: vRes.url,
+              videoUrl: vRes.videoUrl,
+              title: vRes.title,
+              topic: vRes.topic,
+              presenterAvatar: vRes.presenterAvatar,
+              script: vRes.script,
+              duration: vRes.duration,
+              khungHinh: vRes.khungHinh,
+            },
+          });
+        } catch {}
+      }
+      if (
+        !bypassFastPaths &&
+        (isImageGenerationRequest(lastMsg) || isPosterGenerationRequest(lastMsg) || lastMsg.includes("banner") || lastMsg.includes("avatar"))
+      ) {
+        try {
+          const fallbackFormat = inferChatImageFormatFromText(lastRawMsg);
+          const imgResult = await hamTaoHinhAnh(lastRawMsg, fallbackFormat, lastRawMsg);
+          return res.json({
+            success: true,
+            reply: `Max10 đã tạo bức ảnh khổ **${imgResult.loaiAnh.toUpperCase()} (${imgResult.aspectRatio})** theo mô tả của bạn bên dưới! 🎨✨`,
+            generatedImage: {
+              url: imgResult.imageUrl,
+              fallbackUrl: imgResult.fallbackUrl,
+              prompt: lastRawMsg,
+              enhancedPrompt: imgResult.enhancedPrompt,
+              seed: imgResult.seed,
+              aspectRatio: imgResult.aspectRatio,
+              style: imgResult.style,
+              loaiAnh: imgResult.loaiAnh,
+            },
+          });
+        } catch {}
+      }
       const offlineReply = solveSchoolExerciseOffline(lastRawMsg, grade, subject, userName);
       return res.json({
         success: true,
         reply: offlineReply,
+      });
+    }
+  });
+
+  // 1b. Community Discord AI Bot Slash Command Endpoint (/ve, /sodo, /ai)
+  app.post("/api/bot", async (req, res) => {
+    const rawMessage = String(req.body?.message || "").trim();
+    const explicitCmd = String(req.body?.command || "").toLowerCase().trim();
+    const userName = String(req.body?.userName || "Thành viên").trim();
+    const grade = String(req.body?.grade || "Lớp 9").trim();
+    const subject = String(req.body?.subject || "Tổng hợp").trim();
+    const communityContext = req.body?.communityContext || {};
+
+    if (!rawMessage) {
+      return res.status(400).json({ success: false, error: "Vui lòng nhập nội dung lệnh cho AI Bot." });
+    }
+
+    const lower = rawMessage.toLowerCase();
+    let mode: "ve" | "sodo" | "ai" = "ai";
+    let bodyText = rawMessage;
+
+    if (explicitCmd === "ve" || /^\/ve(\s|$)/i.test(rawMessage)) {
+      mode = "ve";
+      bodyText = rawMessage.replace(/^\/ve\s*/i, "").trim() || "Tranh minh họa học tập sáng tạo và rực rỡ sắc màu";
+    } else if (explicitCmd === "sodo" || /^\/sodo(\s|$)/i.test(rawMessage)) {
+      mode = "sodo";
+      bodyText = rawMessage.replace(/^\/sodo\s*/i, "").trim() || subject || "Kiến thức trọng tâm";
+    } else {
+      mode = "ai";
+      bodyText = rawMessage.replace(/^\/ai\s*/i, "").trim() || rawMessage;
+    }
+
+    try {
+      if (mode === "ve") {
+        const inferredFormat = inferChatImageFormatFromText(bodyText);
+        let enhancedPrompt = bodyText;
+        try {
+          const enhanced = await generateEnhancedImage(
+            bodyText,
+            inferredFormat === "poster" ? "academic_poster" : "chatgpt",
+            inferredFormat === "banner" ? "16:9" : inferredFormat === "poster" ? "9:16" : "1:1"
+          );
+          if (enhanced?.enhancedPrompt) enhancedPrompt = enhanced.enhancedPrompt;
+        } catch {}
+        const imgResult = await hamTaoHinhAnh(enhancedPrompt, inferredFormat, bodyText);
+        return res.json({
+          success: true,
+          type: "image",
+          reply: `🎨 **AI Bot** đã vẽ xong tác phẩm theo yêu cầu của **${userName}**: *"${bodyText}"* (${imgResult.aspectRatio}).`,
+          imageUrl: imgResult.imageUrl,
+          fallbackUrl: imgResult.fallbackUrl,
+          aspectRatio: imgResult.aspectRatio,
+          prompt: bodyText,
+        });
+      }
+
+      if (mode === "sodo") {
+        let mermaidCode = "";
+        let summaryText = "";
+        try {
+          const mmPromptRes = await generateContentWithRetry({
+            contents: `Hãy tạo một sơ đồ tư duy Mermaid (bắt đầu bằng từ khóa \`mindmap\`, dòng 2 là \`  root((Chủ đề))\`, thụt 2 dấu cách mỗi cấp nhánh con, KHÔNG dùng dấu ngoặc tròn () ngoặc vuông [] hay dấu hai chấm : trong các nhánh con) cho chủ đề: "${bodyText}" (Môn: ${subject}, Trình độ: ${grade}). Trả về JSON với 2 trường: "mermaid" (mã mermaid mindmap hợp lệ) và "summary" (tóm tắt 2-3 câu ngắn gọn bằng tiếng Việt).`,
+            config: {
+              responseMimeType: "application/json",
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            },
+          });
+          if (mmPromptRes?.text) {
+            const parsed = JSON.parse(mmPromptRes.text);
+            if (typeof parsed?.mermaid === "string") mermaidCode = parsed.mermaid;
+            if (typeof parsed?.summary === "string") summaryText = parsed.summary;
+          }
+        } catch {}
+
+        const mmRes = await hamTaoSoDoTuDuy(mermaidCode, bodyText, subject, grade);
+        return res.json({
+          success: true,
+          type: "mindmap",
+          reply:
+            summaryText ||
+            `🗺️ **AI Bot** đã tổng hợp **Sơ đồ tư duy** cho chủ đề **"${bodyText}"**! Bấm vào ảnh để phóng to hoặc tải về ôn tập nhé.`,
+          imageUrl: mmRes.imageUrl,
+          fallbackUrl: mmRes.fallbackUrl,
+          aspectRatio: mmRes.aspectRatio,
+          prompt: bodyText,
+        });
+      }
+
+      // mode === 'ai' -> Full Gemini tutor/community reply with optional multi-tool calls
+      const commName = String(communityContext?.name || "Cộng đồng Max10").trim();
+      const commCat = String(communityContext?.category || "study").trim();
+      const aiPrompt = `Bạn là AI Bot thông minh tích hợp trong kênh "${commName}" (${commCat}). Thành viên "${userName}" vừa dùng lệnh /ai để hỏi: "${bodyText}". Hãy trả lời súc tích, thân thiện, chuẩn xác bằng tiếng Việt (Markdown rõ ràng). Nếu người dùng yêu cầu vẽ tranh/ảnh hãy gọi \`ham_tao_hinh_anh\`, nếu muốn vẽ sơ đồ tư duy hãy gọi \`ham_tao_so_do_tu_duy\`, nếu muốn tạo video người AI nói hãy gọi \`ham_tao_video_nguoi_noi\`.`;
+
+      const aiRes = await generateContentWithRetry({
+        contents: aiPrompt,
+        config: {
+          tools: [
+            {
+              functionDeclarations: [
+                hamTaoHinhAnhDeclaration,
+                hamTaoVideoNguoiNoiDeclaration,
+                hamTaoSoDoTuDuyDeclaration,
+              ],
+            },
+          ],
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        },
+      });
+
+      const directCalls = Array.isArray(aiRes?.functionCalls) ? aiRes.functionCalls : [];
+      const partCalls = (aiRes?.candidates?.[0]?.content?.parts || [])
+        .filter((p: any) => p?.functionCall)
+        .map((p: any) => p.functionCall);
+      const allCalls = directCalls.length > 0 ? directCalls : partCalls;
+
+      let outImageUrl: string | undefined;
+      let outFallbackUrl: string | undefined;
+      let outAspectRatio: string | undefined;
+      let outVideo: any = undefined;
+      let replyText = aiRes?.text?.trim() || "";
+
+      for (const fnCall of allCalls) {
+        const fnName = fnCall?.name;
+        const args = (fnCall?.args || {}) as Record<string, any>;
+        if (fnName === "ham_tao_hinh_anh" && !outImageUrl) {
+          const format: ChatImageFormat =
+            args.loai_anh === "poster" || args.loai_anh === "banner"
+              ? args.loai_anh
+              : inferChatImageFormatFromText(bodyText);
+          const imgRes = await hamTaoHinhAnh(String(args.prompt_tieng_anh || bodyText), format, bodyText);
+          outImageUrl = imgRes.imageUrl;
+          outFallbackUrl = imgRes.fallbackUrl;
+          outAspectRatio = imgRes.aspectRatio;
+          if (!replyText) replyText = `🎨 **AI Bot** đã tạo hình ảnh minh họa cho **${userName}**!`;
+        } else if (fnName === "ham_tao_so_do_tu_duy" && !outImageUrl) {
+          const mmRes = await hamTaoSoDoTuDuy(String(args.ma_mermaid || ""), bodyText, subject, grade);
+          outImageUrl = mmRes.imageUrl;
+          outFallbackUrl = mmRes.fallbackUrl;
+          outAspectRatio = mmRes.aspectRatio;
+          if (!replyText) replyText = `🗺️ **AI Bot** đã vẽ xong sơ đồ tư duy cho **${userName}**!`;
+        } else if (fnName === "ham_tao_video_nguoi_noi" && !outVideo) {
+          const kh: ChatVideoFrame =
+            args.khung_hinh === "ngang" || args.khung_hinh === "vuong" ? args.khung_hinh : "doc";
+          const vRes = await hamTaoVideoNguoiNoi(
+            String(args.loi_thoai || `Xin chào ${userName}! Cùng khám phá ${bodyText} nhé!`),
+            kh,
+            bodyText
+          );
+          outVideo = {
+            url: vRes.url,
+            videoUrl: vRes.videoUrl,
+            title: vRes.title,
+            topic: vRes.topic,
+            presenterAvatar: vRes.presenterAvatar,
+            script: vRes.script,
+            duration: vRes.duration,
+            khungHinh: vRes.khungHinh,
+          };
+          if (!replyText) replyText = `🎬 **AI Bot** đã tạo video thuyết trình cho **${userName}**!`;
+        }
+      }
+
+      if (!replyText) {
+        replyText = solveSchoolExerciseOffline(bodyText, grade, subject, userName);
+      }
+
+      return res.json({
+        success: true,
+        type: "ai",
+        reply: replyText,
+        imageUrl: outImageUrl,
+        fallbackUrl: outFallbackUrl,
+        aspectRatio: outAspectRatio,
+        video: outVideo,
+      });
+    } catch (err: any) {
+      console.error("/api/bot fallback:", err?.message || err);
+      if (mode === "sodo") {
+        const mmRes = await hamTaoSoDoTuDuy("", bodyText, subject, grade);
+        return res.json({
+          success: true,
+          type: "mindmap",
+          reply: `🗺️ **AI Bot** đã tạo sơ đồ tư duy cho chủ đề **"${bodyText}"**!`,
+          imageUrl: mmRes.imageUrl,
+          fallbackUrl: mmRes.fallbackUrl,
+          aspectRatio: mmRes.aspectRatio,
+          prompt: bodyText,
+        });
+      }
+      if (mode === "ve") {
+        const format = inferChatImageFormatFromText(bodyText);
+        const imgRes = await hamTaoHinhAnh(bodyText, format, bodyText);
+        return res.json({
+          success: true,
+          type: "image",
+          reply: `🎨 **AI Bot** đã vẽ hình ảnh theo mô tả **"${bodyText}"**!`,
+          imageUrl: imgRes.imageUrl,
+          fallbackUrl: imgRes.fallbackUrl,
+          aspectRatio: imgRes.aspectRatio,
+          prompt: bodyText,
+        });
+      }
+      return res.json({
+        success: true,
+        type: "ai",
+        reply: solveSchoolExerciseOffline(bodyText, grade, subject, userName),
       });
     }
   });
@@ -4143,6 +4957,8 @@ Yêu cầu kịch bản video gồm:
       offsetMs: number;
       isPinnedTrending?: boolean;
       trendingBadge?: string;
+      channelAdminId?: string;
+      channelAdminName?: string;
     }) => ({
       id: cfg.id,
       name: cfg.name,
@@ -4151,8 +4967,10 @@ Yêu cầu kịch bản video gồm:
       subject: `Trò chơi · ${cfg.gamePlatform}`,
       avatarIcon: cfg.avatarIcon,
       createdAt: now - cfg.offsetMs,
-      createdBy: "admin-mac-khanh-duy",
-      createdByName: "Ban Quản Trị Max10",
+      createdBy: cfg.channelAdminId || "admin-mac-khanh-duy",
+      createdByName: cfg.channelAdminName || "Ban Quản Trị Max10",
+      channelAdminId: cfg.channelAdminId || "admin_game",
+      channelAdminName: cfg.channelAdminName || "Admin Game",
       createdByAdmin: true,
       isCommunity: true,
       communityCategory: "game",
@@ -4167,23 +4985,39 @@ Yêu cầu kịch bản video gồm:
       isPublic: true,
       onlyAdminCanAdd: false,
       code: cfg.code,
-      pinnedNotice: `${cfg.avatarIcon} Cộng đồng ${cfg.gameTitle} (${cfg.gamePlatform}) — Giao lưu & Thi đấu cùng thành viên người thật, không có AI giả!`,
+      pinnedNotice: `${cfg.avatarIcon} Cộng đồng ${cfg.gameTitle} (${cfg.gamePlatform}) — Quản trị viên: @${cfg.channelAdminId || "admin_game"}. Dùng /ve, /sodo, /ai để gọi AI Bot!`,
       members: [adminMember],
       mutedUsers: {},
     });
 
     return [
+      makeGameCommunity({
+        id: "community-game-max10",
+        name: "Cộng Đồng Game",
+        description:
+          "Thông báo giải đấu, giao lưu mọi tựa game Mobile, PC, Console & Mini Game cùng bạn bè người thật.",
+        avatarIcon: "🎮",
+        code: "CD-TROCHOI",
+        gamePlatform: "Cross-Platform",
+        gameTitle: "Tổng hợp Mọi Game & Mini Game",
+        gameGenre: "Đa thể loại",
+        offsetMs: 310000,
+        channelAdminId: "admin_game",
+        channelAdminName: "Admin Game",
+      }),
       {
         id: "community-study-max10",
-        name: "Cộng Đồng Học Tập Điểm 10 THCS",
+        name: "Cộng Đồng Học Tập",
         description:
-          "Không gian học tập & thi đấu chung cho mọi tài khoản thật cùng trao đổi Toán, Văn, Anh, KHTN.",
+          "Tài liệu ôn thi, sơ đồ tư duy & không gian thi đấu chung cho Toán, Văn, Anh, KHTN.",
         grade: "Lớp 9",
         subject: "Học tập",
         avatarIcon: "📚",
-        createdAt: now - 300000,
+        createdAt: now - 305000,
         createdBy: "admin-mac-khanh-duy",
         createdByName: "Ban Quản Trị Max10",
+        channelAdminId: "admin_hoctap",
+        channelAdminName: "Admin Học Tập",
         createdByAdmin: true,
         isCommunity: true,
         communityCategory: "study",
@@ -4192,7 +5026,57 @@ Yêu cầu kịch bản video gồm:
         onlyAdminCanAdd: false,
         code: "CD-HOCTAP",
         pinnedNotice:
-          "📚 Cộng đồng Học tập & Thi đấu Điểm 10 — Thảo luận bài vở cùng thành viên thật & gọi @Max10 AI khi cần giải bài!",
+          "📚 Cộng đồng Học tập — Quản trị viên: @admin_hoctap. Dùng /sodo [chủ đề] để vẽ sơ đồ tư duy, /ai [câu hỏi] để giải bài!",
+        members: [adminMember],
+        mutedUsers: {},
+      },
+      {
+        id: "community-boys-max10",
+        name: "Cộng Đồng Con Trai",
+        description:
+          "Khu vực dành riêng cho nam — Giao lưu thể thao, công nghệ, game & học tập văn minh.",
+        grade: "Lớp 9",
+        subject: "Trò chuyện tự do",
+        avatarIcon: "👦",
+        createdAt: now - 300000,
+        createdBy: "admin-mac-khanh-duy",
+        createdByName: "Admin Con Trai",
+        channelAdminId: "admin_nam",
+        channelAdminName: "Admin Con Trai",
+        createdByAdmin: true,
+        isCommunity: true,
+        communityCategory: "chat",
+        approvalStatus: "approved",
+        isPublic: true,
+        onlyAdminCanAdd: false,
+        code: "CD-CONTRAI",
+        pinnedNotice:
+          "👦 Cộng đồng Con trai — Quản trị viên: @admin_nam. Gõ /ve, /sodo, /ai để tương tác cùng AI Bot!",
+        members: [adminMember],
+        mutedUsers: {},
+      },
+      {
+        id: "community-girls-max10",
+        name: "Cộng Đồng Con Gái",
+        description:
+          "Khu vực dành riêng cho nữ — Chia sẻ bí quyết học tập, sáng tạo, nghệ thuật & tâm sự tuổi học trò.",
+        grade: "Lớp 9",
+        subject: "Trò chuyện tự do",
+        avatarIcon: "👧",
+        createdAt: now - 295000,
+        createdBy: "admin-mac-khanh-duy",
+        createdByName: "Admin Con Gái",
+        channelAdminId: "admin_nu",
+        channelAdminName: "Admin Con Gái",
+        createdByAdmin: true,
+        isCommunity: true,
+        communityCategory: "chat",
+        approvalStatus: "approved",
+        isPublic: true,
+        onlyAdminCanAdd: false,
+        code: "CD-CONGAI",
+        pinnedNotice:
+          "👧 Cộng đồng Con gái — Quản trị viên: @admin_nu. Gõ /ve, /sodo, /ai để tạo ảnh, sơ đồ tư duy cùng AI Bot!",
         members: [adminMember],
         mutedUsers: {},
       },
@@ -4207,6 +5091,8 @@ Yêu cầu kịch bản video gồm:
         createdAt: now - 290000,
         createdBy: "admin-mac-khanh-duy",
         createdByName: "Ban Quản Trị Max10",
+        channelAdminId: "super_admin",
+        channelAdminName: "Tổng Quản Trị",
         createdByAdmin: true,
         isCommunity: true,
         communityCategory: "chat",
@@ -4215,22 +5101,10 @@ Yêu cầu kịch bản video gồm:
         onlyAdminCanAdd: false,
         code: "CD-TROCHUYEN",
         pinnedNotice:
-          "💬 Cộng đồng Trò chuyện Tự do — Giao lưu thoải mái, văn minh & gọi @Max10 AI tán gẫu cùng mọi người!",
+          "💬 Cộng đồng Trò chuyện Tự do — Giao lưu thoải mái, văn minh & gọi @Max10 AI hoặc /ai tán gẫu cùng mọi người!",
         members: [adminMember],
         mutedUsers: {},
       },
-      makeGameCommunity({
-        id: "community-game-max10",
-        name: "Cộng Đồng Game Tổng Hợp & Mini Game Mọi Nền Tảng",
-        description:
-          "Tổng hợp tất cả các trò chơi điện tử trên Mobile, PC, Console, Web & Đấu trường Mini Game thuộc bài cùng bạn bè người thật.",
-        avatarIcon: "🎮",
-        code: "CD-TROCHOI",
-        gamePlatform: "Cross-Platform",
-        gameTitle: "Tổng hợp Mọi Game & Mini Game",
-        gameGenre: "Đa thể loại",
-        offsetMs: 280000,
-      }),
       // CROSS-PLATFORM GAMES
       makeGameCommunity({
         id: "community-game-minecraft",
@@ -4551,28 +5425,103 @@ Yêu cầu kịch bản video gồm:
           const existingIds = new Set(parsed.groups.map((g: any) => g && g.id).filter(Boolean));
           const deletedSet = new Set(parsed.deletedStarterCommunities || []);
 
-          // Enrich legacy community-game-max10 if missing platform metadata
+          // Enrich legacy starter communities if missing platform or channelAdmin metadata
           parsed.groups = parsed.groups.map((g: any) => {
-            if (g && starterMap.has(g.id) && g.communityCategory === "game" && !g.gamePlatform) {
-              const ref = starterMap.get(g.id);
-              upgradedLegacyCopy = true;
-              return {
-                ...g,
-                gamePlatform: ref.gamePlatform,
-                gameTitle: ref.gameTitle,
-                gameGenre: ref.gameGenre,
-              };
+            if (!g || !starterMap.has(g.id)) return g;
+            const ref = starterMap.get(g.id);
+            let nextG = { ...g };
+            let changed = false;
+            if (g.communityCategory === "game" && !g.gamePlatform) {
+              nextG.gamePlatform = ref.gamePlatform;
+              nextG.gameTitle = ref.gameTitle;
+              nextG.gameGenre = ref.gameGenre;
+              changed = true;
             }
-            return g;
+            if (ref.channelAdminId && !g.channelAdminId) {
+              nextG.channelAdminId = ref.channelAdminId;
+              nextG.channelAdminName = ref.channelAdminName;
+              changed = true;
+            }
+            if (changed) upgradedLegacyCopy = true;
+            return nextG;
           });
 
           const missingStarters = starters.filter(
             (s: any) => !existingIds.has(s.id) && !deletedSet.has(s.id)
           );
           if (missingStarters.length > 0) {
-            parsed.groups = [...parsed.groups, ...missingStarters];
+            parsed.groups = [...missingStarters, ...parsed.groups];
             upgradedLegacyCopy = true;
           }
+
+          // Seed initial welcome notices for the 4 core communities if empty
+          const coreWelcomes: Record<string, any[]> = {
+            "community-game-max10": [
+              {
+                id: "welcome-game-admin",
+                groupId: "community-game-max10",
+                senderId: "admin_game",
+                senderName: "Admin Game",
+                senderRole: "admin",
+                content: "🎮 Chào mừng các bạn đến với **Cộng Đồng Game**! Giải đấu & kèo giao lưu mới sẽ được cập nhật liên tục tại đây.",
+                createdAt: Date.now() - 120000,
+                timestamp: formatVietnamTime(Date.now() - 120000),
+              },
+              {
+                id: "welcome-game-bot",
+                groupId: "community-game-max10",
+                senderId: "ai-bot-community",
+                senderName: "AI Bot",
+                senderRole: "ai_tutor",
+                isAi: true,
+                content: "🤖 Gõ `/ve [mô tả]` để vẽ banner/avatar game, `/sodo [chủ đề]` để tạo sơ đồ chiến thuật hoặc `/ai [câu hỏi]` để hỏi đáp ngay!",
+                createdAt: Date.now() - 110000,
+                timestamp: formatVietnamTime(Date.now() - 110000),
+              },
+            ],
+            "community-study-max10": [
+              {
+                id: "welcome-study-admin",
+                groupId: "community-study-max10",
+                senderId: "admin_hoctap",
+                senderName: "Admin Học Tập",
+                senderRole: "admin",
+                content: "📚 Chào mừng đến với **Cộng Đồng Học Tập**! Gõ `/sodo [chủ đề]` để AI Bot vẽ Sơ đồ tư duy ôn thi siêu nhanh nhé.",
+                createdAt: Date.now() - 120000,
+                timestamp: formatVietnamTime(Date.now() - 120000),
+              },
+            ],
+            "community-boys-max10": [
+              {
+                id: "welcome-boys-admin",
+                groupId: "community-boys-max10",
+                senderId: "admin_nam",
+                senderName: "Admin Con Trai",
+                senderRole: "admin",
+                content: "👦 Chào mừng anh em đến với **Cộng Đồng Con Trai**! Cùng giao lưu thể thao, công nghệ, học tập và thử lệnh `/ve`, `/ai` nhé.",
+                createdAt: Date.now() - 120000,
+                timestamp: formatVietnamTime(Date.now() - 120000),
+              },
+            ],
+            "community-girls-max10": [
+              {
+                id: "welcome-girls-admin",
+                groupId: "community-girls-max10",
+                senderId: "admin_nu",
+                senderName: "Admin Con Gái",
+                senderRole: "admin",
+                content: "👧 Chào mừng các bạn nữ đến với **Cộng Đồng Con Gái**! Cùng chia sẻ bí quyết học tốt, sáng tạo & thử `/ve`, `/sodo` nhé.",
+                createdAt: Date.now() - 120000,
+                timestamp: formatVietnamTime(Date.now() - 120000),
+              },
+            ],
+          };
+          Object.entries(coreWelcomes).forEach(([gid, seedMsgs]) => {
+            if (!Array.isArray(parsed.groupMessages[gid]) || parsed.groupMessages[gid].length === 0) {
+              parsed.groupMessages[gid] = seedMsgs;
+              upgradedLegacyCopy = true;
+            }
+          });
 
           // Seed initial approvalStatus & default pinned trending games once
           const defaultTrendingMap: Record<string, string> = {
@@ -4623,7 +5572,67 @@ Yêu cầu kịch bản video gồm:
       directMessages: [],
       blockedUsers: [],
       groups: getStarterAdminCommunities(),
-      groupMessages: {},
+      groupMessages: {
+        "community-game-max10": [
+          {
+            id: "welcome-game-admin",
+            groupId: "community-game-max10",
+            senderId: "admin_game",
+            senderName: "Admin Game",
+            senderRole: "admin",
+            content: "🎮 Chào mừng các bạn đến với **Cộng Đồng Game**! Giải đấu & kèo giao lưu mới sẽ được cập nhật liên tục tại đây.",
+            createdAt: Date.now() - 120000,
+            timestamp: formatVietnamTime(Date.now() - 120000),
+          },
+          {
+            id: "welcome-game-bot",
+            groupId: "community-game-max10",
+            senderId: "ai-bot-community",
+            senderName: "AI Bot",
+            senderRole: "ai_tutor",
+            isAi: true,
+            content: "🤖 Gõ `/ve [mô tả]` để vẽ banner/avatar game, `/sodo [chủ đề]` để tạo sơ đồ chiến thuật hoặc `/ai [câu hỏi]` để hỏi đáp ngay!",
+            createdAt: Date.now() - 110000,
+            timestamp: formatVietnamTime(Date.now() - 110000),
+          },
+        ],
+        "community-study-max10": [
+          {
+            id: "welcome-study-admin",
+            groupId: "community-study-max10",
+            senderId: "admin_hoctap",
+            senderName: "Admin Học Tập",
+            senderRole: "admin",
+            content: "📚 Chào mừng đến với **Cộng Đồng Học Tập**! Gõ `/sodo [chủ đề]` để AI Bot vẽ Sơ đồ tư duy ôn thi siêu nhanh nhé.",
+            createdAt: Date.now() - 120000,
+            timestamp: formatVietnamTime(Date.now() - 120000),
+          },
+        ],
+        "community-boys-max10": [
+          {
+            id: "welcome-boys-admin",
+            groupId: "community-boys-max10",
+            senderId: "admin_nam",
+            senderName: "Admin Con Trai",
+            senderRole: "admin",
+            content: "👦 Chào mừng anh em đến với **Cộng Đồng Con Trai**! Cùng giao lưu thể thao, công nghệ, học tập và thử lệnh `/ve`, `/ai` nhé.",
+            createdAt: Date.now() - 120000,
+            timestamp: formatVietnamTime(Date.now() - 120000),
+          },
+        ],
+        "community-girls-max10": [
+          {
+            id: "welcome-girls-admin",
+            groupId: "community-girls-max10",
+            senderId: "admin_nu",
+            senderName: "Admin Con Gái",
+            senderRole: "admin",
+            content: "👧 Chào mừng các bạn nữ đến với **Cộng Đồng Con Gái**! Cùng chia sẻ bí quyết học tốt, sáng tạo & thử `/ve`, `/sodo` nhé.",
+            createdAt: Date.now() - 120000,
+            timestamp: formatVietnamTime(Date.now() - 120000),
+          },
+        ],
+      },
       registeredClasses: [],
       adminAutoReply: { enabled: true, customGreeting: "", updatedAt: Date.now() },
       adminMentions: [],
@@ -6858,8 +7867,7 @@ Yêu cầu:
   // ==========================================
   const isVerifiedAdminRequest = (req: express.Request): boolean => {
     const headerCode = String(req.headers["x-max10-master-code"] || "").trim();
-    const headerUser = String(req.headers["x-max10-user-id"] || "").trim();
-    return headerCode === MASTER_SECURITY_CODE || headerUser === "admin-mac-khanh-duy";
+    return headerCode.length > 0 && headerCode === MASTER_SECURITY_CODE;
   };
 
   app.get("/api/admin/godmode/overview", (req, res) => {

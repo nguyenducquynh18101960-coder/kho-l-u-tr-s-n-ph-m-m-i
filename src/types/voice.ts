@@ -1,4 +1,15 @@
-export type GeminiVoiceName = 'Kore' | 'Puck' | 'Fenrir' | 'Zephyr' | 'Charon';
+export type GeminiVoiceName =
+  | 'Kore'
+  | 'Zephyr'
+  | 'Aoede'
+  | 'Leda'
+  | 'Puck'
+  | 'Fenrir'
+  | 'Charon'
+  | 'Orus';
+
+export const FEMALE_GEMINI_VOICES: GeminiVoiceName[] = ['Kore', 'Zephyr', 'Aoede', 'Leda'];
+export const MALE_GEMINI_VOICES: GeminiVoiceName[] = ['Puck', 'Fenrir', 'Charon', 'Orus'];
 
 export interface AIVoicePersona {
   id: string;
@@ -75,6 +86,19 @@ export const AI_VOICE_PERSONAS: AIVoicePersona[] = [
     badgeColor: 'bg-purple-500/10 text-purple-600 border-purple-500/30 dark:text-purple-400',
   },
 ];
+
+export function getPersonaByGender(
+  gender: 'female' | 'male',
+  currentId?: string
+): AIVoicePersona {
+  const existing = currentId ? AI_VOICE_PERSONAS.find((p) => p.id === currentId) : undefined;
+  if (existing && existing.gender === gender) {
+    return existing;
+  }
+  return (
+    AI_VOICE_PERSONAS.find((p) => p.gender === gender) || AI_VOICE_PERSONAS[0]
+  );
+}
 
 export interface AIVoiceSettings {
   personaId: string;

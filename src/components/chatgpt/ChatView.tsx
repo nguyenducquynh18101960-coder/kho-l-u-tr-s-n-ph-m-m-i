@@ -76,6 +76,15 @@ import { RobotTutor3D, RobotReactionType } from './RobotTutor3D';
 import { SmartWhiteboard } from './SmartWhiteboard';
 import { recordAttemptResult } from '../../utils/knowledgeGapTracker';
 import { AIVoicePersona } from '../../types/voice';
+import { DiscordStudyCards } from './DiscordStudyCards';
+import {
+  GlobalStudyProfile,
+  VirtualStudyBuddy,
+  StudyPresenceStatus,
+  StudyLanguageMode,
+  SLASH_COMMANDS,
+  loadGlobalStudyProfile,
+} from '../../data/globalStudySystem';
 
 interface ChatViewProps {
   grade: GradeLevel;
@@ -120,6 +129,20 @@ interface ChatViewProps {
   onSelectQuizSubject?: (topic: QuizTopicId) => void;
   quizRole?: QuizRole;
   onSelectQuizRole?: (role: QuizRole) => void;
+  globalStudyProfile?: GlobalStudyProfile;
+  activeStudyBuddy?: VirtualStudyBuddy | null;
+  onExecuteSlashCommand?: (cmd: string) => void;
+  onAddStudyFriend?: (buddy: VirtualStudyBuddy) => void;
+  onStartBuddyChat?: (buddy: VirtualStudyBuddy) => void;
+  onExitBuddyChat?: () => void;
+  onCycleStudyStatus?: (status: StudyPresenceStatus) => void;
+  onApplyCurriculumSetup?: (config: {
+    countryCode: CountryCode;
+    gradeLabel: string;
+    subject: QuizTopicId;
+    languageMode: StudyLanguageMode;
+    startQuiz: boolean;
+  }) => void;
 }
 
 export const ChatView: React.FC<ChatViewProps> = ({
@@ -158,8 +181,18 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onSelectQuizSubject,
   quizRole = 'tutor',
   onSelectQuizRole,
+  globalStudyProfile,
+  activeStudyBuddy = null,
+  onExecuteSlashCommand,
+  onAddStudyFriend,
+  onStartBuddyChat,
+  onExitBuddyChat,
+  onCycleStudyStatus,
+  onApplyCurriculumSetup,
 }) => {
   const activeCountry = getCountryCulture(countryCode);
+  const effectiveStudyProfile =
+    globalStudyProfile || loadGlobalStudyProfile(userName, grade, countryCode);
   const [autoSpeakTutor, setAutoSpeakTutor] = useState<boolean>(true);
   const [input, setInput] = useState('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('toan');
@@ -170,6 +203,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
   } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
+  const [failedImgUrls, setFailedImgUrls] = useState<Record<string, boolean>>({});
+  const [imgSrcOverrides, setImgSrcOverrides] = useState<Record<string, string>>({});
   const [deepThinking, setDeepThinking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
@@ -522,22 +557,35 @@ export const ChatView: React.FC<ChatViewProps> = ({
     });
   };
 
+  const trimmedInput = input.trim();
+  const isTypingSlashMenu = trimmedInput.startsWith('/') && !trimmedInput.includes(' ');
+  const matchingSlashCommands = isTypingSlashMenu
+    ? SLASH_COMMANDS.filter((c) => c.command.startsWith(trimmedInput.toLowerCase()))
+    : [];
+
   const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if ((!input.trim() && !attachedImage) || loading) return;
 
-    if (!isAdmin && quotaStatus.remaining <= 0) {
-      setQuotaStatus(getDailyQuestionQuota(isAdmin));
-      return;
-    }
+    const isLocalSlashCmd =
+      trimmedInput.startsWith('/') &&
+      !trimmedInput.startsWith('/hoibai') &&
+      !trimmedInput.startsWith('/chat ');
 
-    useQuestionSlot(isAdmin);
-    const nextQuota = getDailyQuestionQuota(isAdmin);
-    setQuotaStatus(nextQuota);
+    if (!isLocalSlashCmd) {
+      if (!isAdmin && quotaStatus.remaining <= 0) {
+        setQuotaStatus(getDailyQuestionQuota(isAdmin));
+        return;
+      }
 
-    if (!isAdmin && nextQuota.used >= MAX_DAILY_QUESTIONS) {
-      celebrationEngine.celebrate(4);
-      soundEffects.playMissionComplete();
+      useQuestionSlot(isAdmin);
+      const nextQuota = getDailyQuestionQuota(isAdmin);
+      setQuotaStatus(nextQuota);
+
+      if (!isAdmin && nextQuota.used >= MAX_DAILY_QUESTIONS) {
+        celebrationEngine.celebrate(4);
+        soundEffects.playMissionComplete();
+      }
     }
 
     const activeModePayload =
@@ -555,6 +603,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Tab' && isTypingSlashMenu && matchingSlashCommands.length > 0) {
+      e.preventDefault();
+      setInput(`${matchingSlashCommands[0].command} `);
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -1094,6 +1147,47 @@ export const ChatView: React.FC<ChatViewProps> = ({
         </div>
       )}
 
+      {/* Active International Study Buddy Banner */}
+      {activeStudyBuddy && (
+        <div
+          className={`mx-3 sm:mx-6 mt-2 px-3.5 py-2 rounded-2xl border flex flex-wrap items-center justify-between gap-2 shrink-0 ${
+            isDark
+              ? 'bg-[#2b2d31] border-[#5865F2]/40 text-zinc-100'
+              : 'bg-indigo-50/90 border-indigo-200 text-slate-900'
+          }`}
+        >
+          <div className="flex items-center gap-2.5 min-w-0 text-xs">
+            <span className="text-lg shrink-0">{activeStudyBuddy.avatarEmoji}</span>
+            <div className="min-w-0">
+              <span className="font-extrabold">
+                {activeStudyBuddy.flag} Đang trò chuyện cùng {activeStudyBuddy.name}#{activeStudyBuddy.tag}
+              </span>
+              <span className="opacity-75 ml-2 hidden sm:inline">
+                ({activeStudyBuddy.nativeLanguage} kèm dịch Tiếng Việt)
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => onExecuteSlashCommand?.(`/xem ${activeStudyBuddy.name}`)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer ${
+                isDark ? 'border-white/15 hover:bg-white/10' : 'border-indigo-200 bg-white hover:bg-indigo-50'
+              }`}
+            >
+              Xem Profile
+            </button>
+            <button
+              type="button"
+              onClick={() => onExitBuddyChat?.()}
+              className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-600 hover:bg-rose-500 text-white cursor-pointer"
+            >
+              Thoát (/chat off)
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Scrollable Viewport */}
       <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 scroll-smooth overscroll-contain">
         <div
@@ -1104,6 +1198,31 @@ export const ChatView: React.FC<ChatViewProps> = ({
           {/* MODERN EDTECH BENTO DASHBOARD (Empty State) */}
           {isEmptyState && (
             <div className="space-y-3">
+              {/* Pre-generated Discord Global Tutor Profile & Starter Slash Commands */}
+              <DiscordStudyCards
+                embed={{
+                  kind: 'welcome_activation',
+                  profile: effectiveStudyProfile,
+                  suggestedCommands: [
+                    '/timban Hàn Quốc',
+                    '/ngonngu Tiếng Anh',
+                    '/hoibai Nhật Bản Toán',
+                    '/caidat',
+                    '/profile',
+                    '/listban',
+                  ],
+                }}
+                isDark={isDark}
+                friendIds={effectiveStudyProfile.friendIds}
+                onExecuteCommand={(cmd) =>
+                  onExecuteSlashCommand ? onExecuteSlashCommand(cmd) : onSendMessage(cmd)
+                }
+                onAddFriend={(buddy) => onAddStudyFriend?.(buddy)}
+                onStartBuddyChat={(buddy) => onStartBuddyChat?.(buddy)}
+                onCycleStatus={onCycleStudyStatus}
+                onApplyCurriculum={onApplyCurriculumSetup}
+              />
+
               {/* TOP SECTION: Student Welcome & Achievement Card */}
               <section
                 aria-label="Bảng chào mừng học sinh"
@@ -1437,16 +1556,32 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     </div>
                   ) : (
                     <div className="flex items-start gap-3.5">
-                      <div className="w-9 h-9 rounded-2xl overflow-hidden shrink-0 mt-1 shadow-xs select-none border border-emerald-500/30 bg-emerald-500/10">
-                        <img
-                          src="/max10-avatar.jpg"
-                          alt="Max10"
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                      </div>
+                      {msg.buddyMeta ? (
+                        <div className="w-9 h-9 rounded-2xl shrink-0 mt-1 shadow-xs select-none border border-[#5865F2]/40 bg-[#5865F2]/15 flex items-center justify-center text-lg">
+                          {msg.buddyMeta.avatarEmoji}
+                        </div>
+                      ) : (
+                        <div className="w-9 h-9 rounded-2xl overflow-hidden shrink-0 mt-1 shadow-xs select-none border border-emerald-500/30 bg-emerald-500/10">
+                          <img
+                            src="/max10-avatar.jpg"
+                            alt="Max10"
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                      )}
 
                       <div className="flex-1 overflow-hidden">
+                        {msg.buddyMeta && (
+                          <div className="mb-1.5 flex items-center gap-2 text-xs">
+                            <span className="font-extrabold text-[#5865F2]">
+                              {msg.buddyMeta.flag} {msg.buddyMeta.name}#{msg.buddyMeta.tag}
+                            </span>
+                            <span className="text-[11px] text-slate-500 dark:text-zinc-400">
+                              {msg.buddyMeta.countryName} · {msg.buddyMeta.nativeLanguage}
+                            </span>
+                          </div>
+                        )}
                         {msg.deepThinkingContent && (
                           <div
                             className={`mb-3 p-3.5 rounded-2xl border text-xs leading-relaxed ${
@@ -1629,47 +1764,149 @@ export const ChatView: React.FC<ChatViewProps> = ({
                                   </a>
                                 );
                               },
+                              img: ({ src, alt }) => (
+                                <img
+                                  src={src}
+                                  alt={alt || 'Hình minh họa AI'}
+                                  referrerPolicy="no-referrer"
+                                  className="my-2 rounded-2xl max-h-[380px] object-contain border border-black/10 dark:border-zinc-800 shadow-sm cursor-pointer"
+                                  onClick={() => src && setFullscreenImage(src)}
+                                />
+                              ),
                             }}
                           >
                             {formatDolaMath(msg.content)}
                           </Markdown>
                         </div>
 
-                        {msg.generatedImage && (
-                          <div className="mt-3.5 rounded-2xl overflow-hidden border border-black/10 dark:border-zinc-800 shadow-md bg-black/5 max-w-md">
-                            <div className="relative group">
-                              <img
-                                src={msg.generatedImage.url}
-                                alt={msg.generatedImage.prompt}
-                                className="w-full max-h-[380px] object-contain cursor-pointer transition-transform duration-200 group-hover:scale-[1.01]"
-                                onClick={() => setFullscreenImage(msg.generatedImage?.url || null)}
-                              />
-                              <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => setFullscreenImage(msg.generatedImage?.url || null)}
-                                  className="p-1.5 rounded-lg bg-black/70 hover:bg-black text-white backdrop-blur-xs cursor-pointer"
-                                  title="Xem ảnh lớn"
-                                >
-                                  <Maximize2 className="w-4 h-4" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleDownloadImage(
-                                      msg.generatedImage?.url || '',
-                                      msg.generatedImage?.prompt || 'max10-ai'
-                                    )
-                                  }
-                                  className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
-                                  title="Tải ảnh về máy"
-                                >
-                                  <Download className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </div>
+                        {msg.discordEmbed && (
+                          <div className="mt-3">
+                            <DiscordStudyCards
+                              embed={msg.discordEmbed}
+                              isDark={isDark}
+                              friendIds={effectiveStudyProfile.friendIds}
+                              onExecuteCommand={(cmd) =>
+                                onExecuteSlashCommand ? onExecuteSlashCommand(cmd) : onSendMessage(cmd)
+                              }
+                              onAddFriend={(buddy) => onAddStudyFriend?.(buddy)}
+                              onStartBuddyChat={(buddy) => onStartBuddyChat?.(buddy)}
+                              onCycleStatus={onCycleStudyStatus}
+                              onApplyCurriculum={onApplyCurriculumSetup}
+                            />
                           </div>
                         )}
+
+                        {(() => {
+                          const imagesList =
+                            msg.generatedImages && msg.generatedImages.length > 0
+                              ? msg.generatedImages
+                              : msg.generatedImage
+                              ? [msg.generatedImage]
+                              : [];
+                          if (imagesList.length === 0) return null;
+
+                          return imagesList.map((imgItem, imgIdx) => {
+                            const stateKey = `${msg.id}-${imgIdx}`;
+                            const activeUrl = imgSrcOverrides[stateKey] || imgItem.url;
+                            const isBroken = Boolean(failedImgUrls[stateKey]);
+                            const ratio = imgItem.aspectRatio || '1:1';
+                            const isMindmap = imgItem.style === 'mindmap' || imgItem.style === 'diagram';
+                            const maxWidthClass = isMindmap
+                              ? 'max-w-xl'
+                              : ratio === '16:9'
+                              ? 'max-w-xl'
+                              : ratio === '9:16' || ratio === '3:4'
+                              ? 'max-w-sm'
+                              : 'max-w-md';
+                            const formatLabel = isMindmap
+                              ? 'Sơ đồ tư duy · Mindmap'
+                              : imgItem.loaiAnh === 'banner' || ratio === '16:9'
+                              ? 'Banner · 16:9 (1344×768)'
+                              : imgItem.loaiAnh === 'poster' || ratio === '9:16'
+                              ? 'Poster · 9:16 (768×1344)'
+                              : ratio === '3:4'
+                              ? 'Poster Học Tập · 3:4'
+                              : 'Avatar · 1:1 (1024×1024)';
+
+                            return (
+                              <div
+                                key={stateKey}
+                                className={`mt-3.5 rounded-2xl overflow-hidden border border-black/10 dark:border-zinc-800 shadow-md ${
+                                  isMindmap ? 'bg-white dark:bg-zinc-900' : 'bg-black/5 dark:bg-zinc-900/60'
+                                } ${maxWidthClass}`}
+                              >
+                                {isBroken ? (
+                                  <div className="p-5 flex flex-col items-center justify-center text-center gap-2.5 min-h-[180px]">
+                                    <ImageIcon className="w-8 h-8 text-emerald-500 opacity-80" />
+                                    <p className="text-xs font-medium text-slate-600 dark:text-zinc-300">
+                                      Không tải được ảnh trực tiếp. Bạn có thể thử tải lại ảnh bên dưới.
+                                    </p>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setFailedImgUrls((prev) => ({ ...prev, [stateKey]: false }));
+                                        const nextUrl = imgItem.fallbackUrl || imgItem.url || '';
+                                        if (nextUrl) {
+                                          setImgSrcOverrides((prev) => ({ ...prev, [stateKey]: nextUrl }));
+                                        }
+                                      }}
+                                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold cursor-pointer"
+                                    >
+                                      Thử tải lại ảnh
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="relative group">
+                                    <img
+                                      src={activeUrl}
+                                      alt={imgItem.prompt}
+                                      referrerPolicy="no-referrer"
+                                      className="w-full max-h-[460px] object-contain cursor-pointer transition-transform duration-200 group-hover:scale-[1.01]"
+                                      onClick={() => setFullscreenImage(activeUrl || null)}
+                                      onError={() => {
+                                        const fb = imgItem.fallbackUrl;
+                                        if (fb && activeUrl !== fb) {
+                                          setImgSrcOverrides((prev) => ({ ...prev, [stateKey]: fb }));
+                                        } else {
+                                          setFailedImgUrls((prev) => ({ ...prev, [stateKey]: true }));
+                                        }
+                                      }}
+                                    />
+                                    <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => setFullscreenImage(activeUrl || null)}
+                                        className="p-1.5 rounded-lg bg-black/70 hover:bg-black text-white backdrop-blur-xs cursor-pointer"
+                                        title="Xem ảnh lớn"
+                                      >
+                                        <Maximize2 className="w-4 h-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleDownloadImage(
+                                            activeUrl || '',
+                                            imgItem.prompt || 'max10-ai'
+                                          )
+                                        }
+                                        className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                                        title="Tải ảnh về máy"
+                                      >
+                                        <Download className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                                <div className="px-3.5 py-2 border-t border-black/5 dark:border-zinc-800/80 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-zinc-400">
+                                  <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                    {formatLabel}
+                                  </span>
+                                  <span className="truncate opacity-80">{imgItem.prompt}</span>
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
 
                         {msg.generatedVideo && (
                           <ChatGPTVideoPlayer
@@ -1934,7 +2171,74 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     </button>
                   );
                 })}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onExecuteSlashCommand) {
+                      onExecuteSlashCommand('/help');
+                    } else {
+                      setInput('/');
+                      textareaRef.current?.focus();
+                    }
+                  }}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-mono font-bold border transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                    isDark
+                      ? 'bg-[#5865F2]/20 border-[#5865F2]/40 text-indigo-300 hover:bg-[#5865F2]/30'
+                      : 'bg-indigo-50 border-indigo-200 text-[#4752C4] hover:bg-indigo-100'
+                  }`}
+                  title="Xem tất cả lệnh điều khiển / (Slash Commands)"
+                >
+                  <span>/ Lệnh</span>
+                </button>
               </div>
+
+              {/* Discord-style Slash Command Autocomplete Menu */}
+              {isTypingSlashMenu && matchingSlashCommands.length > 0 && (
+                <div
+                  className={`rounded-2xl border p-2 shadow-xl max-h-60 overflow-y-auto ${
+                    isDark
+                      ? 'bg-[#1e1f22] border-white/10 text-zinc-100'
+                      : 'bg-white border-slate-200 text-slate-900'
+                  }`}
+                >
+                  <div className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-wider text-[#5865F2] flex items-center justify-between">
+                    <span>Lệnh điều khiển (Slash Commands)</span>
+                    <span className="opacity-70 font-normal">Tab để điền nhanh</span>
+                  </div>
+                  <div className="space-y-1 mt-1">
+                    {matchingSlashCommands.map((spec) => (
+                      <button
+                        key={spec.command}
+                        type="button"
+                        onClick={() => {
+                          if (spec.command === '/profile' || spec.command === '/listban') {
+                            onExecuteSlashCommand?.(spec.command);
+                            setInput('');
+                          } else {
+                            setInput(`${spec.command} `);
+                            textareaRef.current?.focus();
+                          }
+                        }}
+                        className={`w-full text-left px-2.5 py-2 rounded-xl flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                          isDark ? 'hover:bg-[#2b2d31]' : 'hover:bg-indigo-50/80'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="font-mono text-xs font-extrabold text-[#5865F2]">
+                            {spec.syntax}
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
+                            {spec.description}
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-[#5865F2]/10 text-[#5865F2] shrink-0">
+                          {spec.badge}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Floating Pill Input Container */}
               <div
@@ -2083,9 +2387,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={
-                    quizVoiceMode
+                    activeStudyBuddy
+                      ? `Nhắn tin với ${activeStudyBuddy.flag} ${activeStudyBuddy.name}#${activeStudyBuddy.tag} (${activeStudyBuddy.nativeLanguage}) hoặc gõ / để dùng lệnh...`
+                      : quizVoiceMode
                       ? `Trả lời câu hỏi của ${quizRole === 'deskmate' ? 'bạn học cùng bàn' : 'gia sư'} (${activeCountry.nativeName}) bằng chữ hoặc nhấn Mic...`
-                      : `Hỏi bài tập ${grade}, dán đề thi hoặc tải ảnh bài cần giải...`
+                      : `Hỏi bài tập ${grade}, gõ lệnh /timban, /ngonngu, /hoibai hoặc tải ảnh bài cần giải...`
                   }
                   rows={1}
                   className={`flex-1 min-w-0 bg-transparent border-0 focus:outline-none focus:ring-0 text-xs sm:text-sm resize-none leading-relaxed py-2 px-1 ${
@@ -2171,6 +2477,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
           <img
             src={fullscreenImage}
             alt="Phóng to ảnh"
+            referrerPolicy="no-referrer"
             className="max-w-full max-h-[90vh] object-contain rounded-2xl shadow-2xl"
           />
         </div>

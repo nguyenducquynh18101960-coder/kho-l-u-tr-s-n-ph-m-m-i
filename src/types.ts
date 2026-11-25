@@ -38,22 +38,28 @@ export type TutorMode =
 
 export interface GeneratedImageInfo {
   url: string;
+  fallbackUrl?: string;
   prompt: string;
   enhancedPrompt?: string;
   seed?: number;
   aspectRatio?: '1:1' | '16:9' | '9:16' | '3:4';
   style?: string;
+  loaiAnh?: 'avatar' | 'poster' | 'banner';
 }
 
 export interface GeneratedVideoInfo {
   url?: string;
+  videoUrl?: string;
   title: string;
   topic: string;
   presenterAvatar?: string;
   script?: string;
   duration?: number;
   audioUrl?: string;
+  khungHinh?: 'doc' | 'ngang' | 'vuong';
 }
+
+import type { DiscordStudyEmbedData } from './data/globalStudySystem';
 
 export interface ChatMessage {
   id: string;
@@ -62,8 +68,19 @@ export interface ChatMessage {
   timestamp: string;
   imagePreview?: string;
   generatedImage?: GeneratedImageInfo;
+  generatedImages?: GeneratedImageInfo[];
   generatedVideo?: GeneratedVideoInfo;
   deepThinkingContent?: string;
+  discordEmbed?: DiscordStudyEmbedData;
+  buddyMeta?: {
+    id: string;
+    name: string;
+    tag: string;
+    flag: string;
+    countryName: string;
+    nativeLanguage: string;
+    avatarEmoji: string;
+  };
   meta?: {
     grade?: GradeLevel;
     subject?: string;
@@ -225,9 +242,12 @@ export interface GroupChatMessage {
   attachment?: {
     type: 'image' | 'file';
     url: string;
+    fallbackUrl?: string;
     name?: string;
     size?: string;
+    aspectRatio?: '1:1' | '16:9' | '9:16' | '3:4';
   };
+  video?: GeneratedVideoInfo;
   challengeId?: string;
 }
 
@@ -253,6 +273,8 @@ export interface ChatGroup {
   mutedUsers: Record<string, UserMuteRecord>;
   createdBy: string;
   createdByName?: string;
+  channelAdminId?: string;
+  channelAdminName?: string;
   code?: string; // Group code like Zalo (e.g. ZL-8392)
   onlyAdminCanAdd?: boolean; // When true: only group creator / admin can add members (User requested: "nhóm khi tạo chỉ bạn và bạn mới có thể thêm người vào")
   isPublic?: boolean;

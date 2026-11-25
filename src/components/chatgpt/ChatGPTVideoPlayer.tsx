@@ -131,8 +131,59 @@ export const ChatGPTVideoPlayer: React.FC<ChatGPTVideoPlayerProps> = ({
     URL.revokeObjectURL(url);
   };
 
+  const frameType = video.khungHinh || 'ngang';
+  const containerWidthClass =
+    frameType === 'doc'
+      ? 'max-w-[290px]'
+      : frameType === 'vuong'
+      ? 'max-w-sm'
+      : 'max-w-md';
+  const aspectClass =
+    frameType === 'doc'
+      ? 'aspect-[9/16]'
+      : frameType === 'vuong'
+      ? 'aspect-square'
+      : 'aspect-video';
+  const frameBadgeLabel =
+    frameType === 'doc'
+      ? '9:16 Dọc'
+      : frameType === 'vuong'
+      ? '1:1 Vuông'
+      : '16:9 Ngang';
+
+  if (video.videoUrl) {
+    return (
+      <div className={`mt-3.5 rounded-2xl overflow-hidden border border-black/10 dark:border-zinc-800 shadow-lg bg-black text-white w-full ${containerWidthClass}`}>
+        <div className="flex items-center justify-between px-3 py-2 bg-zinc-900 border-b border-zinc-800 text-xs">
+          <div className="flex items-center gap-1.5 truncate">
+            <Film className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+            <span className="font-bold text-[11px] truncate text-zinc-200">
+              {video.title || 'Video Người AI Nói'}
+            </span>
+          </div>
+          <span className="text-[10px] text-rose-400 font-bold shrink-0">{frameBadgeLabel}</span>
+        </div>
+        <div className={`relative ${aspectClass} bg-black`}>
+          <video
+            src={video.videoUrl}
+            poster={video.presenterAvatar || video.url}
+            controls
+            playsInline
+            className="w-full h-full object-contain"
+          />
+        </div>
+        {video.script && (
+          <div className="p-3 bg-zinc-950 border-t border-zinc-800 text-[11px] text-zinc-300 leading-relaxed">
+            <span className="font-bold text-zinc-400 mr-1.5">Lời thoại:</span>
+            <span className="italic">&ldquo;{video.script}&rdquo;</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="mt-3.5 rounded-2xl overflow-hidden border border-black/10 dark:border-zinc-800 shadow-lg bg-black text-white max-w-md w-full transition-all select-none">
+    <div className={`mt-3.5 rounded-2xl overflow-hidden border border-black/10 dark:border-zinc-800 shadow-lg bg-black text-white w-full transition-all select-none ${containerWidthClass}`}>
       {/* Top Bar */}
       <div className="flex items-center justify-between px-3 py-2 bg-zinc-900 border-b border-zinc-800 text-xs">
         <div className="flex items-center gap-1.5 truncate">
@@ -142,9 +193,7 @@ export const ChatGPTVideoPlayer: React.FC<ChatGPTVideoPlayerProps> = ({
           </span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <span className="px-1.5 py-0.5 rounded-md bg-rose-500/20 text-rose-400 font-extrabold text-[10px] uppercase tracking-wider border border-rose-500/30">
-            HD 1080p
-          </span>
+          <span className="text-[10px] font-bold text-rose-400">{frameBadgeLabel}</span>
           <span className="text-[10px] text-zinc-400 font-mono">
             {formatTime(duration)}
           </span>
@@ -152,11 +201,12 @@ export const ChatGPTVideoPlayer: React.FC<ChatGPTVideoPlayerProps> = ({
       </div>
 
       {/* Video Screen with Presenter Avatar & Lip-Sync Animation */}
-      <div className="relative aspect-video bg-zinc-950 flex items-center justify-center overflow-hidden group">
+      <div className={`relative ${aspectClass} bg-zinc-950 flex items-center justify-center overflow-hidden group`}>
         {video.presenterAvatar || video.url ? (
           <img
             src={video.presenterAvatar || video.url}
             alt={video.title}
+            referrerPolicy="no-referrer"
             className={`w-full h-full object-cover transition-transform duration-500 ${
               isPlaying ? 'scale-[1.02]' : 'group-hover:scale-105'
             }`}

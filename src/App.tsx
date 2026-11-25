@@ -5,7 +5,25 @@ import { UserAccount, STORAGE_KEY_AUTH_USER, isUserAdmin, STORAGE_KEY_USER_GENDE
 import { GenderType, STORAGE_KEY_USER_AVATAR } from './data/presetAvatars';
 import { SUBJECTS } from './data/subjects';
 import { useAutoUpdate } from './hooks/useAutoUpdate';
-import { CountryCode, QuizRole, QuizTopicId } from './data/countryCultures';
+import { CountryCode, QuizRole, QuizTopicId, getCountryCulture } from './data/countryCultures';
+import {
+  GlobalStudyProfile,
+  VirtualStudyBuddy,
+  StudyPresenceStatus,
+  StudyLanguageMode,
+  CURRICULUM_STANDARDS,
+  VIRTUAL_STUDY_BUDDIES,
+  SLASH_COMMANDS,
+  loadGlobalStudyProfile,
+  saveGlobalStudyProfile,
+  getLanguageLabelForConfig,
+  resolveCountryInput,
+  resolveLanguageInput,
+  resolveSubjectInput,
+  findRandomBuddies,
+  findBuddyByNameOrId,
+  parseSlashCommand,
+} from './data/globalStudySystem';
 
 // Study Hub UI Components
 import { Header } from './components/chatgpt/Header';
@@ -209,11 +227,72 @@ export function App() {
     return 'tutor';
   });
 
+  const [globalStudyProfile, setGlobalStudyProfile] = useState<GlobalStudyProfile>(() =>
+    loadGlobalStudyProfile(
+      localStorage.getItem(STORAGE_KEY_USER_NAME) || 'Bạn học',
+      localStorage.getItem(STORAGE_KEY_SELECTED_GRADE) || 'Lớp 9',
+      'VN'
+    )
+  );
+  const [activeStudyBuddy, setActiveStudyBuddy] = useState<VirtualStudyBuddy | null>(null);
+
+  const updateGlobalStudyProfile = (
+    updater: (prev: GlobalStudyProfile) => GlobalStudyProfile
+  ) => {
+    setGlobalStudyProfile((prev) => {
+      const next = updater(prev);
+      saveGlobalStudyProfile(next);
+      return next;
+    });
+  };
+
+  const appendSessionMessages = (newMsgs: ChatMessage[]) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id === currentSessionId) {
+          return { ...s, messages: [...s.messages, ...newMsgs] };
+        }
+        return s;
+      })
+    );
+  };
+
   const handleSelectCountry = (code: CountryCode) => {
     setCountryCode(code);
     try {
       localStorage.setItem(STORAGE_KEY_COUNTRY_CODE, code);
     } catch {}
+    const culture = getCountryCulture(code);
+    const nextLangMode: StudyLanguageMode =
+      code === 'VN' ? 'vi' : bilingualMode ? 'bilingual' : 'native';
+    updateGlobalStudyProfile((prev) => ({
+      ...prev,
+      countryCode: culture.code,
+      countryName: culture.name,
+      flag: culture.flag,
+      languageMode: nextLangMode,
+      activeLanguageLabel: getLanguageLabelForConfig(code, nextLangMode),
+    }));
+
+    // Prompt user which country curriculum, grade level, and subject they want to study when switching country
+    const std = CURRICULUM_STANDARDS[code];
+    const nowTime = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    const promptMsg: ChatMessage = {
+      id: 'msg-country-prompt-' + Date.now(),
+      role: 'assistant',
+      content: `Đã chuyển sang khu vực **${culture.flag} ${culture.name}** (${std.standardName}). Bạn muốn học chương trình của nước nào, cấp học nào và môn gì? Hãy chọn nhanh trong thẻ bên dưới hoặc gõ \`/hoibai ${culture.shortName} Toán\` nhé!`,
+      timestamp: nowTime,
+      discordEmbed: {
+        kind: 'curriculum_prompt',
+        title: `Chuyển đổi sang chương trình ${culture.flag} ${culture.name}`,
+        subtitle: `Bạn muốn học chương trình của nước nào, cấp học nào và môn gì? Hệ thống sẽ hiệu chỉnh 100% kiến thức, đơn vị đo lường (${std.unitSystem}) và chuẩn bài tập theo quốc gia bạn chọn.`,
+        currentCountryCode: code,
+        currentGrade: globalStudyProfile.gradeLabel || grade,
+        currentSubject: quizSubject,
+        currentLanguageMode: nextLangMode,
+      },
+    };
+    appendSessionMessages([promptMsg]);
   };
 
   const handleToggleBilingualMode = () => {
@@ -222,6 +301,13 @@ export function App() {
       try {
         localStorage.setItem(STORAGE_KEY_BILINGUAL_MODE, next ? 'true' : 'false');
       } catch {}
+      const nextLangMode: StudyLanguageMode =
+        countryCode === 'VN' ? 'vi' : next ? 'bilingual' : 'native';
+      updateGlobalStudyProfile((p) => ({
+        ...p,
+        languageMode: nextLangMode,
+        activeLanguageLabel: getLanguageLabelForConfig(countryCode, nextLangMode),
+      }));
       return next;
     });
   };
@@ -231,6 +317,10 @@ export function App() {
     try {
       localStorage.setItem(STORAGE_KEY_QUIZ_SUBJECT, topic);
     } catch {}
+    updateGlobalStudyProfile((p) => ({
+      ...p,
+      subjectLabel: topic,
+    }));
   };
 
   const handleSelectQuizRole = (role: QuizRole) => {
@@ -515,16 +605,18 @@ export function App() {
     });
   };
 
-  // Send message directly to Max10 AI without any blocking security verification step
-  const handleSendMessage = async (
+  const sendToAiBackend = async (
     text: string,
-    image?: { data: string; mimeType: string; previewUrl: string } | null,
-    isThinking?: boolean,
-    mode?: 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector' | 'all_in_one',
-    quizOverrides?: { interactiveQuizMode?: boolean; quizSubject?: QuizTopicId; quizRole?: QuizRole }
+    image: { data: string; mimeType: string; previewUrl: string } | null | undefined,
+    isThinking: boolean | undefined,
+    mode: 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector' | 'all_in_one' | undefined,
+    quizOverrides: { interactiveQuizMode?: boolean; quizSubject?: QuizTopicId; quizRole?: QuizRole } | undefined,
+    overrideBuddy?: VirtualStudyBuddy | null,
+    overrideCountryCode?: CountryCode,
+    overrideLanguageMode?: StudyLanguageMode,
+    overrideGradeLabel?: string,
+    overrideSubjectLabel?: QuizTopicId
   ) => {
-    if ((!text || !text.trim()) && !image) return;
-
     const userMsg: ChatMessage = {
       id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
       role: 'user',
@@ -539,15 +631,20 @@ export function App() {
 
     const effectiveQuizMode =
       quizOverrides?.interactiveQuizMode !== undefined ? quizOverrides.interactiveQuizMode : quizVoiceMode;
-    const effectiveQuizSubject = quizOverrides?.quizSubject || quizSubject;
+    const effectiveQuizSubject = overrideSubjectLabel || quizOverrides?.quizSubject || quizSubject;
     const effectiveQuizRole = quizOverrides?.quizRole || quizRole;
+    const effectiveCountry = overrideCountryCode || countryCode;
+    const effectiveLanguageMode = overrideLanguageMode || globalStudyProfile.languageMode;
+    const effectiveGradeLabel = overrideGradeLabel || globalStudyProfile.gradeLabel || grade;
+    const buddyInUse = overrideBuddy !== undefined ? overrideBuddy : activeStudyBuddy;
+    const std = CURRICULUM_STANDARDS[effectiveCountry];
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          grade,
+          grade: effectiveGradeLabel,
           subject: effectiveQuizMode ? effectiveQuizSubject : currentSubject.name,
           mode: mode || (isThinking ? 'grade_10_secret' : 'tutor'),
           messages: currentMsgs.map((m) => ({
@@ -558,11 +655,34 @@ export function App() {
           image: image ? { mimeType: image.mimeType, data: image.data } : null,
           userName,
           isThinking,
-          countryCode,
-          bilingualMode,
+          countryCode: effectiveCountry,
+          bilingualMode: effectiveLanguageMode === 'bilingual' || bilingualMode,
           interactiveQuizMode: effectiveQuizMode,
           quizSubject: effectiveQuizSubject,
           quizRole: effectiveQuizRole,
+          studyContext: {
+            curriculumCountryName: std.countryName,
+            curriculumStandard: std.standardName,
+            curriculumUnits: std.unitSystem,
+            curriculumCalibration: std.calibrationPrompt,
+            studyGrade: effectiveGradeLabel,
+            studySubject: effectiveQuizSubject,
+            languageMode: effectiveLanguageMode,
+            activeBuddy: buddyInUse
+              ? {
+                  id: buddyInUse.id,
+                  name: buddyInUse.name,
+                  tag: buddyInUse.tag,
+                  countryCode: buddyInUse.countryCode,
+                  countryName: buddyInUse.countryName,
+                  flag: buddyInUse.flag,
+                  nativeLanguage: buddyInUse.nativeLanguage,
+                  grade: buddyInUse.grade,
+                  strongSubject: buddyInUse.strongSubject,
+                  personality: buddyInUse.personality,
+                }
+              : null,
+          },
         }),
       });
 
@@ -578,12 +698,23 @@ export function App() {
           content: data.reply || data.message || 'Max10 AI đã hoàn tất bài giảng cho bạn!',
           timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
           generatedImage: data.generatedImage,
+          generatedImages: Array.isArray(data.generatedImages) ? data.generatedImages : undefined,
           generatedVideo: data.generatedVideo,
           deepThinkingContent: data.thinking || data.deepThinkingContent,
+          buddyMeta: buddyInUse
+            ? {
+                id: buddyInUse.id,
+                name: buddyInUse.name,
+                tag: buddyInUse.tag,
+                flag: buddyInUse.flag,
+                countryName: buddyInUse.countryName,
+                nativeLanguage: buddyInUse.nativeLanguage,
+                avatarEmoji: buddyInUse.avatarEmoji,
+              }
+            : undefined,
         };
         updateActiveSessionMessages([...currentMsgs, aiMsg]);
 
-        // Auto-trigger fireworks & confetti celebration when user completes 10 daily interactions!
         const currentQuota = getDailyQuestionQuota(isAdmin);
         if (!isAdmin && currentQuota.used >= MAX_DAILY_QUESTIONS) {
           celebrateMilestone();
@@ -605,6 +736,558 @@ export function App() {
     }
   };
 
+  const handleAddStudyFriend = (buddy: VirtualStudyBuddy) => {
+    const already = globalStudyProfile.friendIds.includes(buddy.id);
+    const nextFriendIds = already
+      ? globalStudyProfile.friendIds
+      : [...globalStudyProfile.friendIds, buddy.id];
+    updateGlobalStudyProfile((prev) => ({
+      ...prev,
+      friendIds: nextFriendIds,
+    }));
+    const nowTime = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    const addedMsg: ChatMessage = {
+      id: 'msg-friend-' + Date.now(),
+      role: 'assistant',
+      content: already
+        ? `**${buddy.flag} ${buddy.name}#${buddy.tag}** đã có sẵn trong danh sách bạn bè của bạn.`
+        : `Đã kết bạn thành công với **${buddy.flag} ${buddy.name}#${buddy.tag}** (${buddy.nativeLanguage})!`,
+      timestamp: nowTime,
+      discordEmbed: {
+        kind: 'buddy_added',
+        buddy,
+        alreadyFriend: already,
+        totalFriends: nextFriendIds.length,
+      },
+    };
+    appendSessionMessages([addedMsg]);
+  };
+
+  const handleStartBuddyChat = async (buddy: VirtualStudyBuddy) => {
+    setActiveStudyBuddy(buddy);
+    setQuizVoiceMode(false);
+    setCountryCode(buddy.countryCode);
+    try {
+      localStorage.setItem(STORAGE_KEY_COUNTRY_CODE, buddy.countryCode);
+    } catch {}
+    const culture = getCountryCulture(buddy.countryCode);
+    const nextLangMode: StudyLanguageMode = buddy.countryCode === 'VN' ? 'vi' : 'bilingual';
+    updateGlobalStudyProfile((prev) => ({
+      ...prev,
+      countryCode: culture.code,
+      countryName: culture.name,
+      flag: culture.flag,
+      languageMode: nextLangMode,
+      activeLanguageLabel: getLanguageLabelForConfig(buddy.countryCode, nextLangMode),
+    }));
+
+    const starterPrompt =
+      buddy.countryCode === 'VN'
+        ? `Chào ${buddy.name}! Mình muốn trò chuyện và cùng bạn ôn môn ${buddy.strongSubject} nhé!`
+        : `Xin chào ${buddy.name}! Mình muốn trò chuyện và học cùng bạn bằng ${buddy.nativeLanguage} (có dịch tiếng Việt bên dưới nhé)!`;
+
+    await sendToAiBackend(
+      starterPrompt,
+      null,
+      false,
+      'tutor',
+      { interactiveQuizMode: false, quizSubject: buddy.strongSubject },
+      buddy,
+      buddy.countryCode,
+      nextLangMode,
+      globalStudyProfile.gradeLabel,
+      buddy.strongSubject
+    );
+  };
+
+  const handleExitBuddyChat = () => {
+    const oldBuddy = activeStudyBuddy;
+    setActiveStudyBuddy(null);
+    const nowTime = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    appendSessionMessages([
+      {
+        id: 'msg-exit-buddy-' + Date.now(),
+        role: 'assistant',
+        content: oldBuddy
+          ? `👋 Đã kết thúc trò chuyện cùng **${oldBuddy.flag} ${oldBuddy.name}#${oldBuddy.tag}** và quay lại chế độ **Gia sư Max10 AI**!`
+          : '👋 Đã quay lại chế độ **Gia sư Max10 AI**!',
+        timestamp: nowTime,
+      },
+    ]);
+  };
+
+  const handleCycleStudyStatus = (nextStatus: StudyPresenceStatus) => {
+    updateGlobalStudyProfile((prev) => ({
+      ...prev,
+      status: nextStatus,
+    }));
+  };
+
+  const handleApplyCurriculumSetup = async (config: {
+    countryCode: CountryCode;
+    gradeLabel: string;
+    subject: QuizTopicId;
+    languageMode: StudyLanguageMode;
+    startQuiz: boolean;
+  }) => {
+    const culture = getCountryCulture(config.countryCode);
+    const std = CURRICULUM_STANDARDS[config.countryCode];
+    setCountryCode(config.countryCode);
+    setQuizSubject(config.subject);
+    setBilingualMode(config.languageMode !== 'native');
+    try {
+      localStorage.setItem(STORAGE_KEY_COUNTRY_CODE, config.countryCode);
+      localStorage.setItem(STORAGE_KEY_QUIZ_SUBJECT, config.subject);
+      localStorage.setItem(STORAGE_KEY_BILINGUAL_MODE, config.languageMode !== 'native' ? 'true' : 'false');
+    } catch {}
+
+    const langLabel = getLanguageLabelForConfig(config.countryCode, config.languageMode);
+    updateGlobalStudyProfile((prev) => ({
+      ...prev,
+      countryCode: culture.code,
+      countryName: culture.name,
+      flag: culture.flag,
+      gradeLabel: config.gradeLabel,
+      subjectLabel: config.subject,
+      languageMode: config.languageMode,
+      activeLanguageLabel: langLabel,
+    }));
+
+    if (config.startQuiz) {
+      setActiveStudyBuddy(null);
+      setQuizVoiceMode(true);
+      const quizPrompt = `Bắt đầu dò bài từng câu một (từ dễ đến khó) môn ${config.subject} theo chuẩn ${std.standardName} (${culture.name}), cấp học ${config.gradeLabel}, hệ đơn vị ${std.unitSystem}. Hãy hỏi ngay câu đầu tiên và đợi mình trả lời!`;
+      await sendToAiBackend(
+        quizPrompt,
+        null,
+        false,
+        'tutor',
+        { interactiveQuizMode: true, quizSubject: config.subject, quizRole },
+        null,
+        config.countryCode,
+        config.languageMode,
+        config.gradeLabel,
+        config.subject
+      );
+    } else {
+      const nowTime = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+      appendSessionMessages([
+        {
+          id: 'msg-curriculum-saved-' + Date.now(),
+          role: 'assistant',
+          content: `✅ Đã lưu chương trình học: **${culture.flag} ${culture.name}** · **${config.gradeLabel}** · Môn **${config.subject}** · Ngôn ngữ **${langLabel}**.`,
+          timestamp: nowTime,
+          discordEmbed: {
+            kind: 'language_updated',
+            countryCode: config.countryCode,
+            countryName: culture.name,
+            flag: culture.flag,
+            languageMode: config.languageMode,
+            languageLabel: langLabel,
+          },
+        },
+      ]);
+    }
+  };
+
+  const executeSlashCommand = async (rawCmd: string): Promise<boolean> => {
+    const parsed = parseSlashCommand(rawCmd);
+    if (!parsed) return false;
+
+    const { command, args } = parsed;
+    const nowTime = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    const userCmdMsg: ChatMessage = {
+      id: 'msg-cmd-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      role: 'user',
+      content: rawCmd.trim(),
+      timestamp: nowTime,
+    };
+
+    if (command === '/help' || command === '/lenh') {
+      appendSessionMessages([
+        userCmdMsg,
+        {
+          id: 'msg-help-' + Date.now(),
+          role: 'assistant',
+          content: 'Dưới đây là toàn bộ các lệnh điều khiển (Slash Commands) của hệ thống Gia sư & Kết bạn Quốc tế:',
+          timestamp: nowTime,
+          discordEmbed: {
+            kind: 'help',
+            commands: SLASH_COMMANDS,
+          },
+        },
+      ]);
+      return true;
+    }
+
+    if (command === '/ngonngu') {
+      const resolved = resolveLanguageInput(args, countryCode);
+      const culture = getCountryCulture(resolved.countryCode);
+      setCountryCode(resolved.countryCode);
+      setBilingualMode(resolved.languageMode !== 'native');
+      try {
+        localStorage.setItem(STORAGE_KEY_COUNTRY_CODE, resolved.countryCode);
+        localStorage.setItem(STORAGE_KEY_BILINGUAL_MODE, resolved.languageMode !== 'native' ? 'true' : 'false');
+      } catch {}
+
+      updateGlobalStudyProfile((prev) => ({
+        ...prev,
+        countryCode: culture.code,
+        countryName: culture.name,
+        flag: culture.flag,
+        languageMode: resolved.languageMode,
+        activeLanguageLabel: resolved.languageLabel,
+      }));
+
+      appendSessionMessages([
+        userCmdMsg,
+        {
+          id: 'msg-lang-' + Date.now(),
+          role: 'assistant',
+          content: `🌐 Đã chuyển đổi ngôn ngữ giao tiếp sang **${resolved.languageLabel}** (${culture.flag} ${culture.name}).`,
+          timestamp: nowTime,
+          discordEmbed: {
+            kind: 'language_updated',
+            countryCode: culture.code,
+            countryName: culture.name,
+            flag: culture.flag,
+            languageMode: resolved.languageMode,
+            languageLabel: resolved.languageLabel,
+          },
+        },
+      ]);
+      return true;
+    }
+
+    if (command === '/caidat') {
+      if (!args) {
+        appendSessionMessages([
+          userCmdMsg,
+          {
+            id: 'msg-caidat-ui-' + Date.now(),
+            role: 'assistant',
+            content: 'Bạn muốn học chương trình của nước nào, cấp học nào và môn gì? Hãy chọn cấu hình ngay bên dưới hoặc gõ `/caidat Mỹ | Song ngữ | Lớp 9 | Toán`!',
+            timestamp: nowTime,
+            discordEmbed: {
+              kind: 'curriculum_prompt',
+              title: 'Cài đặt Chương trình Học tập theo Quốc gia',
+              subtitle: 'Chọn Quốc gia, Cấp học, Môn học và Chế độ Ngôn ngữ để AI chuẩn hóa 100% kiến thức & đơn vị đo lường.',
+              currentCountryCode: countryCode,
+              currentGrade: globalStudyProfile.gradeLabel || grade,
+              currentSubject: quizSubject,
+              currentLanguageMode: globalStudyProfile.languageMode,
+            },
+          },
+        ]);
+        return true;
+      }
+
+      const parts = args.split(/[|,]/).map((p) => p.trim()).filter(Boolean);
+      const targetCountry = (parts[0] ? resolveCountryInput(parts[0]) : null) || resolveCountryInput(args) || countryCode;
+      const langRes = resolveLanguageInput(parts[1] || args, targetCountry);
+      const gradePart = parts[2] || globalStudyProfile.gradeLabel || grade;
+      const subjPart = resolveSubjectInput(parts[3] || args);
+      const culture = getCountryCulture(targetCountry);
+      const std = CURRICULUM_STANDARDS[targetCountry];
+      const finalLangMode: StudyLanguageMode =
+        parts[1] && parts[1].toLowerCase().includes('việt')
+          ? 'vi'
+          : targetCountry === 'VN'
+          ? 'vi'
+          : langRes.languageMode;
+      const finalLangLabel = getLanguageLabelForConfig(targetCountry, finalLangMode);
+
+      setCountryCode(targetCountry);
+      setQuizSubject(subjPart);
+      setBilingualMode(finalLangMode !== 'native');
+      try {
+        localStorage.setItem(STORAGE_KEY_COUNTRY_CODE, targetCountry);
+        localStorage.setItem(STORAGE_KEY_QUIZ_SUBJECT, subjPart);
+      } catch {}
+
+      updateGlobalStudyProfile((prev) => ({
+        ...prev,
+        countryCode: culture.code,
+        countryName: culture.name,
+        flag: culture.flag,
+        gradeLabel: gradePart,
+        subjectLabel: subjPart,
+        languageMode: finalLangMode,
+        activeLanguageLabel: finalLangLabel,
+      }));
+
+      appendSessionMessages([
+        userCmdMsg,
+        {
+          id: 'msg-caidat-done-' + Date.now(),
+          role: 'assistant',
+          content: `⚙️ Đã thiết lập chuẩn **${culture.flag} ${culture.name}** (${std.standardName}) · Cấp học: **${gradePart}** · Môn: **${subjPart}** · Ngôn ngữ: **${finalLangLabel}**.`,
+          timestamp: nowTime,
+          discordEmbed: {
+            kind: 'language_updated',
+            countryCode: targetCountry,
+            countryName: culture.name,
+            flag: culture.flag,
+            languageMode: finalLangMode,
+            languageLabel: finalLangLabel,
+          },
+        },
+      ]);
+      return true;
+    }
+
+    if (command === '/profile' || command === '/xem') {
+      if (command === '/xem' && args) {
+        const buddy = findBuddyByNameOrId(args);
+        if (!buddy) {
+          appendSessionMessages([
+            userCmdMsg,
+            {
+              id: 'msg-xem-notfound-' + Date.now(),
+              role: 'assistant',
+              content: `🔍 Không tìm thấy bạn học nào tên/ID **"${args}"**. Hãy thử \`/timban\` để khám phá 3 bạn học quốc tế mới nhé!`,
+              timestamp: nowTime,
+            },
+          ]);
+          return true;
+        }
+        const buddyCulture = getCountryCulture(buddy.countryCode);
+        const buddyProfile: GlobalStudyProfile = {
+          displayName: buddy.name,
+          tag: buddy.tag,
+          countryCode: buddy.countryCode,
+          countryName: buddy.countryName,
+          flag: buddy.flag,
+          languageMode: buddy.countryCode === 'VN' ? 'vi' : 'bilingual',
+          activeLanguageLabel: buddy.nativeLanguage,
+          gradeLabel: buddy.grade,
+          subjectLabel: buddy.strongSubject,
+          status: buddy.status,
+          badges: buddy.badges,
+          friendIds: [],
+        };
+        appendSessionMessages([
+          userCmdMsg,
+          {
+            id: 'msg-xem-' + Date.now(),
+            role: 'assistant',
+            content: `🪪 Hồ sơ Discord chi tiết của **${buddyCulture.flag} ${buddy.name}#${buddy.tag}**:`,
+            timestamp: nowTime,
+            discordEmbed: {
+              kind: 'profile',
+              profile: buddyProfile,
+              isSelf: false,
+              buddy,
+              isFriend: globalStudyProfile.friendIds.includes(buddy.id),
+            },
+          },
+        ]);
+        return true;
+      }
+
+      appendSessionMessages([
+        userCmdMsg,
+        {
+          id: 'msg-profile-self-' + Date.now(),
+          role: 'assistant',
+          content: `🪪 Thẻ Hồ sơ Discord của **${globalStudyProfile.displayName}#${globalStudyProfile.tag}**:`,
+          timestamp: nowTime,
+          discordEmbed: {
+            kind: 'profile',
+            profile: globalStudyProfile,
+            isSelf: true,
+          },
+        },
+      ]);
+      return true;
+    }
+
+    if (command === '/timban') {
+      const suggestions = findRandomBuddies(args, 3);
+      appendSessionMessages([
+        userCmdMsg,
+        {
+          id: 'msg-timban-' + Date.now(),
+          role: 'assistant',
+          content: args
+            ? `🌍 Max10 AI đã tìm thấy 3 bạn học quốc tế phù hợp với **"${args}"**:`
+            : '🌍 Max10 AI đã chọn ngẫu nhiên 3 bạn học quốc tế đang hoạt động cho bạn:',
+          timestamp: nowTime,
+          discordEmbed: {
+            kind: 'buddy_search',
+            queryLabel: args || 'Toàn cầu',
+            buddies: suggestions,
+            friendIds: globalStudyProfile.friendIds,
+          },
+        },
+      ]);
+      return true;
+    }
+
+    if (command === '/ketban') {
+      if (!args) {
+        const suggestions = findRandomBuddies('', 3);
+        appendSessionMessages([
+          userCmdMsg,
+          {
+            id: 'msg-ketban-hint-' + Date.now(),
+            role: 'assistant',
+            content: 'Hãy nhập tên hoặc #ID (ví dụ: `/ketban Min-ji`), hoặc chọn nhanh một trong 3 bạn học dưới đây:',
+            timestamp: nowTime,
+            discordEmbed: {
+              kind: 'buddy_search',
+              queryLabel: 'Gợi ý kết bạn',
+              buddies: suggestions,
+              friendIds: globalStudyProfile.friendIds,
+            },
+          },
+        ]);
+        return true;
+      }
+      const buddy = findBuddyByNameOrId(args);
+      if (!buddy) {
+        appendSessionMessages([
+          userCmdMsg,
+          {
+            id: 'msg-ketban-notfound-' + Date.now(),
+            role: 'assistant',
+            content: `🔍 Chưa tìm thấy bạn học nào khớp với **"${args}"**. Dùng \`/timban\` để xem danh sách gợi ý nhé!`,
+            timestamp: nowTime,
+          },
+        ]);
+        return true;
+      }
+      const already = globalStudyProfile.friendIds.includes(buddy.id);
+      const nextIds = already
+        ? globalStudyProfile.friendIds
+        : [...globalStudyProfile.friendIds, buddy.id];
+      updateGlobalStudyProfile((prev) => ({ ...prev, friendIds: nextIds }));
+      appendSessionMessages([
+        userCmdMsg,
+        {
+          id: 'msg-ketban-ok-' + Date.now(),
+          role: 'assistant',
+          content: already
+            ? `**${buddy.flag} ${buddy.name}#${buddy.tag}** đã là bạn bè của bạn.`
+            : `🤝 Đã thêm **${buddy.flag} ${buddy.name}#${buddy.tag}** vào danh sách bạn bè!`,
+          timestamp: nowTime,
+          discordEmbed: {
+            kind: 'buddy_added',
+            buddy,
+            alreadyFriend: already,
+            totalFriends: nextIds.length,
+          },
+        },
+      ]);
+      return true;
+    }
+
+    if (command === '/listban') {
+      const friendBuddies = VIRTUAL_STUDY_BUDDIES.filter((b) =>
+        globalStudyProfile.friendIds.includes(b.id)
+      );
+      appendSessionMessages([
+        userCmdMsg,
+        {
+          id: 'msg-listban-' + Date.now(),
+          role: 'assistant',
+          content: `👥 Danh sách bạn bè hiện tại của bạn (${friendBuddies.length} bạn học):`,
+          timestamp: nowTime,
+          discordEmbed: {
+            kind: 'friends_list',
+            friends: friendBuddies,
+          },
+        },
+      ]);
+      return true;
+    }
+
+    if (command === '/chat') {
+      if (!args || args.toLowerCase() === 'off' || args.toLowerCase() === 'tat' || args.toLowerCase() === 'exit') {
+        handleExitBuddyChat();
+        return true;
+      }
+      const buddy = findBuddyByNameOrId(args);
+      if (!buddy) {
+        appendSessionMessages([
+          userCmdMsg,
+          {
+            id: 'msg-chat-notfound-' + Date.now(),
+            role: 'assistant',
+            content: `🔍 Không tìm thấy bạn học tên **"${args}"**. Hãy thử \`/timban\` hoặc \`/listban\` để chọn bạn trò chuyện nhé!`,
+            timestamp: nowTime,
+          },
+        ]);
+        return true;
+      }
+      await handleStartBuddyChat(buddy);
+      return true;
+    }
+
+    if (command === '/hoibai') {
+      const detectedCountry = (args ? resolveCountryInput(args) : null) || countryCode;
+      const detectedSubject = args ? resolveSubjectInput(args) : quizSubject;
+      const culture = getCountryCulture(detectedCountry);
+      const std = CURRICULUM_STANDARDS[detectedCountry];
+      const nextLangMode: StudyLanguageMode =
+        detectedCountry === 'VN' ? 'vi' : globalStudyProfile.languageMode === 'native' ? 'native' : 'bilingual';
+
+      setActiveStudyBuddy(null);
+      setCountryCode(detectedCountry);
+      setQuizSubject(detectedSubject);
+      setQuizVoiceMode(true);
+      try {
+        localStorage.setItem(STORAGE_KEY_COUNTRY_CODE, detectedCountry);
+        localStorage.setItem(STORAGE_KEY_QUIZ_SUBJECT, detectedSubject);
+      } catch {}
+
+      updateGlobalStudyProfile((prev) => ({
+        ...prev,
+        countryCode: culture.code,
+        countryName: culture.name,
+        flag: culture.flag,
+        subjectLabel: detectedSubject,
+        languageMode: nextLangMode,
+        activeLanguageLabel: getLanguageLabelForConfig(detectedCountry, nextLangMode),
+      }));
+
+      const quizPrompt = `Bắt đầu chế độ Dò bài từng câu một (từ dễ đến khó) môn ${detectedSubject} theo chuẩn ${std.standardName} (${culture.name}), cấp học ${globalStudyProfile.gradeLabel || grade}, hệ đơn vị ${std.unitSystem}. Không giảng dài dòng và không đưa đáp án trước; hãy hỏi ngay câu hỏi đầu tiên ở mức dễ và đợi mình trả lời!`;
+      await sendToAiBackend(
+        quizPrompt,
+        null,
+        false,
+        'tutor',
+        { interactiveQuizMode: true, quizSubject: detectedSubject, quizRole },
+        null,
+        detectedCountry,
+        nextLangMode,
+        globalStudyProfile.gradeLabel || grade,
+        detectedSubject
+      );
+      return true;
+    }
+
+    return false;
+  };
+
+  // Send message directly to Max10 AI or execute Slash Commands
+  const handleSendMessage = async (
+    text: string,
+    image?: { data: string; mimeType: string; previewUrl: string } | null,
+    isThinking?: boolean,
+    mode?: 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector' | 'all_in_one',
+    quizOverrides?: { interactiveQuizMode?: boolean; quizSubject?: QuizTopicId; quizRole?: QuizRole }
+  ) => {
+    if ((!text || !text.trim()) && !image) return;
+
+    if (text && text.trim().startsWith('/') && !image) {
+      const handled = await executeSlashCommand(text.trim());
+      if (handled) return;
+    }
+
+    await sendToAiBackend(text, image, isThinking, mode, quizOverrides);
+  };
+
   // Regenerate last message
   const handleRegenerate = () => {
     if (!activeSession || activeSession.messages.length === 0) return;
@@ -618,12 +1301,20 @@ export function App() {
   const handleSelectGrade = (newGrade: GradeLevel) => {
     setGrade(newGrade);
     localStorage.setItem(STORAGE_KEY_SELECTED_GRADE, newGrade);
+    updateGlobalStudyProfile((prev) => ({
+      ...prev,
+      gradeLabel: newGrade,
+    }));
   };
 
   // Save user name
   const handleSaveUserName = (newName: string) => {
     setUserName(newName);
     localStorage.setItem(STORAGE_KEY_USER_NAME, newName);
+    updateGlobalStudyProfile((prev) => ({
+      ...prev,
+      displayName: newName.trim() || prev.displayName,
+    }));
     if (currentUser) {
       const updated = { ...currentUser, name: newName };
       setCurrentUser(updated);
@@ -1419,6 +2110,14 @@ export function App() {
               onSelectQuizSubject={handleSelectQuizSubject}
               quizRole={quizRole}
               onSelectQuizRole={handleSelectQuizRole}
+              globalStudyProfile={globalStudyProfile}
+              activeStudyBuddy={activeStudyBuddy}
+              onExecuteSlashCommand={executeSlashCommand}
+              onAddStudyFriend={handleAddStudyFriend}
+              onStartBuddyChat={handleStartBuddyChat}
+              onExitBuddyChat={handleExitBuddyChat}
+              onCycleStudyStatus={handleCycleStudyStatus}
+              onApplyCurriculumSetup={handleApplyCurriculumSetup}
             />
           )}
 
@@ -1429,6 +2128,14 @@ export function App() {
               currentUser={currentUser}
               isDark={isDark}
               onOpenAuthModal={() => setShowAuthModal(true)}
+              onLoginSuccess={handleLoginSuccess}
+              onLogout={() => {
+                if (currentUser) {
+                  saveAccountToHistory(currentUser);
+                }
+                localStorage.removeItem(STORAGE_KEY_AUTH_USER);
+                setCurrentUser(null);
+              }}
               userAvatar={userAvatar}
               onOpenAvatarModal={() => setShowAvatarModal(true)}
               onPresenceStatusChange={(status: UserPresenceStatus) => {
@@ -1626,12 +2333,26 @@ export function App() {
           {activeTab === 'tracker' && (
             <KnowledgeGapTracker
               isDark={isDark}
-              onPracticeTopic={(_subject, tutorPrompt) => {
+              onPracticeTopic={(subject, tutorPrompt) => {
+                const lowerSub = (subject || '').toLowerCase();
+                const mappedTopic: QuizTopicId = lowerSub.includes('văn')
+                  ? 'Văn'
+                  : lowerSub.includes('anh')
+                  ? 'Anh'
+                  : lowerSub.includes('sử')
+                  ? 'Lịch sử'
+                  : lowerSub.includes('địa')
+                  ? 'Địa lý'
+                  : lowerSub.includes('khtn') || lowerSub.includes('lý') || lowerSub.includes('hóa') || lowerSub.includes('sinh')
+                  ? 'KHTN'
+                  : 'Toán';
+                setQuizSubject(mappedTopic);
                 setQuizVoiceMode(true);
                 setActiveTab('chat');
                 setTimeout(() => {
                   handleSendMessage(tutorPrompt, null, false, 'tutor', {
                     interactiveQuizMode: true,
+                    quizSubject: mappedTopic,
                     quizRole: 'tutor',
                   });
                 }, 90);

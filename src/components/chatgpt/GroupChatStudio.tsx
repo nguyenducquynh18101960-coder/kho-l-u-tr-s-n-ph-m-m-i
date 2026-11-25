@@ -74,8 +74,11 @@ import {
   Headphones,
   ChevronRight,
   Palette,
+  Lock,
+  LogOut,
 } from 'lucide-react';
 import Markdown from 'react-markdown';
+import { ChatGPTVideoPlayer } from './ChatGPTVideoPlayer';
 import { getVisibleHolidays } from './HolidayGiftAnimationModal';
 import {
   ChatGroup,
@@ -313,6 +316,8 @@ interface GroupChatStudioProps {
   currentUser: UserAccount | null;
   isDark: boolean;
   onOpenAuthModal?: () => void;
+  onLoginSuccess?: (user: UserAccount) => void;
+  onLogout?: () => void;
   userAvatar?: string;
   onOpenAvatarModal?: () => void;
   onPresenceStatusChange?: (status: UserPresenceStatus) => void;
@@ -332,6 +337,50 @@ interface GroupChatStudioProps {
   bilingualMode?: boolean;
 }
 
+const COMMUNITY_ROLE_ACCOUNTS: Record<
+  string,
+  { roleTag: 'SUPER_ADMIN' | 'ADMIN' | 'MEMBER'; displayName: string; desc: string }
+> = {
+  super_admin: {
+    roleTag: 'SUPER_ADMIN',
+    displayName: 'Tổng Quản Trị',
+    desc: 'Quản trị toàn bộ 4 cộng đồng',
+  },
+  admin_game: {
+    roleTag: 'ADMIN',
+    displayName: 'Admin Game',
+    desc: 'Quản trị Cộng đồng Game',
+  },
+  admin_hoctap: {
+    roleTag: 'ADMIN',
+    displayName: 'Admin Học Tập',
+    desc: 'Quản trị Cộng đồng Học tập',
+  },
+  admin_nam: {
+    roleTag: 'ADMIN',
+    displayName: 'Admin Con Trai',
+    desc: 'Quản trị Cộng đồng Con trai',
+  },
+  admin_nu: {
+    roleTag: 'ADMIN',
+    displayName: 'Admin Con Gái',
+    desc: 'Quản trị Cộng đồng Con gái',
+  },
+  thanh_vien: {
+    roleTag: 'MEMBER',
+    displayName: 'Thành Viên',
+    desc: 'Thành viên cộng đồng',
+  },
+};
+
+const CORE_COMMUNITY_ORDER = [
+  'community-game-max10',
+  'community-study-max10',
+  'community-boys-max10',
+  'community-girls-max10',
+  'community-chat-max10',
+];
+
 const STORAGE_KEY_GROUPS = 'max10_real_groups_v15';
 const STORAGE_KEY_GROUP_MSGS = 'max10_real_group_messages_v15';
 const STORAGE_KEY_USER_VIOLATIONS = 'max10_real_user_violations_v15';
@@ -339,6 +388,13 @@ const STORAGE_KEY_FRIENDS = 'max10_real_friends_list_v15';
 const STORAGE_KEY_DIRECT_MSGS = 'max10_real_direct_chat_messages_v15';
 const STORAGE_KEY_REPLIED_ADMIN_THREADS = 'max10_replied_admin_threads_v1';
 const STORAGE_KEY_HIDDEN_BROADCAST_AT = 'max10_hidden_other_broadcast_at_v1';
+const STORAGE_KEY_READ_GROUP_SERVERS = 'max10_read_group_servers_v1';
+
+interface ReadGroupServerState {
+  lastReadMsgId: string;
+  lastReadCount: number;
+  lastReadCreatedAt: number;
+}
 
 const UPDATED_BROADCAST_COPY =
   '📢 [CẬP NHẬT MỚI TỪ MAX10 AI - PHIÊN BẢN STUDY HUB]\n🚀 Max10 AI vừa nâng cấp toàn diện giao diện & tính năng học tập thông minh:\n✨ Không gian Study Hub 3 vùng gọn gàng: Gia sư AI, Cộng đồng & Chat, Kho Luyện Tập (hỗ trợ làm đề Offline), Công cụ AI & Lịch học.\n🎥 Gọi Video & Thoại dùng Camera & Micro thật, tự động hiện ảnh đại diện khi tắt cam và hộp thoại nhận/từ chối cuộc gọi tức thì.\n💬 Nhắn tin, trả lời trích dẫn và gọi @Max10 AI giải bài ngay trong nhóm lẫn chat 1-1.\nChúc các bạn học tập hiệu quả và chinh phục Điểm 10!';
@@ -361,6 +417,8 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
   currentUser,
   isDark,
   onOpenAuthModal,
+  onLoginSuccess,
+  onLogout,
   userAvatar,
   onOpenAvatarModal,
   onPresenceStatusChange,
@@ -381,6 +439,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 }) => {
   // Purge any stale fake seeded chats and legacy auto-created "Nhóm Học Tập Chính Thức" groups
   const deletedGroupIdsRef = useRef<Set<string>>(new Set());
+  const lastSavedGroupsJsonRef = useRef<string | null>(null);
 
   useEffect(() => {
     [
@@ -405,16 +464,24 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       setGroups((prev) => prev.filter((g) => !isLegacyAutoCreatedClassGroup(g)));
     }
 
-    const onGroupsUpdated = () => {
+    const onGroupsUpdated = (e: Event) => {
+      if ((e as CustomEvent<{ source?: string }>)?.detail?.source === 'group_chat_studio') {
+        return;
+      }
       try {
         const raw = localStorage.getItem(STORAGE_KEY_GROUPS);
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed)) {
-            setGroups(parsed.filter((g: ChatGroup) => !isLegacyAutoCreatedClassGroup(g) && !deletedGroupIdsRef.current.has(g.id)));
+            const nextFiltered = parsed.filter(
+              (g: ChatGroup) => !isLegacyAutoCreatedClassGroup(g) && !deletedGroupIdsRef.current.has(g.id)
+            );
+            const nextSerialized = JSON.stringify(nextFiltered);
+            lastSavedGroupsJsonRef.current = nextSerialized;
+            setGroups((prev) => (JSON.stringify(prev) === nextSerialized ? prev : nextFiltered));
           }
         }
-      } catch (e) {}
+      } catch (err) {}
     };
     window.addEventListener('max10_groups_updated', onGroupsUpdated);
     return () => window.removeEventListener('max10_groups_updated', onGroupsUpdated);
@@ -433,7 +500,20 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           currentUser?.isSuperAdmin ||
           (currentUser?.email || '').toLowerCase() === ADMIN_EMAIL
       ));
+  const isAdminForGroup = (group: ChatGroup | null | undefined, senderId: string) =>
+    senderId === ADMIN_ID ||
+    senderId === 'super_admin' ||
+    senderId === 'admin-mac-khanh-duy' ||
+    Boolean(group && (group.createdBy === senderId || (group.channelAdminId && group.channelAdminId === senderId)));
   const REAL_ADMIN_AVATAR = 'https://api.dicebear.com/7.x/personas/svg?seed=MacKhanhDuy';
+
+  // Lock-screen login state when !currentUser
+  const [lockUsername, setLockUsername] = useState<string>('');
+  const [lockPassword, setLockPassword] = useState<string>('123456');
+  const [lockError, setLockError] = useState<string>('');
+  const [zoomedAttachmentUrl, setZoomedAttachmentUrl] = useState<string | null>(null);
+  const [brokenAttachmentIds, setBrokenAttachmentIds] = useState<Record<string, boolean>>({});
+  const [attachmentOverrides, setAttachmentOverrides] = useState<Record<string, string>>({});
 
   // Admin Real Inbox & Broadcast states
   const [adminInboxThreads, setAdminInboxThreads] = useState<Array<{
@@ -726,6 +806,81 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     return DEFAULT_DIRECT_MESSAGES;
   });
 
+  const [readGroupServers, setReadGroupServers] = useState<Record<string, ReadGroupServerState>>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_READ_GROUP_SERVERS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch {}
+    return {};
+  });
+
+  const getVisibleServerMessages = (gid: string, msgsMap = groupMessages): GroupChatMessage[] => {
+    return (msgsMap[gid] || []).filter(
+      (m) =>
+        m &&
+        m.senderId !== 'user-quynh' &&
+        !(m.senderId || '').startsWith('teacher-') &&
+        !(m.senderId || '').startsWith('std-')
+    );
+  };
+
+  const markGroupServerAsRead = (gid: string, msgsMap = groupMessages) => {
+    if (!gid) return;
+    const visibleMsgs = getVisibleServerMessages(gid, msgsMap);
+    const lastMsg = visibleMsgs[visibleMsgs.length - 1];
+    const latestCreatedAt = visibleMsgs.reduce((max, m) => Math.max(max, m.createdAt || 0), 0);
+    const nextEntry: ReadGroupServerState = {
+      lastReadMsgId: lastMsg?.id || '',
+      lastReadCount: visibleMsgs.length,
+      lastReadCreatedAt: latestCreatedAt,
+    };
+
+    setReadGroupServers((prev) => {
+      const existing = prev[gid];
+      if (
+        existing &&
+        existing.lastReadMsgId === nextEntry.lastReadMsgId &&
+        existing.lastReadCount === nextEntry.lastReadCount &&
+        existing.lastReadCreatedAt === nextEntry.lastReadCreatedAt
+      ) {
+        return prev;
+      }
+      const updated = { ...prev, [gid]: nextEntry };
+      try {
+        localStorage.setItem(STORAGE_KEY_READ_GROUP_SERVERS, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  const getUnreadCountInServer = (gid: string): number => {
+    const visibleMsgs = getVisibleServerMessages(gid);
+    if (visibleMsgs.length === 0) return 0;
+    const readEntry = readGroupServers[gid];
+    if (!readEntry) {
+      return visibleMsgs.filter((m) => m.senderId !== activeUserId).length;
+    }
+    const lastMsg = visibleMsgs[visibleMsgs.length - 1];
+    if (lastMsg && lastMsg.senderId === activeUserId) return 0;
+    if (lastMsg && lastMsg.id === readEntry.lastReadMsgId && visibleMsgs.length <= readEntry.lastReadCount) {
+      return 0;
+    }
+    return visibleMsgs.filter((m) => {
+      if (m.senderId === activeUserId) return false;
+      if (typeof m.createdAt === 'number' && readEntry.lastReadCreatedAt > 0) {
+        return m.createdAt > readEntry.lastReadCreatedAt;
+      }
+      return false;
+    }).length || (visibleMsgs.length > readEntry.lastReadCount ? visibleMsgs.length - readEntry.lastReadCount : 0);
+  };
+
+  const hasUnreadMessagesInServer = (gid: string): boolean => {
+    return getUnreadCountInServer(gid) > 0;
+  };
+
 
   // Track violations count per user in this group: Record<groupId_userId, count>
   const [violationCounts, setViolationCounts] = useState<Record<string, number>>(() => {
@@ -837,11 +992,15 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
   const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(false);
 
   // Save friends to localStorage & broadcast to ContextPanel
+  const lastSavedFriendsJsonRef = useRef<string | null>(null);
   useEffect(() => {
     try {
       const clean = friends.filter((f) => !isAiEntity(f) && !f.id.startsWith('std-'));
-      localStorage.setItem(STORAGE_KEY_FRIENDS, JSON.stringify(clean));
-      window.dispatchEvent(new CustomEvent('max10_friends_updated'));
+      const serialized = JSON.stringify(clean);
+      if (lastSavedFriendsJsonRef.current === serialized) return;
+      lastSavedFriendsJsonRef.current = serialized;
+      localStorage.setItem(STORAGE_KEY_FRIENDS, serialized);
+      window.dispatchEvent(new CustomEvent('max10_friends_updated', { detail: { source: 'group_chat_studio' } }));
     } catch (e) {
       console.warn('Lỗi lưu danh sách bạn bè', e);
     }
@@ -1047,7 +1206,15 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 map.set(g.id, g);
               }
             });
-            return Array.from(map.values());
+            const nextGroups = Array.from(map.values()).sort((a, b) => {
+              const ia = CORE_COMMUNITY_ORDER.indexOf(a.id);
+              const ib = CORE_COMMUNITY_ORDER.indexOf(b.id);
+              if (ia !== -1 && ib !== -1) return ia - ib;
+              if (ia !== -1) return -1;
+              if (ib !== -1) return 1;
+              return 0;
+            });
+            return JSON.stringify(prev) === JSON.stringify(nextGroups) ? prev : nextGroups;
           });
         }
       }
@@ -1073,6 +1240,9 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
               merged.push(m);
             });
             merged.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+            if (JSON.stringify(currentList) === JSON.stringify(merged)) {
+              return prev;
+            }
             return {
               ...prev,
               [targetGid]: merged,
@@ -2037,8 +2207,11 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
   // Save groups to localStorage & broadcast to ContextPanel
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY_GROUPS, JSON.stringify(groups));
-      window.dispatchEvent(new CustomEvent('max10_groups_updated'));
+      const serialized = JSON.stringify(groups);
+      if (lastSavedGroupsJsonRef.current === serialized) return;
+      lastSavedGroupsJsonRef.current = serialized;
+      localStorage.setItem(STORAGE_KEY_GROUPS, serialized);
+      window.dispatchEvent(new CustomEvent('max10_groups_updated', { detail: { source: 'group_chat_studio' } }));
     } catch (e) {
       console.warn('Lỗi lưu nhóm', e);
     }
@@ -2064,6 +2237,13 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       console.warn('Lỗi lưu tin nhắn', e);
     }
   }, [groupMessages]);
+
+  // Persist read watermark to localStorage whenever user views a server/group
+  useEffect(() => {
+    if (activeMode === 'group' && activeGroupId && !showCommunitiesView) {
+      markGroupServerAsRead(activeGroupId, groupMessages);
+    }
+  }, [activeMode, activeGroupId, showCommunitiesView, groupMessages]);
 
   // Save violations to localStorage
   useEffect(() => {
@@ -2453,13 +2633,14 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     setMentionQuery(null);
 
     // Clean group message sent normally:
+    const isSenderChannelAdmin = isAdminForGroup(activeGroup, activeUserId);
     const userMsg: GroupChatMessage = {
       id: 'msg-' + Date.now(),
       groupId: activeGroupId,
       senderId: activeUserId,
       senderName: activeUserName,
       senderAvatar: activeUserAvatar,
-      senderRole: currentUser?.role === 'teacher' ? 'teacher' : currentUser?.role === 'admin' ? 'admin' : 'member',
+      senderRole: isSenderChannelAdmin ? 'admin' : currentUser?.role === 'teacher' ? 'teacher' : currentUser?.role === 'admin' ? 'admin' : 'member',
       content: text,
       timestamp: timeStr,
       createdAt: nowMs,
@@ -2582,12 +2763,85 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       }
     }
 
+    const isSlashCommand = /^\/(ve|sodo|ai)(\s|$)/i.test(text);
+
+    if (isSlashCommand) {
+      setIsAiReplying(true);
+      try {
+        const commCat: 'game' | 'chat' | 'study' =
+          activeGroup.communityCategory === 'game'
+            ? 'game'
+            : activeGroup.communityCategory === 'chat'
+            ? 'chat'
+            : 'study';
+        const resBot = await fetch('/api/bot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: text,
+            userName: activeUserName,
+            grade: currentGrade,
+            subject: activeGroup.subject || (commCat === 'game' ? 'Game' : commCat === 'chat' ? 'Trò chuyện' : 'Học tập'),
+            communityContext: {
+              isCommunity: Boolean(activeGroup.isCommunity),
+              category: commCat,
+              name: activeGroup.name,
+              description: activeGroup.description,
+            },
+          }),
+        });
+        const botData = await resBot.json();
+        const botMsg: GroupChatMessage = {
+          id: 'bot-reply-' + Date.now(),
+          groupId: activeGroupId,
+          senderId: 'ai-bot-community',
+          senderName: 'AI Bot',
+          senderAvatar: '/max10-avatar.jpg',
+          senderRole: 'ai_tutor',
+          isAi: true,
+          content:
+            botData?.reply ||
+            `🤖 **AI Bot** đã nhận lệnh của **${activeUserName}**!`,
+          attachment: botData?.imageUrl
+            ? {
+                type: 'image',
+                url: botData.imageUrl,
+                fallbackUrl: botData.fallbackUrl,
+                aspectRatio: botData.aspectRatio,
+                name: botData.prompt || text,
+              }
+            : undefined,
+          video: botData?.video || undefined,
+          createdAt: Date.now(),
+          timestamp: formatAccurateTime(Date.now()),
+          replyTo: { id: userMsg.id, senderName: activeUserName, content: text },
+        };
+
+        setGroupMessages((prev) => ({
+          ...prev,
+          [activeGroupId]: [...(prev[activeGroupId] || []), botMsg],
+        }));
+
+        fetch(`/api/groups/${encodeURIComponent(activeGroupId)}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(botMsg),
+        }).catch(() => {});
+      } catch {
+        setToastMessage('⚠️ Không kết nối được AI Bot, vui lòng thử lại!');
+        setTimeout(() => setToastMessage(''), 3000);
+      } finally {
+        setIsAiReplying(false);
+      }
+    }
+
     // Trigger @Max10 AI in group/community when explicitly tagged OR inside #hoi-max10-ai channel
     const isTaggingAi =
-      lower.includes('@max10 ai') ||
-      lower.includes('@max10') ||
-      /(^|\s)@ai(\s|$|[.,!?])/.test(lower) ||
-      (discordChannel === 'ai_tutor' && !isTaggingAdmin);
+      !isSlashCommand &&
+      (lower.includes('@max10 ai') ||
+        lower.includes('@max10') ||
+        /(^|\s)@ai(\s|$|[.,!?])/.test(lower) ||
+        (discordChannel === 'ai_tutor' && !isTaggingAdmin));
 
     if (isTaggingAi) {
       setIsAiReplying(true);
@@ -2633,6 +2887,8 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           data?.reply ||
           data?.text ||
           `Chào **${activeUserName}**! Mình đã có mặt trong **${activeGroup.name}** để thảo luận cùng mọi người theo đúng chủ đề rồi đây!`;
+        const firstGenImg =
+          (Array.isArray(data?.generatedImages) && data.generatedImages[0]) || data?.generatedImage;
 
         const aiGroupReply: GroupChatMessage = {
           id: 'ai-group-' + Date.now(),
@@ -2643,6 +2899,16 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           senderRole: 'ai_tutor',
           isAi: true,
           content: aiText,
+          attachment: firstGenImg?.url
+            ? {
+                type: 'image',
+                url: firstGenImg.url,
+                fallbackUrl: firstGenImg.fallbackUrl,
+                aspectRatio: firstGenImg.aspectRatio,
+                name: firstGenImg.prompt || text,
+              }
+            : undefined,
+          video: data?.generatedVideo || undefined,
           createdAt: Date.now(),
           timestamp: formatAccurateTime(Date.now()),
         };
@@ -3301,6 +3567,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       setActiveMode('group');
       setActiveGroupId(item.id);
       setDiscordChannel('general');
+      markGroupServerAsRead(item.id);
     }
   };
 
@@ -3738,6 +4005,180 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     );
   };
 
+  const handleCommunityLockLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanId = lockUsername.trim().toLowerCase();
+    const acc = COMMUNITY_ROLE_ACCOUNTS[cleanId];
+    if (!acc || lockPassword !== '123456') {
+      setLockError('Sai tên tài khoản hoặc mật khẩu! (Mật khẩu mẫu: 123456)');
+      return;
+    }
+    const newAccount: UserAccount = {
+      id: cleanId,
+      name: acc.displayName,
+      email: `${cleanId}@max10.edu.vn`,
+      role: cleanId === 'thanh_vien' ? 'student' : 'teacher',
+      provider: 'email',
+      schoolName: acc.desc,
+      avatar: `https://api.dicebear.com/7.x/personas/svg?seed=${encodeURIComponent(cleanId)}`,
+      presenceStatus: 'online',
+      plan: 'free',
+      createdAt: new Date().toISOString(),
+    };
+    setLockError('');
+    onLoginSuccess?.(newAccount);
+  };
+
+  const handleDownloadAttachment = async (url: string, label: string) => {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = `${(label || 'max10-ai').slice(0, 32).replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objUrl);
+    } catch {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'max10-ai-image.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  };
+
+  if (!currentUser) {
+    return (
+      <div
+        className={`flex flex-1 h-full w-full items-center justify-center p-4 overflow-y-auto ${
+          isDark ? 'bg-[#1e1f22] text-[#dbdee1]' : 'bg-[#e3e5e8] text-slate-900'
+        }`}
+      >
+        <div
+          className={`w-full max-w-md rounded-2xl border p-6 shadow-2xl space-y-5 ${
+            isDark ? 'bg-[#2b2d31] border-[#1f2023]' : 'bg-white border-slate-200'
+          }`}
+        >
+          <div className="text-center space-y-2">
+            <div className="mx-auto w-12 h-12 rounded-2xl bg-[#5865f2]/15 text-[#5865f2] flex items-center justify-center">
+              <Lock className="w-6 h-6" />
+            </div>
+            <h2 className="text-xl font-black tracking-tight">Cổng Thông Báo Cộng Đồng</h2>
+            <p className={`text-xs leading-relaxed ${isDark ? 'text-[#949ba4]' : 'text-slate-600'}`}>
+              Đăng nhập để mở khóa 4 cộng đồng (🎮 Game · 📚 Học tập · 👦 Con trai · 👧 Con gái) và sử dụng AI Bot{' '}
+              <code className="px-1 py-0.5 rounded bg-[#5865f2]/15 text-[#5865f2] font-bold">/ve</code>,{' '}
+              <code className="px-1 py-0.5 rounded bg-[#5865f2]/15 text-[#5865f2] font-bold">/sodo</code>,{' '}
+              <code className="px-1 py-0.5 rounded bg-[#5865f2]/15 text-[#5865f2] font-bold">/ai</code>.
+            </p>
+          </div>
+
+          <form onSubmit={handleCommunityLockLogin} className="space-y-3.5">
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider mb-1 text-[#949ba4]">
+                Tên tài khoản cộng đồng
+              </label>
+              <input
+                type="text"
+                value={lockUsername}
+                onChange={(e) => {
+                  setLockUsername(e.target.value);
+                  setLockError('');
+                }}
+                placeholder="VD: super_admin, admin_game, thanh_vien..."
+                className={`w-full px-3.5 py-2.5 rounded-lg text-sm outline-none border transition-colors ${
+                  isDark
+                    ? 'bg-[#1e1f22] border-[#111214] text-white focus:border-[#5865f2]'
+                    : 'bg-[#f2f3f5] border-slate-300 text-slate-900 focus:border-[#5865f2]'
+                }`}
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider mb-1 text-[#949ba4]">
+                Mật khẩu (mặc định: 123456)
+              </label>
+              <input
+                type="password"
+                value={lockPassword}
+                onChange={(e) => {
+                  setLockPassword(e.target.value);
+                  setLockError('');
+                }}
+                className={`w-full px-3.5 py-2.5 rounded-lg text-sm outline-none border transition-colors ${
+                  isDark
+                    ? 'bg-[#1e1f22] border-[#111214] text-white focus:border-[#5865f2]'
+                    : 'bg-[#f2f3f5] border-slate-300 text-slate-900 focus:border-[#5865f2]'
+                }`}
+                required
+              />
+            </div>
+
+            {lockError && (
+              <div className="text-xs font-semibold text-[#da373c] bg-[#da373c]/10 border border-[#da373c]/30 rounded-lg px-3 py-2">
+                {lockError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="w-full py-2.5 px-4 rounded-lg bg-[#5865f2] hover:bg-[#4752c4] text-white font-bold text-sm transition-colors cursor-pointer"
+            >
+              Mở khóa Cộng đồng
+            </button>
+          </form>
+
+          <div className={`pt-3 border-t space-y-2 ${isDark ? 'border-[#35363c]' : 'border-slate-200'}`}>
+            <div className="text-[11px] font-bold uppercase tracking-wider text-[#949ba4]">
+              Chọn nhanh tài khoản mẫu (Mật khẩu: 123456)
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {Object.entries(COMMUNITY_ROLE_ACCOUNTS).map(([accId, info]) => (
+                <button
+                  key={accId}
+                  type="button"
+                  onClick={() => {
+                    setLockUsername(accId);
+                    setLockPassword('123456');
+                    setLockError('');
+                  }}
+                  className={`px-2.5 py-1.5 rounded-lg text-left border text-xs transition-colors cursor-pointer ${
+                    lockUsername.trim().toLowerCase() === accId
+                      ? 'bg-[#5865f2]/20 border-[#5865f2] text-[#5865f2] dark:text-white'
+                      : isDark
+                      ? 'bg-[#1e1f22] border-[#35363c] hover:bg-[#35373c] text-[#dbdee1]'
+                      : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-800'
+                  }`}
+                >
+                  <div className="font-bold truncate">{info.displayName}</div>
+                  <div className="text-[10px] opacity-75 truncate">@{accId}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {onOpenAuthModal && (
+            <button
+              type="button"
+              onClick={onOpenAuthModal}
+              className={`w-full py-2 px-3 rounded-lg border text-xs font-bold transition-colors cursor-pointer ${
+                isDark
+                  ? 'border-[#35363c] bg-[#1e1f22] hover:bg-[#35373c] text-[#dbdee1]'
+                  : 'border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-800'
+              }`}
+            >
+              Đăng nhập / Đăng ký tài khoản Học sinh, Giáo viên khác
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   const hasActiveChat = Boolean((activeMode === 'direct' && activeFriend) || (activeMode === 'group' && activeGroup));
 
   return (
@@ -3820,14 +4261,15 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           <div className="flex flex-col items-center gap-2 w-full">
             {groups.map((g) => {
               const isSelectedServer = activeMode === 'group' && activeGroupId === g.id && !showCommunitiesView;
-              const hasMessagesInServer = (groupMessages[g.id] || []).length > 0;
+              const unreadCount = getUnreadCountInServer(g.id);
+              const hasUnreadInServer = unreadCount > 0;
               return (
                 <div key={g.id} className="relative flex items-center justify-center w-full group">
                   <span
                     className={`absolute left-0 rounded-r-full transition-all duration-200 ${
                       isSelectedServer
                         ? 'h-10 w-1 bg-slate-900 dark:bg-white'
-                        : hasMessagesInServer
+                        : hasUnreadInServer
                         ? 'h-2 w-1 bg-slate-900 dark:bg-white group-hover:h-5'
                         : 'h-0 group-hover:h-5 w-1 bg-slate-900 dark:bg-white'
                     }`}
@@ -3840,6 +4282,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                       setActiveGroupId(g.id);
                       setDiscordChannel('general');
                       setMobileShowChat(true);
+                      markGroupServerAsRead(g.id);
                     }}
                     className={`relative w-12 h-12 flex items-center justify-center text-lg font-bold transition-all duration-200 cursor-pointer ${
                       isSelectedServer
@@ -3849,6 +4292,8 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                         : 'rounded-[24px] hover:rounded-[16px] bg-white text-slate-800 hover:bg-[#5865f2] hover:text-white shadow-2xs'
                     }`}
                     title={`${g.name}${
+                      g.channelAdminId ? ` · Admin: @${g.channelAdminId}` : ''
+                    }${
                       g.isCommunity
                         ? g.communityCategory === 'game'
                           ? ' · Cộng đồng Trò chơi'
@@ -3866,19 +4311,22 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                           ? '💬'
                           : '📚')}
                     </span>
-                    {g.isPinnedTrending ? (
+                    {hasUnreadInServer && !isSelectedServer && (
+                      <span
+                        className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#da373c] border-2 border-[#e3e5e8] dark:border-[#1e1f22] flex items-center justify-center text-[10px] font-black text-white tabular-nums"
+                        title={`${unreadCount} tin nhắn mới`}
+                      >
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    )}
+                    {g.isPinnedTrending && (
                       <span
                         className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#23a559] border-2 border-[#e3e5e8] dark:border-[#1e1f22] flex items-center justify-center text-[8px] text-white font-black"
                         title="Thịnh hành"
                       >
                         ★
                       </span>
-                    ) : hasMessagesInServer && !isSelectedServer ? (
-                      <span
-                        className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#da373c] border-2 border-[#e3e5e8] dark:border-[#1e1f22]"
-                        title="Có tin nhắn mới"
-                      />
-                    ) : null}
+                    )}
                   </button>
                 </div>
               );
@@ -4655,6 +5103,21 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
               >
                 <Settings className="w-4 h-4" />
               </button>
+
+              {onLogout && (
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  className={`w-7 h-7 rounded-[4px] flex items-center justify-center transition-colors cursor-pointer ${
+                    isDark
+                      ? 'text-[#b5bac1] hover:bg-[#da373c]/20 hover:text-[#da373c]'
+                      : 'text-slate-600 hover:bg-rose-100 hover:text-[#da373c]'
+                  }`}
+                  title="Đăng xuất / Đổi tài khoản"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -5624,7 +6087,9 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 <span className="hidden lg:inline-block h-5 w-px bg-black/10 dark:bg-white/10 mx-1 shrink-0" />
                 <p className="hidden lg:block text-xs text-[#80848e] dark:text-[#949ba4] truncate">
                   {activeMode === 'group'
-                    ? `${activeGroup?.name} · ${
+                    ? `${activeGroup?.name}${
+                        activeGroup?.channelAdminId ? ` · Quản trị viên: @${activeGroup.channelAdminId}` : ''
+                      } · ${
                         discordChannel === 'admin_news'
                           ? 'Cập nhật hệ thống & Trả lời trực tiếp từ Admin'
                           : discordChannel === 'ai_tutor'
@@ -6320,7 +6785,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                   Math.abs((msg.createdAt || 0) - (prev.createdAt || 0)) < 5 * 60 * 1000
               );
               const isGrpAdmin =
-                msg.senderRole === 'admin' || (activeGroup && activeGroup.createdBy === msg.senderId);
+                msg.senderRole === 'admin' || isAdminForGroup(activeGroup, msg.senderId);
               const cat = getSenderCategory(
                 { id: msg.senderId, name: msg.senderName, role: msg.senderRole },
                 { isGroupAdmin: isGrpAdmin }
@@ -6435,6 +6900,101 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                       >
                         <Markdown>{formatDolaMath(msg.content)}</Markdown>
                       </div>
+
+                      {msg.attachment && msg.attachment.type === 'image' && msg.attachment.url && (
+                        <div
+                          className={`mt-2.5 rounded-xl overflow-hidden border shadow-sm max-w-md ${
+                            isDark ? 'bg-[#2b2d31] border-[#1f2023]' : 'bg-slate-50 border-slate-200'
+                          }`}
+                        >
+                          {brokenAttachmentIds[msg.id] ? (
+                            <div className="p-4 flex flex-col items-center justify-center text-center gap-2 min-h-[140px]">
+                              <ImageIcon className="w-7 h-7 text-[#5865f2] opacity-80" />
+                              <p className="text-xs text-[#949ba4]">
+                                Không tải được ảnh trực tiếp. Bấm thử lại để tải lại ảnh.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setBrokenAttachmentIds((prev) => ({ ...prev, [msg.id]: false }));
+                                  const fb = msg.attachment?.fallbackUrl || msg.attachment?.url || '';
+                                  if (fb) {
+                                    setAttachmentOverrides((prev) => ({ ...prev, [msg.id]: fb }));
+                                  }
+                                }}
+                                className="px-3 py-1 rounded-lg bg-[#5865f2] hover:bg-[#4752c4] text-white text-xs font-bold cursor-pointer"
+                              >
+                                Thử tải lại
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="relative group/img">
+                              <img
+                                src={attachmentOverrides[msg.id] || msg.attachment.url}
+                                alt={msg.attachment.name || 'AI Bot Attachment'}
+                                referrerPolicy="no-referrer"
+                                className="w-full max-h-[360px] object-contain cursor-pointer transition-transform duration-200 group-hover/img:scale-[1.01]"
+                                onClick={() =>
+                                  setZoomedAttachmentUrl(attachmentOverrides[msg.id] || msg.attachment!.url)
+                                }
+                                onError={() => {
+                                  const currUrl = attachmentOverrides[msg.id] || msg.attachment?.url;
+                                  const fb = msg.attachment?.fallbackUrl;
+                                  if (fb && currUrl !== fb) {
+                                    setAttachmentOverrides((prev) => ({ ...prev, [msg.id]: fb }));
+                                  } else {
+                                    setBrokenAttachmentIds((prev) => ({ ...prev, [msg.id]: true }));
+                                  }
+                                }}
+                              />
+                              <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover/img:opacity-100 transition-opacity">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setZoomedAttachmentUrl(attachmentOverrides[msg.id] || msg.attachment!.url)
+                                  }
+                                  className="p-1.5 rounded-lg bg-black/70 hover:bg-black text-white cursor-pointer"
+                                  title="Phóng to ảnh"
+                                >
+                                  <Maximize2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleDownloadAttachment(
+                                      attachmentOverrides[msg.id] || msg.attachment!.url,
+                                      msg.attachment!.name || 'ai-bot-image'
+                                    )
+                                  }
+                                  className="p-1.5 rounded-lg bg-[#248046] hover:bg-[#1a6334] text-white cursor-pointer"
+                                  title="Tải ảnh về máy"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {msg.attachment.name && (
+                            <div
+                              className={`px-3 py-1.5 text-[11px] border-t truncate ${
+                                isDark ? 'border-[#1f2023] text-[#949ba4]' : 'border-slate-200 text-slate-500'
+                              }`}
+                            >
+                              {msg.attachment.name}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {msg.video && (
+                        <div className="mt-2.5 max-w-md">
+                          <ChatGPTVideoPlayer
+                            video={msg.video}
+                            isDark={isDark}
+                            onOpenVideoStudio={onOpenVideoStudio}
+                          />
+                        </div>
+                      )}
 
                       {renderChallengeCard(msg.challengeId, false)}
 
@@ -6626,6 +7186,39 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 type="button"
                 onClick={() => {
                   setShowComposerPlusMenu(false);
+                  setInputMessage('/ve ');
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-[4px] hover:bg-[#5865f2] hover:text-white cursor-pointer transition-colors"
+              >
+                <ImageIcon className="w-4 h-4 text-sky-400" />
+                <span>Lệnh /ve (Vẽ ảnh AI)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowComposerPlusMenu(false);
+                  setInputMessage('/sodo ');
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-[4px] hover:bg-[#5865f2] hover:text-white cursor-pointer transition-colors"
+              >
+                <Rocket className="w-4 h-4 text-emerald-400" />
+                <span>Lệnh /sodo (Vẽ sơ đồ tư duy)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowComposerPlusMenu(false);
+                  setInputMessage('/ai ');
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-[4px] hover:bg-[#5865f2] hover:text-white cursor-pointer transition-colors"
+              >
+                <Bot className="w-4 h-4 text-indigo-400" />
+                <span>Lệnh /ai (Hỏi AI Bot)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowComposerPlusMenu(false);
                   handleSendQuickLike();
                 }}
                 className="w-full flex items-center gap-2 px-2.5 py-2 rounded-[4px] hover:bg-[#5865f2] hover:text-white cursor-pointer transition-colors"
@@ -6750,7 +7343,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                         : discordChannel === 'duel'
                         ? 'thi-đấu-kiến-thức'
                         : 'thảo-luận-chung'
-                    }`
+                    } (dùng /ve, /sodo, /ai hoặc @Max10 AI)`
                   : `Nhắn tin tới @${activeConversationTitle}`
               }
               className="flex-1 min-w-0 bg-transparent border-none text-xs sm:text-sm outline-none text-slate-900 dark:text-[#dbdee1] placeholder-[#6d6f78] dark:placeholder-[#87898c]"
@@ -6890,10 +7483,10 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                   (() => {
                     const humanMembers = activeGroup.members.filter((m) => !isAiEntity(m));
                     const admins = humanMembers.filter(
-                      (m) => m.role === 'admin' || activeGroup.createdBy === m.id || m.id === ADMIN_ID
+                      (m) => m.role === 'admin' || isAdminForGroup(activeGroup, m.id)
                     );
                     const nonAdmins = humanMembers.filter(
-                      (m) => m.role !== 'admin' && activeGroup.createdBy !== m.id && m.id !== ADMIN_ID
+                      (m) => m.role !== 'admin' && !isAdminForGroup(activeGroup, m.id)
                     );
                     const onlineMembers = nonAdmins.filter(
                       (m) => (m.id === activeUserId ? userPresence : m.presenceStatus || 'online') !== 'offline'
@@ -6915,7 +7508,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                           </div>
                           {list.map((member, mIdx) => {
                             const isGrpAdmin =
-                              member.role === 'admin' || activeGroup.createdBy === member.id || member.id === ADMIN_ID;
+                              member.role === 'admin' || isAdminForGroup(activeGroup, member.id);
                             const isSelfMember = member.id === activeUserId;
                             const cat = getSenderCategory(member, {
                               isGroupAdmin: isGrpAdmin,
@@ -9906,6 +10499,40 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           countryCode={countryCode}
           onChallengeUpdated={handleDuelChallengeUpdated}
         />
+      )}
+
+      {/* Lightbox Zoom Modal for Community AI Bot Images */}
+      {zoomedAttachmentUrl && (
+        <div
+          className="fixed inset-0 z-[1000000] bg-black/85 flex items-center justify-center p-4"
+          onClick={() => setZoomedAttachmentUrl(null)}
+        >
+          <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={zoomedAttachmentUrl}
+              alt="Xem ảnh lớn"
+              referrerPolicy="no-referrer"
+              className="max-w-full max-h-[82vh] rounded-xl object-contain shadow-2xl"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleDownloadAttachment(zoomedAttachmentUrl, 'max10-community-image')}
+                className="px-4 py-2 rounded-lg bg-[#248046] hover:bg-[#1a6334] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Tải ảnh về máy</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setZoomedAttachmentUrl(null)}
+                className="px-4 py-2 rounded-lg bg-[#313338] hover:bg-[#404249] text-white text-xs font-bold cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Toast message for Actions */}

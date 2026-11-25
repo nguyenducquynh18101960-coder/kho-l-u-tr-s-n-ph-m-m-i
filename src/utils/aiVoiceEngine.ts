@@ -3,8 +3,24 @@ import {
   AI_VOICE_PERSONAS,
   AIVoiceSettings,
   DEFAULT_VOICE_SETTINGS,
+  FEMALE_GEMINI_VOICES,
+  GeminiVoiceName,
+  MALE_GEMINI_VOICES,
   STORAGE_KEY_VOICE_SETTINGS,
+  getPersonaByGender,
 } from '../types/voice';
+
+const FEMALE_VOICE_NAME_RE =
+  /\bfemale\b|woman|girl|nữ|hoai\s*my|hoaimy|linh|lan|mai|thao|thảo|ngoc|ngọc|huong|hương|jenny|aria|sara|zira|hazel|samantha|victoria|karen|moira|tessa|fiona|kate|serena|susan|heera|haruka|nanami|kyoko|sun-hi|ji-young|xiaoxiao|xiaoyi|mei-jia|ting-ting|sin-ji|hedda|katja|amelie|amélie|hortense|denise|julie|alice|paulina|monica/i;
+
+const MALE_VOICE_NAME_RE =
+  /\bmale\b|man\b|boy|nam\s*minh|namminh|\ban\b\s*online|\ban\b.*vietnam|hùng|hung|dũng|dung|tuan|tuấn|khang|david|mark|george|ryan|guy|daniel|alex|fred|oliver|arthur|thomas|rishi|ichiro|keita|otoya|injoon|hyun-su|yunjian|yunxi|yunyang|kangkang|stefan|conrad|henri|paul|nicolas|diego|jorge/i;
+
+function classifyVoiceGender(voiceName: string): 'female' | 'male' | 'unknown' {
+  if (FEMALE_VOICE_NAME_RE.test(voiceName)) return 'female';
+  if (MALE_VOICE_NAME_RE.test(voiceName)) return 'male';
+  return 'unknown';
+}
 
 export interface VoicePlaybackState {
   isPlaying: boolean;
@@ -90,6 +106,14 @@ class AIVoiceManager {
     this.state.speed = this.settings.speed;
   }
 
+  public setVoiceGender(gender: 'female' | 'male'): AIVoicePersona {
+    const next = getPersonaByGender(gender, this.state.activePersona?.id);
+    this.saveSettings({ personaId: next.id });
+    this.state.activePersona = next;
+    this.notifyState();
+    return next;
+  }
+
   // Pre-process text to sound natural in spoken target language
   public cleanTextForSpeech(rawText: string, langCode: string = 'vi-VN'): string {
     const isVi = !langCode || langCode.toLowerCase().startsWith('vi');
@@ -148,7 +172,19 @@ class AIVoiceManager {
 
     this.stop();
 
-    const persona = customPersona || this.state.activePersona;
+    const rawPersona = customPersona || this.state.activePersona;
+    const validPool: GeminiVoiceName[] =
+      rawPersona.gender === 'female' ? FEMALE_GEMINI_VOICES : MALE_GEMINI_VOICES;
+    const safeGeminiVoice: GeminiVoiceName = validPool.includes(rawPersona.geminiVoice)
+      ? rawPersona.geminiVoice
+      : rawPersona.gender === 'female'
+      ? 'Kore'
+      : 'Fenrir';
+    const persona: AIVoicePersona = {
+      ...rawPersona,
+      geminiVoice: safeGeminiVoice,
+    };
+
     const cleanText = this.cleanTextForSpeech(rawText, langCode);
     if (!cleanText) return;
 
@@ -170,7 +206,7 @@ class AIVoiceManager {
 
     // Strategy 1: Try Gemini TTS API if enabled
     if (this.settings.preferGeminiTTS) {
-      const cacheKey = `${langCode}_${persona.geminiVoice}_${textToSpeak.slice(0, 80)}`;
+      const cacheKey = `${langCode}_${persona.gender}_${persona.geminiVoice}_${textToSpeak.slice(0, 80)}`;
       const cachedUrl = this.audioCache.get(cacheKey);
 
       if (cachedUrl) {
@@ -185,6 +221,7 @@ class AIVoiceManager {
           body: JSON.stringify({
             text: textToSpeak,
             voice: persona.geminiVoice,
+            gender: persona.gender,
             speed: this.settings.speed,
             lang: langCode,
           }),
@@ -262,21 +299,40 @@ class AIVoiceManager {
     utterance.lang = targetLang;
     utterance.rate = this.settings.speed || 1.0;
 
-    // Pick matching native voice if available
+    // Pick matching native voice with strict gender filtering
+    const desiredGender = this.state.activePersona.gender;
+    let matchedExplicitGender = false;
+    let pickedOppositeGender = false;
     try {
       const voices = window.speechSynthesis.getVoices();
       const shortPrefix = targetLang.split('-')[0].toLowerCase();
-      const exactVoice = voices.find((v) => v.lang.toLowerCase() === targetLang.toLowerCase());
-      const prefixVoice = voices.find((v) => v.lang.toLowerCase().startsWith(shortPrefix));
-      if (exactVoice) utterance.voice = exactVoice;
-      else if (prefixVoice) utterance.voice = prefixVoice;
+      const exactVoices = voices.filter((v) => v.lang.toLowerCase() === targetLang.toLowerCase());
+      const prefixVoices = voices.filter((v) => v.lang.toLowerCase().startsWith(shortPrefix));
+      const langPool = exactVoices.length > 0 ? exactVoices : prefixVoices;
+
+      const genderMatch = langPool.find((v) => classifyVoiceGender(v.name) === desiredGender);
+      const neutralMatch = langPool.find((v) => classifyVoiceGender(v.name) === 'unknown');
+      const fallbackVoice = langPool[0];
+
+      if (genderMatch) {
+        utterance.voice = genderMatch;
+        matchedExplicitGender = true;
+      } else if (neutralMatch) {
+        utterance.voice = neutralMatch;
+      } else if (fallbackVoice) {
+        utterance.voice = fallbackVoice;
+        const detected = classifyVoiceGender(fallbackVoice.name);
+        if (detected !== 'unknown' && detected !== desiredGender) {
+          pickedOppositeGender = true;
+        }
+      }
     } catch {}
 
-    // Adjust pitch based on persona gender
-    if (this.state.activePersona.gender === 'female') {
-      utterance.pitch = 1.1;
+    // Adjust pitch strictly by persona gender (stronger compensation if OS only provides opposite-gender voice)
+    if (desiredGender === 'female') {
+      utterance.pitch = pickedOppositeGender ? 1.32 : matchedExplicitGender ? 1.05 : 1.22;
     } else {
-      utterance.pitch = 0.95;
+      utterance.pitch = pickedOppositeGender ? 0.76 : matchedExplicitGender ? 0.94 : 0.84;
     }
 
     utterance.onstart = () => {
