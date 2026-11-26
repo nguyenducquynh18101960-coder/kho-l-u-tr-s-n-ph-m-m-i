@@ -29,6 +29,7 @@ import { calculateLevel, formatLevelLabel, MAX_LEVEL } from '../../types/achieve
 import { getUserInitials } from './UserNameModal';
 import { MainTabId, HubSpaceId, getSpaceFromTab } from './Sidebar';
 import { CountryCode, COUNTRY_CULTURES, getCountryCulture } from '../../data/countryCultures';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -385,6 +386,9 @@ export const Header: React.FC<HeaderProps> = ({
             <span>{currentXp.toLocaleString()} điểm</span>
           </span>
         </button>
+
+        {/* Cài đặt Max10 AI về điện thoại / máy tính */}
+        <PWAInstallButton onOpenStoreModal={onOpenStoreModal} />
 
         {/* Màn hình quay XP Lên Cấp */}
         <button

@@ -1,5 +1,5 @@
-// Max10 Progressive Web App Service Worker
-const CACHE_NAME = 'max10-pwa-cache-v1';
+// Max10 AI Progressive Web App Service Worker
+const CACHE_NAME = 'max10-ai-pwa-cache-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

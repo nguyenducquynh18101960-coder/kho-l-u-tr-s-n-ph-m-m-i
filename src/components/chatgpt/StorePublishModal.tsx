@@ -145,8 +145,8 @@ export const StorePublishModal: React.FC<StorePublishModalProps> = ({
     if (navigator.share) {
       try {
         await navigator.share({
-          title: 'Max10 - Gia Sư Chinh Phục Điểm 10',
-          text: 'Ứng dụng Max10 - Gia sư AI đồng hành học tập chinh phục điểm 10 trọn năm học:',
+          title: 'Max10 AI - Gia Sư Chinh Phục Điểm 10',
+          text: 'Ứng dụng Max10 AI - Gia sư AI đồng hành học tập chinh phục điểm 10 trọn năm học:',
           url: currentAppUrl,
         });
       } catch (err) {
@@ -699,10 +699,10 @@ npx cap open ios       # Mở Xcode để đóng gói đưa lên App Store`;
                   </div>
                   <div>
                     <h4 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
-                      Cài đặt Max10 ngay vào máy mà không cần chờ duyệt Store
+                      Cài đặt Max10 AI ngay vào điện thoại &amp; máy tính
                     </h4>
                     <p className="text-xs text-slate-500 dark:text-zinc-400">
-                      Được trang bị Service Worker, lưu dữ liệu offline, không có thanh địa chỉ trình duyệt, phản hồi tức thì 100%.
+                      Thêm ra màn hình chính thành ứng dụng riêng tên <strong>Max10 AI</strong>, chạy độc lập không cần thanh địa chỉ trình duyệt.
                     </p>
                   </div>
                 </div>
@@ -790,28 +790,13 @@ npx cap open ios       # Mở Xcode để đóng gói đưa lên App Store`;
                         3
                       </span>
                       <span>
-                        Bấm <strong>Cài đặt</strong> để đưa biểu tượng Max10 ra màn hình chính.
+                        Bấm <strong>Cài đặt</strong> để đưa biểu tượng <strong>Max10 AI</strong> ra màn hình chính.
                       </span>
                     </li>
                   </ol>
-                  <div className="pt-2 border-t border-slate-200 dark:border-zinc-700 flex flex-col gap-2">
-                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
-                      ✓ Trực tiếp từ Google: Không cần giải nén file .zip! Google Chrome sẽ tự động cài Max10 thành ứng dụng bên ngoài màn hình chính.
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const currentUrl = window.location.href.replace(/^https?:\/\//, '');
-                          window.location.href = `intent://${currentUrl}#Intent;scheme=https;package=com.android.chrome;end`;
-                        }}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        <span>Mở trong Google Chrome</span>
-                      </button>
-                    </div>
-                  </div>
+                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold pt-1">
+                    ✓ Dùng được trên Chrome, Samsung Internet, Edge, Cốc Cốc: biểu tượng <strong>Max10 AI</strong> sẽ thành ứng dụng riêng ngoài màn hình!
+                  </p>
                 </div>
 
                 {/* iOS Card */}
@@ -820,21 +805,21 @@ npx cap open ios       # Mở Xcode để đóng gói đưa lên App Store`;
                     <div className="w-7 h-7 rounded-xl bg-zinc-900 text-white flex items-center justify-center">
                       <Apple className="w-4 h-4" />
                     </div>
-                    <span>iPhone & iPad (Safari)</span>
+                    <span>iPhone &amp; iPad (Safari / Chrome iOS)</span>
                   </div>
                   <ol className="space-y-2 text-xs text-slate-600 dark:text-zinc-300">
                     <li className="flex items-start gap-2">
                       <span className="w-4 h-4 rounded-full bg-slate-200 dark:bg-zinc-700 text-slate-700 dark:text-zinc-200 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">
                         1
                       </span>
-                      <span>Mở link ứng dụng bằng trình duyệt <strong>Safari</strong>.</span>
+                      <span>Mở link ứng dụng bằng trình duyệt <strong>Safari</strong> (hoặc Chrome trên iOS).</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="w-4 h-4 rounded-full bg-slate-200 dark:bg-zinc-700 text-slate-700 dark:text-zinc-200 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">
                         2
                       </span>
                       <span>
-                        Nhấn nút <strong>Chia sẻ (Share)</strong> <Share2 className="w-3.5 h-3.5 inline mx-0.5 text-blue-600" /> ở thanh công cụ Safari.
+                        Nhấn nút <strong>Chia sẻ (Share)</strong> <Share2 className="w-3.5 h-3.5 inline mx-0.5 text-blue-600" /> ở thanh công cụ trình duyệt.
                       </span>
                     </li>
                     <li className="flex items-start gap-2">
@@ -842,12 +827,12 @@ npx cap open ios       # Mở Xcode để đóng gói đưa lên App Store`;
                         3
                       </span>
                       <span>
-                        Chọn <strong>"Thêm vào MH chính" (Add to Home Screen)</strong> <PlusSquare className="w-3.5 h-3.5 inline mx-0.5 text-emerald-600" /> rồi bấm <strong>"Thêm"</strong>.
+                        Chọn <strong>&quot;Thêm vào MH chính&quot; (Add to Home Screen)</strong> <PlusSquare className="w-3.5 h-3.5 inline mx-0.5 text-emerald-600" /> rồi bấm <strong>&quot;Thêm&quot;</strong>.
                       </span>
                     </li>
                   </ol>
                   <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold pt-1">
-                    ✓ Biểu tượng Max10 sẽ nằm ngay trên màn hình chính như tải từ App Store!
+                    ✓ Biểu tượng ghi tên <strong>Max10 AI</strong> ở dưới và mở thành app riêng trên màn hình chính iPhone!
                   </p>
                 </div>
               </div>

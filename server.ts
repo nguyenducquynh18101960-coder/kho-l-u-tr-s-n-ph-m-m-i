@@ -2969,19 +2969,39 @@ Chế độ hiện tại: ${
       return res.status(400).json({ success: false, error: "Vui lòng nhập nội dung lệnh cho AI Bot." });
     }
 
-    const lower = rawMessage.toLowerCase();
+    const stripped = rawMessage.replace(/^(@ai|\/ai)\s*/i, "").trim();
+    const strippedLower = stripped.toLowerCase();
     let mode: "ve" | "sodo" | "ai" = "ai";
     let bodyText = rawMessage;
 
-    if (explicitCmd === "ve" || /^\/ve(\s|$)/i.test(rawMessage)) {
+    if (
+      explicitCmd === "ve" ||
+      /^\/ve(\s|$)/i.test(rawMessage) ||
+      /^(vẽ|ve)(\s+|$)/i.test(stripped)
+    ) {
       mode = "ve";
-      bodyText = rawMessage.replace(/^\/ve\s*/i, "").trim() || "Tranh minh họa học tập sáng tạo và rực rỡ sắc màu";
-    } else if (explicitCmd === "sodo" || /^\/sodo(\s|$)/i.test(rawMessage)) {
+      bodyText =
+        rawMessage
+          .replace(/^\/ve\s*/i, "")
+          .replace(/^(@ai|\/ai)\s*/i, "")
+          .replace(/^(vẽ|ve)\s*/i, "")
+          .trim() || "Tranh minh họa học tập sáng tạo và rực rỡ sắc màu";
+    } else if (
+      explicitCmd === "sodo" ||
+      /^\/sodo(\s|$)/i.test(rawMessage) ||
+      strippedLower.includes("sơ đồ tư duy") ||
+      strippedLower.includes("so do tu duy")
+    ) {
       mode = "sodo";
-      bodyText = rawMessage.replace(/^\/sodo\s*/i, "").trim() || subject || "Kiến thức trọng tâm";
+      bodyText =
+        rawMessage
+          .replace(/^\/sodo\s*/i, "")
+          .replace(/^(@ai|\/ai)\s*/i, "")
+          .replace(/^(tạo|vẽ|lập|viết)?\s*(sơ đồ tư duy|so do tu duy)\s*(về|cho)?\s*/i, "")
+          .trim() || subject || "Kiến thức trọng tâm";
     } else {
       mode = "ai";
-      bodyText = rawMessage.replace(/^\/ai\s*/i, "").trim() || rawMessage;
+      bodyText = stripped || rawMessage;
     }
 
     try {
@@ -4993,15 +5013,17 @@ Yêu cầu kịch bản video gồm:
     return [
       makeGameCommunity({
         id: "community-game-max10",
-        name: "Cộng Đồng Game",
+        name: "Cộng Đồng Trò Chơi",
         description:
-          "Thông báo giải đấu, giao lưu mọi tựa game Mobile, PC, Console & Mini Game cùng bạn bè người thật.",
+          "Tổng hợp tất cả các trò chơi chung & Mini Game (Minecraft, Roblox, Liên Quân, Free Fire, Valorant, Genshin, Mini Game Quiz, Thử thách Toán, Vòng quay XP...) ngay trong Kênh văn bản.",
         avatarIcon: "🎮",
         code: "CD-TROCHOI",
         gamePlatform: "Cross-Platform",
-        gameTitle: "Tổng hợp Mọi Game & Mini Game",
+        gameTitle: "Tổng hợp Tất cả Trò chơi & Mini Game",
         gameGenre: "Đa thể loại",
         offsetMs: 310000,
+        isPinnedTrending: true,
+        trendingBadge: "Tất cả Trò chơi",
         channelAdminId: "admin_game",
         channelAdminName: "Admin Game",
       }),
@@ -5082,12 +5104,14 @@ Yêu cầu kịch bản video gồm:
       },
       {
         id: "community-chat-max10",
-        name: "Cộng Đồng Trò Chuyện Tự Do Max10",
+        name: "Max10 AI Community",
         description:
-          "Không gian trò chuyện tự do, tâm sự tuổi học trò, chia sẻ sở thích, phim nhạc & giao lưu vui vẻ cùng bạn bè và @Max10 AI.",
+          "Cộng đồng chính thức Max10 AI — Cập nhật tính năng mới, nội quy, trò chuyện tự do, chia sẻ prompt AI và hỏi đáp trực tiếp cùng @Max10.",
         grade: "Lớp 9",
-        subject: "Trò chuyện tự do",
-        avatarIcon: "💬",
+        subject: "Thảo luận & AI",
+        avatarIcon: "M10",
+        isPinnedTrending: true,
+        trendingBadge: "Official M10",
         createdAt: now - 290000,
         createdBy: "admin-mac-khanh-duy",
         createdByName: "Ban Quản Trị Max10",
@@ -5099,230 +5123,34 @@ Yêu cầu kịch bản video gồm:
         approvalStatus: "approved",
         isPublic: true,
         onlyAdminCanAdd: false,
-        code: "CD-TROCHUYEN",
+        code: "CD-MAX10-AI",
         pinnedNotice:
-          "💬 Cộng đồng Trò chuyện Tự do — Giao lưu thoải mái, văn minh & gọi @Max10 AI hoặc /ai tán gẫu cùng mọi người!",
+          "🤖 Chào mừng bạn đến với Max10 AI Community! Gõ @Max10 kèm câu hỏi hoặc vào #hỏi-đáp-max10-bot để được trợ lý AI giải đáp ngay.",
         members: [adminMember],
         mutedUsers: {},
       },
-      // CROSS-PLATFORM GAMES
-      makeGameCommunity({
-        id: "community-game-minecraft",
-        name: "Cộng Đồng Minecraft (Java, Bedrock, PE & Console)",
-        description:
-          "Sinh tồn, xây dựng, Redstone, Mod/Addon, chơi server chung giữa PC, Điện thoại, PS5, Xbox & Nintendo Switch.",
-        avatarIcon: "🧱",
-        code: "CD-MCPE",
-        gamePlatform: "Cross-Platform",
-        gameTitle: "Minecraft (Java / Bedrock / PE)",
-        gameGenre: "Sandbox / Sinh tồn",
-        offsetMs: 260000,
-        isPinnedTrending: true,
-        trendingBadge: "Thịnh hành",
-      }),
-      makeGameCommunity({
-        id: "community-game-roblox",
-        name: "Cộng Đồng Roblox (Blox Fruits, Brookhaven, Doors, Obby)",
-        description:
-          "Tìm team săn boss Blox Fruits, cày sự kiện, chia sẻ map Obby/Tycoon & lập nhóm chơi Roblox trên PC, Mobile và Console.",
-        avatarIcon: "🧊",
-        code: "CD-ROBLOX",
-        gamePlatform: "Cross-Platform",
-        gameTitle: "Roblox (Blox Fruits, Doors, Brookhaven...)",
-        gameGenre: "Thế giới ảo / Nhập vai",
-        offsetMs: 245000,
-        isPinnedTrending: true,
-        trendingBadge: "Top Yêu Thích",
-      }),
-      makeGameCommunity({
-        id: "community-game-hoyoverse",
-        name: "Cộng Đồng HoYoverse (Genshin Impact, Honkai: Star Rail, ZZZ)",
-        description:
-          "Thảo luận build nhân vật, đi bí cảnh Co-op, săn Nguyên Thạch & chia sẻ UID trên PC, Mobile và PlayStation/Xbox.",
-        avatarIcon: "✨",
-        code: "CD-HOYO",
-        gamePlatform: "Cross-Platform",
-        gameTitle: "Genshin Impact / Honkai: Star Rail / ZZZ",
-        gameGenre: "Action RPG / Gacha",
-        offsetMs: 230000,
-      }),
-      makeGameCommunity({
-        id: "community-game-fortnite",
-        name: "Cộng Đồng Fortnite, Rocket League & Battle Royale",
-        description:
-          "Lập Squad leo rank Zero Build, Creative Map, Fall Guys & Rocket League liên nền tảng PC, Console và Mobile.",
-        avatarIcon: "🏆",
-        code: "CD-FORTNITE",
-        gamePlatform: "Cross-Platform",
-        gameTitle: "Fortnite / Rocket League",
-        gameGenre: "Battle Royale / Đấu trường",
-        offsetMs: 215000,
-      }),
-      makeGameCommunity({
-        id: "community-game-party-coop",
-        name: "Cộng Đồng Party & Co-op (Among Us, Stumble Guys, Goose Goose Duck)",
-        description:
-          "Tạo phòng chơi chung vui nhộn sau giờ học: Among Us, Fall Guys, Stumble Guys, Goose Goose Duck trên mọi thiết bị.",
-        avatarIcon: "🛸",
-        code: "CD-PARTY",
-        gamePlatform: "Cross-Platform",
-        gameTitle: "Among Us / Fall Guys / Stumble Guys",
-        gameGenre: "Party / Co-op Vui nhộn",
-        offsetMs: 200000,
-      }),
-      makeGameCommunity({
-        id: "community-game-sports-racing",
-        name: "Cộng Đồng Thể Thao & Đua Xe (FC Online, EA FC, eFootball, Asphalt)",
-        description:
-          "Giao lưu chiến thuật bóng đá EA Sports FC, FC Online, eFootball, NBA 2K và đua xe Asphalt / Forza trên mọi nền tảng.",
-        avatarIcon: "⚽",
-        code: "CD-SPORTS",
-        gamePlatform: "Cross-Platform",
-        gameTitle: "EA FC / FC Online / eFootball / Asphalt",
-        gameGenre: "Thể thao / Đua xe",
-        offsetMs: 185000,
-      }),
-      makeGameCommunity({
-        id: "community-game-board-web",
-        name: "Cộng Đồng Cờ Vua, Cờ Tướng, Ma Sói & Game Web",
-        description:
-          "Đấu trí Chess.com, Lichess, Cờ Tướng, Ma Sói, Skribbl.io, Krunker.io & các game trình duyệt Web nhẹ mượt.",
-        avatarIcon: "♟️",
-        code: "CD-BOARD",
-        gamePlatform: "Cross-Platform",
-        gameTitle: "Chess.com / Ma Sói / Web Games",
-        gameGenre: "Trí tuệ / Board Game / Web",
-        offsetMs: 170000,
-      }),
-      // MOBILE GAMES
-      makeGameCommunity({
-        id: "community-game-lienquan",
-        name: "Cộng Đồng Liên Quân Mobile & Tốc Chiến (Wild Rift)",
-        description:
-          "Tìm đồng đội 5v5 leo Rank Cao Thủ/Thách Đấu, giao lưu tướng tủ, bảng ngọc và giải đấu Liên Quân / Mobile Legends / Tốc Chiến.",
-        avatarIcon: "📱",
-        code: "CD-AOV",
-        gamePlatform: "Mobile",
-        gameTitle: "Liên Quân Mobile / Tốc Chiến / MLBB",
-        gameGenre: "MOBA Mobile",
-        offsetMs: 155000,
-        isPinnedTrending: true,
-        trendingBadge: "Hot Tuần Này",
-      }),
-      makeGameCommunity({
-        id: "community-game-pubg-ff",
-        name: "Cộng Đồng Free Fire, PUBG Mobile & Call of Duty Mobile",
-        description:
-          "Tạo phòng Custom, lập team 4 người săn Booyah / Top 1 trên iOS & Android cho Free Fire, PUBG Mobile và COD Mobile.",
-        avatarIcon: "🔫",
-        code: "CD-FPSMOB",
-        gamePlatform: "Mobile",
-        gameTitle: "Free Fire / PUBG Mobile / COD Mobile",
-        gameGenre: "Bắn súng Sinh tồn Mobile",
-        offsetMs: 140000,
-      }),
-      makeGameCommunity({
-        id: "community-game-supercell",
-        name: "Cộng Đồng Brawl Stars, Clash Royale & Clash of Clans",
-        description:
-          "Lập Clan, giao lưu chiến thuật cày cúp Brawl Stars, Clash Royale, Clash of Clans và Squad Busters trên di động.",
-        avatarIcon: "⚡",
-        code: "CD-CELL",
-        gamePlatform: "Mobile",
-        gameTitle: "Brawl Stars / Clash Royale / Clash of Clans",
-        gameGenre: "Chiến thuật / Đấu trường Mobile",
-        offsetMs: 125000,
-      }),
-      makeGameCommunity({
-        id: "community-game-playtogether",
-        name: "Cộng Đồng Play Together, Blockman Go & Mobile Giải Trí",
-        description:
-          "Câu cá, trang trí nhà, săn kho báu Play Together, Eggy Party, Blockman Go & game mobile nhẹ nhàng.",
-        avatarIcon: "🏝️",
-        code: "CD-PLAYTOG",
-        gamePlatform: "Mobile",
-        gameTitle: "Play Together / Eggy Party / Blockman Go",
-        gameGenre: "Mô phỏng / Giải trí Mobile",
-        offsetMs: 110000,
-      }),
-      // PC GAMES
-      makeGameCommunity({
-        id: "community-game-lol-tft",
-        name: "Cộng Đồng Liên Minh Huyền Thoại (LoL) & Đấu Trường Chân Lý (TFT)",
-        description:
-          "Rủ nhau đánh Normal, ARAM, leo Rank LoL & chia sẻ đội hình meta Đấu Trường Chân Lý (TFT) trên PC / Mac.",
-        avatarIcon: "💻",
-        code: "CD-LOLTFT",
-        gamePlatform: "PC",
-        gameTitle: "Liên Minh Huyền Thoại / TFT",
-        gameGenre: "MOBA / Cờ nhân phẩm PC",
-        offsetMs: 95000,
-      }),
-      makeGameCommunity({
-        id: "community-game-valorant-cs2",
-        name: "Cộng Đồng FPS PC (Valorant, CS2, Apex Legends, Overwatch 2)",
-        description:
-          "Tìm 5-stack Valorant, CS2, Apex Legends, Overwatch 2, chia sẻ crosshair & chiến thuật map trên PC.",
-        avatarIcon: "🎯",
-        code: "CD-FPSPC",
-        gamePlatform: "PC",
-        gameTitle: "Valorant / Counter-Strike 2 / Apex Legends",
-        gameGenre: "Bắn súng Chiến thuật PC",
-        offsetMs: 80000,
-        isPinnedTrending: true,
-        trendingBadge: "Giải đấu",
-      }),
-      makeGameCommunity({
-        id: "community-game-steam-sandbox",
-        name: "Cộng Đồng Steam, PC Indie & Thế Giới Mở (GTA V, Terraria, Dota 2)",
-        description:
-          "Hội game PC trên Steam & Epic: GTA V, Terraria, Stardew Valley, Dota 2, Palworld, Black Myth: Wukong, Hollow Knight.",
-        avatarIcon: "🖥️",
-        code: "CD-STEAM",
-        gamePlatform: "PC",
-        gameTitle: "GTA V / Terraria / Stardew Valley / Dota 2 / Steam",
-        gameGenre: "Steam / Indie / Thế giới mở PC",
-        offsetMs: 65000,
-      }),
-      // CONSOLE GAMES
-      makeGameCommunity({
-        id: "community-game-nintendo",
-        name: "Cộng Đồng Nintendo Switch (Mario Kart, Pokémon, Zelda, Splatoon)",
-        description:
-          "Giao lưu Mario Kart 8 Deluxe, Pokémon Scarlet/Violet, Zelda, Animal Crossing, Super Smash Bros & Splatoon 3.",
-        avatarIcon: "🕹️",
-        code: "CD-SWITCH",
-        gamePlatform: "Console",
-        gameTitle: "Mario Kart / Pokémon / Zelda / Smash Bros",
-        gameGenre: "Nintendo Switch / Handheld",
-        offsetMs: 50000,
-      }),
-      makeGameCommunity({
-        id: "community-game-ps-xbox",
-        name: "Cộng Đồng PlayStation & Xbox (Elden Ring, God of War, Spider-Man)",
-        description:
-          "Trao đổi game PS5, PS4, Xbox Series X/S & Game Pass: Elden Ring, Spider-Man, God of War, Halo, Forza Horizon, Gran Turismo.",
-        avatarIcon: "🎮",
-        code: "CD-PSXBOX",
-        gamePlatform: "Console",
-        gameTitle: "PlayStation 5 / Xbox Series / Elden Ring",
-        gameGenre: "PlayStation & Xbox Console",
-        offsetMs: 35000,
-      }),
-      makeGameCommunity({
-        id: "community-game-retro-rhythm",
-        name: "Cộng Đồng Game Nhịp Điệu, Đối Kháng & Kinh Điển (osu!, GBA, Arcade)",
-        description:
-          "Thử thách osu!, Project Sekai, Street Fighter, Tekken, Mario & game kinh điển Retro / Arcade / Giả lập.",
-        avatarIcon: "👾",
-        code: "CD-RETRO",
-        gamePlatform: "Console",
-        gameTitle: "osu! / Tekken / Retro & Rhythm Games",
-        gameGenre: "Nhịp điệu / Đối kháng / Retro",
-        offsetMs: 20000,
-      }),
     ];
   }
+
+  const LEGACY_GAME_COMMUNITY_SUBCHANNEL_MAP: Record<string, string> = {
+    "community-game-minecraft": "game_minecraft",
+    "community-game-roblox": "game_roblox",
+    "community-game-hoyoverse": "game_hoyoverse",
+    "community-game-fortnite": "game_fortnite",
+    "community-game-party-coop": "game_party_coop",
+    "community-game-sports-racing": "game_sports_racing",
+    "community-game-board-web": "game_board_web",
+    "community-game-lienquan": "game_lienquan",
+    "community-game-pubg-ff": "game_freefire_pubg",
+    "community-game-supercell": "game_supercell",
+    "community-game-playtogether": "game_playtogether",
+    "community-game-lol-tft": "game_lol_tft",
+    "community-game-valorant-cs2": "game_valorant_cs2",
+    "community-game-steam-sandbox": "game_steam_sandbox",
+    "community-game-nintendo": "game_nintendo",
+    "community-game-ps-xbox": "game_ps_xbox",
+    "community-game-retro-rhythm": "game_retro_rhythm",
+  };
 
   function loadSocialDb(): SocialDb {
     try {
@@ -5419,7 +5247,71 @@ Yêu cầu kịch bản video gồm:
             return nextG;
           });
 
-          // Merge all official Admin starter communities (Study + Cross-Platform Games) missing from DB (unless explicitly deleted)
+          // Consolidate all legacy separate starter game communities into unified 'community-game-max10'
+          const legacyGameIds = Object.keys(LEGACY_GAME_COMMUNITY_SUBCHANNEL_MAP);
+          const legacyGameIdSet = new Set(legacyGameIds);
+          if (!parsed.unifiedGamesMigratedV1 || parsed.groups.some((g: any) => g && legacyGameIdSet.has(g.id))) {
+            let mainGameComm = parsed.groups.find((g: any) => g && g.id === "community-game-max10");
+            const memberMap = new Map<string, any>();
+            if (mainGameComm && Array.isArray(mainGameComm.members)) {
+              mainGameComm.members.forEach((m: any) => {
+                if (m?.id && !isServerAiEntity(m)) memberMap.set(m.id, m);
+              });
+            }
+            if (!Array.isArray(parsed.groupMessages["community-game-max10"])) {
+              parsed.groupMessages["community-game-max10"] = [];
+            }
+            const existingMainMsgIds = new Set(
+              parsed.groupMessages["community-game-max10"].map((m: any) => m?.id).filter(Boolean)
+            );
+            legacyGameIds.forEach((legacyId) => {
+              const legacyGroup = parsed.groups.find((g: any) => g && g.id === legacyId);
+              if (legacyGroup && Array.isArray(legacyGroup.members)) {
+                legacyGroup.members.forEach((m: any) => {
+                  if (m?.id && !isServerAiEntity(m) && !memberMap.has(m.id)) {
+                    memberMap.set(m.id, m);
+                  }
+                });
+              }
+              const targetSubChannel = LEGACY_GAME_COMMUNITY_SUBCHANNEL_MAP[legacyId];
+              const legacyMsgs = parsed.groupMessages[legacyId];
+              if (Array.isArray(legacyMsgs) && legacyMsgs.length > 0) {
+                legacyMsgs.forEach((msg: any) => {
+                  if (!msg || !msg.id || existingMainMsgIds.has(msg.id)) return;
+                  existingMainMsgIds.add(msg.id);
+                  parsed.groupMessages["community-game-max10"].push({
+                    ...msg,
+                    groupId: "community-game-max10",
+                    subChannelId: msg.subChannelId || targetSubChannel,
+                  });
+                });
+                delete parsed.groupMessages[legacyId];
+              }
+            });
+            parsed.groups = parsed.groups
+              .filter((g: any) => g && !legacyGameIdSet.has(g.id))
+              .map((g: any) =>
+                g.id === "community-game-max10"
+                  ? {
+                      ...g,
+                      name: "Cộng Đồng Trò Chơi",
+                      description:
+                        "Tổng hợp tất cả các trò chơi chung & Mini Game (Minecraft, Roblox, Liên Quân, Free Fire, Valorant, Genshin, Mini Game Quiz, Thử thách Toán, Vòng quay XP...) ngay trong Kênh văn bản.",
+                      gameTitle: "Tổng hợp Tất cả Trò chơi & Mini Game",
+                      isPinnedTrending: true,
+                      trendingBadge: "Tất cả Trò chơi",
+                      members: Array.from(memberMap.values()),
+                    }
+                  : g
+              );
+            parsed.groupMessages["community-game-max10"].sort(
+              (a: any, b: any) => (a.createdAt || 0) - (b.createdAt || 0)
+            );
+            parsed.unifiedGamesMigratedV1 = true;
+            upgradedLegacyCopy = true;
+          }
+
+          // Merge all official Admin starter communities (Study + Unified Game + Chat) missing from DB (unless explicitly deleted)
           const starters = getStarterAdminCommunities();
           const starterMap = new Map(starters.map((s: any) => [s.id, s]));
           const existingIds = new Set(parsed.groups.map((g: any) => g && g.id).filter(Boolean));
@@ -5431,6 +5323,15 @@ Yêu cầu kịch bản video gồm:
             const ref = starterMap.get(g.id);
             let nextG = { ...g };
             let changed = false;
+            if (g.id === "community-chat-max10" && g.name !== "Max10 AI Community") {
+              nextG.name = ref.name;
+              nextG.description = ref.description;
+              nextG.avatarIcon = ref.avatarIcon;
+              nextG.pinnedNotice = ref.pinnedNotice;
+              nextG.isPinnedTrending = true;
+              nextG.trendingBadge = ref.trendingBadge;
+              changed = true;
+            }
             if (g.communityCategory === "game" && !g.gamePlatform) {
               nextG.gamePlatform = ref.gamePlatform;
               nextG.gameTitle = ref.gameTitle;
@@ -5454,39 +5355,86 @@ Yêu cầu kịch bản video gồm:
             upgradedLegacyCopy = true;
           }
 
-          // Seed initial welcome notices for the 4 core communities if empty
+          // Seed initial welcome notices for the 4 core communities (including sub-channels)
           const coreWelcomes: Record<string, any[]> = {
             "community-game-max10": [
               {
-                id: "welcome-game-admin",
+                id: "welcome-game-admin-sub",
                 groupId: "community-game-max10",
+                subChannelId: "game_admin",
                 senderId: "admin_game",
                 senderName: "Admin Game",
                 senderRole: "admin",
-                content: "🎮 Chào mừng các bạn đến với **Cộng Đồng Game**! Giải đấu & kèo giao lưu mới sẽ được cập nhật liên tục tại đây.",
+                content: "📢 **THÔNG BÁO CHUNG CỘNG ĐỒNG GAME:** Lịch giải đấu giao lưu cuối tuần & hướng dẫn gọi AI Bot vẽ banner (`/ve`), tạo sơ đồ chiến thuật (`/sodo`).",
+                createdAt: Date.now() - 130000,
+                timestamp: formatVietnamTime(Date.now() - 130000),
+              },
+              {
+                id: "welcome-game-admin",
+                groupId: "community-game-max10",
+                subChannelId: "game_all",
+                senderId: "admin_game",
+                senderName: "Admin Game",
+                senderRole: "admin",
+                content: "🎮 Chào mừng các bạn đến với **Cộng Đồng Game**! Tụ tập chém gió mọi tựa game hoặc chọn kênh riêng Minecraft, Roblox bên trái nhé.",
                 createdAt: Date.now() - 120000,
                 timestamp: formatVietnamTime(Date.now() - 120000),
               },
               {
                 id: "welcome-game-bot",
                 groupId: "community-game-max10",
+                subChannelId: "game_all",
                 senderId: "ai-bot-community",
                 senderName: "AI Bot",
                 senderRole: "ai_tutor",
                 isAi: true,
-                content: "🤖 Gõ `/ve [mô tả]` để vẽ banner/avatar game, `/sodo [chủ đề]` để tạo sơ đồ chiến thuật hoặc `/ai [câu hỏi]` để hỏi đáp ngay!",
+                content: "🤖 Gõ `/ve [mô tả]` hoặc `Vẽ ...`, `/sodo [chủ đề]` hoặc `Tạo sơ đồ tư duy ...`, `/ai` hoặc `@ai [câu hỏi]` để AI Bot hỗ trợ ngay!",
                 createdAt: Date.now() - 110000,
                 timestamp: formatVietnamTime(Date.now() - 110000),
+              },
+              {
+                id: "welcome-game-mc",
+                groupId: "community-game-max10",
+                subChannelId: "game_minecraft",
+                senderId: "admin_game",
+                senderName: "Admin Game",
+                senderRole: "admin",
+                content: "⛏️ **Kênh Minecraft:** Chia sẻ IP server sinh tồn, modpack, shader đẹp và mẹo Redstone cùng anh em nhé!",
+                createdAt: Date.now() - 100000,
+                timestamp: formatVietnamTime(Date.now() - 100000),
+              },
+              {
+                id: "welcome-game-roblox",
+                groupId: "community-game-max10",
+                subChannelId: "game_roblox",
+                senderId: "admin_game",
+                senderName: "Admin Game",
+                senderRole: "admin",
+                content: "🧱 **Kênh Roblox:** Rủ team cày map Blox Fruits, Brookhaven, Doors, Obby mỗi tối tại đây!",
+                createdAt: Date.now() - 90000,
+                timestamp: formatVietnamTime(Date.now() - 90000),
+              },
+              {
+                id: "welcome-game-other",
+                groupId: "community-game-max10",
+                subChannelId: "game_other",
+                senderId: "admin_game",
+                senderName: "Admin Game",
+                senderRole: "admin",
+                content: "🎯 **Kênh Game Khác:** Giao lưu Liên Quân, Free Fire, Valorant, Play Together, Genshin Impact & mọi tựa game khác.",
+                createdAt: Date.now() - 80000,
+                timestamp: formatVietnamTime(Date.now() - 80000),
               },
             ],
             "community-study-max10": [
               {
                 id: "welcome-study-admin",
                 groupId: "community-study-max10",
+                subChannelId: "study_main",
                 senderId: "admin_hoctap",
                 senderName: "Admin Học Tập",
                 senderRole: "admin",
-                content: "📚 Chào mừng đến với **Cộng Đồng Học Tập**! Gõ `/sodo [chủ đề]` để AI Bot vẽ Sơ đồ tư duy ôn thi siêu nhanh nhé.",
+                content: "📚 Chào mừng đến với **Cộng Đồng Học Tập**! Gõ `/sodo [chủ đề]` hoặc `Tạo sơ đồ tư duy [chủ đề]` để AI Bot vẽ sơ đồ ôn thi siêu nhanh nhé.",
                 createdAt: Date.now() - 120000,
                 timestamp: formatVietnamTime(Date.now() - 120000),
               },
@@ -5495,10 +5443,11 @@ Yêu cầu kịch bản video gồm:
               {
                 id: "welcome-boys-admin",
                 groupId: "community-boys-max10",
+                subChannelId: "boys_main",
                 senderId: "admin_nam",
                 senderName: "Admin Con Trai",
                 senderRole: "admin",
-                content: "👦 Chào mừng anh em đến với **Cộng Đồng Con Trai**! Cùng giao lưu thể thao, công nghệ, học tập và thử lệnh `/ve`, `/ai` nhé.",
+                content: "👦 Chào mừng anh em đến với **Cộng Đồng Con Trai**! Cùng giao lưu thể thao, công nghệ, học tập và thử `/ve`, `@ai` nhé.",
                 createdAt: Date.now() - 120000,
                 timestamp: formatVietnamTime(Date.now() - 120000),
               },
@@ -5507,6 +5456,7 @@ Yêu cầu kịch bản video gồm:
               {
                 id: "welcome-girls-admin",
                 groupId: "community-girls-max10",
+                subChannelId: "girls_main",
                 senderId: "admin_nu",
                 senderName: "Admin Con Gái",
                 senderRole: "admin",
@@ -5520,6 +5470,18 @@ Yêu cầu kịch bản video gồm:
             if (!Array.isArray(parsed.groupMessages[gid]) || parsed.groupMessages[gid].length === 0) {
               parsed.groupMessages[gid] = seedMsgs;
               upgradedLegacyCopy = true;
+            } else {
+              const existingIds = new Set(parsed.groupMessages[gid].map((m: any) => m?.id).filter(Boolean));
+              const missingSeeds = seedMsgs.filter((m: any) => !existingIds.has(m.id));
+              if (missingSeeds.length > 0 && gid === "community-game-max10") {
+                const subOnly = missingSeeds.filter(
+                  (m: any) => m.subChannelId && m.subChannelId !== "game_all"
+                );
+                if (subOnly.length > 0) {
+                  parsed.groupMessages[gid] = [...subOnly, ...parsed.groupMessages[gid]];
+                  upgradedLegacyCopy = true;
+                }
+              }
             }
           });
 
@@ -5575,35 +5537,82 @@ Yêu cầu kịch bản video gồm:
       groupMessages: {
         "community-game-max10": [
           {
-            id: "welcome-game-admin",
+            id: "welcome-game-admin-sub",
             groupId: "community-game-max10",
+            subChannelId: "game_admin",
             senderId: "admin_game",
             senderName: "Admin Game",
             senderRole: "admin",
-            content: "🎮 Chào mừng các bạn đến với **Cộng Đồng Game**! Giải đấu & kèo giao lưu mới sẽ được cập nhật liên tục tại đây.",
+            content: "📢 **THÔNG BÁO CHUNG CỘNG ĐỒNG GAME:** Lịch giải đấu giao lưu cuối tuần & hướng dẫn gọi AI Bot vẽ banner (`/ve`), tạo sơ đồ chiến thuật (`/sodo`).",
+            createdAt: Date.now() - 130000,
+            timestamp: formatVietnamTime(Date.now() - 130000),
+          },
+          {
+            id: "welcome-game-admin",
+            groupId: "community-game-max10",
+            subChannelId: "game_all",
+            senderId: "admin_game",
+            senderName: "Admin Game",
+            senderRole: "admin",
+            content: "🎮 Chào mừng các bạn đến với **Cộng Đồng Game**! Tụ tập chém gió mọi tựa game hoặc chọn kênh riêng Minecraft, Roblox bên trái nhé.",
             createdAt: Date.now() - 120000,
             timestamp: formatVietnamTime(Date.now() - 120000),
           },
           {
             id: "welcome-game-bot",
             groupId: "community-game-max10",
+            subChannelId: "game_all",
             senderId: "ai-bot-community",
             senderName: "AI Bot",
             senderRole: "ai_tutor",
             isAi: true,
-            content: "🤖 Gõ `/ve [mô tả]` để vẽ banner/avatar game, `/sodo [chủ đề]` để tạo sơ đồ chiến thuật hoặc `/ai [câu hỏi]` để hỏi đáp ngay!",
+            content: "🤖 Gõ `/ve [mô tả]` hoặc `Vẽ ...`, `/sodo [chủ đề]` hoặc `Tạo sơ đồ tư duy ...`, `/ai` hoặc `@ai [câu hỏi]` để AI Bot hỗ trợ ngay!",
             createdAt: Date.now() - 110000,
             timestamp: formatVietnamTime(Date.now() - 110000),
+          },
+          {
+            id: "welcome-game-mc",
+            groupId: "community-game-max10",
+            subChannelId: "game_minecraft",
+            senderId: "admin_game",
+            senderName: "Admin Game",
+            senderRole: "admin",
+            content: "⛏️ **Kênh Minecraft:** Chia sẻ IP server sinh tồn, modpack, shader đẹp và mẹo Redstone cùng anh em nhé!",
+            createdAt: Date.now() - 100000,
+            timestamp: formatVietnamTime(Date.now() - 100000),
+          },
+          {
+            id: "welcome-game-roblox",
+            groupId: "community-game-max10",
+            subChannelId: "game_roblox",
+            senderId: "admin_game",
+            senderName: "Admin Game",
+            senderRole: "admin",
+            content: "🧱 **Kênh Roblox:** Rủ team cày map Blox Fruits, Brookhaven, Doors, Obby mỗi tối tại đây!",
+            createdAt: Date.now() - 90000,
+            timestamp: formatVietnamTime(Date.now() - 90000),
+          },
+          {
+            id: "welcome-game-other",
+            groupId: "community-game-max10",
+            subChannelId: "game_other",
+            senderId: "admin_game",
+            senderName: "Admin Game",
+            senderRole: "admin",
+            content: "🎯 **Kênh Game Khác:** Giao lưu Liên Quân, Free Fire, Valorant, Play Together, Genshin Impact & mọi tựa game khác.",
+            createdAt: Date.now() - 80000,
+            timestamp: formatVietnamTime(Date.now() - 80000),
           },
         ],
         "community-study-max10": [
           {
             id: "welcome-study-admin",
             groupId: "community-study-max10",
+            subChannelId: "study_main",
             senderId: "admin_hoctap",
             senderName: "Admin Học Tập",
             senderRole: "admin",
-            content: "📚 Chào mừng đến với **Cộng Đồng Học Tập**! Gõ `/sodo [chủ đề]` để AI Bot vẽ Sơ đồ tư duy ôn thi siêu nhanh nhé.",
+            content: "📚 Chào mừng đến với **Cộng Đồng Học Tập**! Gõ `/sodo [chủ đề]` hoặc `Tạo sơ đồ tư duy [chủ đề]` để AI Bot vẽ sơ đồ ôn thi siêu nhanh nhé.",
             createdAt: Date.now() - 120000,
             timestamp: formatVietnamTime(Date.now() - 120000),
           },
@@ -5612,10 +5621,11 @@ Yêu cầu kịch bản video gồm:
           {
             id: "welcome-boys-admin",
             groupId: "community-boys-max10",
+            subChannelId: "boys_main",
             senderId: "admin_nam",
             senderName: "Admin Con Trai",
             senderRole: "admin",
-            content: "👦 Chào mừng anh em đến với **Cộng Đồng Con Trai**! Cùng giao lưu thể thao, công nghệ, học tập và thử lệnh `/ve`, `/ai` nhé.",
+            content: "👦 Chào mừng anh em đến với **Cộng Đồng Con Trai**! Cùng giao lưu thể thao, công nghệ, học tập và thử `/ve`, `@ai` nhé.",
             createdAt: Date.now() - 120000,
             timestamp: formatVietnamTime(Date.now() - 120000),
           },
@@ -5624,6 +5634,7 @@ Yêu cầu kịch bản video gồm:
           {
             id: "welcome-girls-admin",
             groupId: "community-girls-max10",
+            subChannelId: "girls_main",
             senderId: "admin_nu",
             senderName: "Admin Con Gái",
             senderRole: "admin",

@@ -76,6 +76,9 @@ import {
   Palette,
   Lock,
   LogOut,
+  Megaphone,
+  Wand2,
+  Code2,
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { ChatGPTVideoPlayer } from './ChatGPTVideoPlayer';
@@ -97,6 +100,8 @@ import {
 import { UserAccount, ADMIN_ID, ADMIN_NAME, ADMIN_EMAIL, isUserAdmin } from '../../types/auth';
 import { MemberProfileModal, buildSafePublicProfile } from './MemberProfileModal';
 import { DuelArenaModal, loadLocalChallenges, saveLocalChallenge } from './DuelArenaModal';
+import { MiniGameQuizModal } from './MiniGameQuizModal';
+import { MathChallengeModal } from './MathChallengeModal';
 import {
   INITIAL_GROUP_MESSAGES,
   DEFAULT_STUDENT_FRIENDS,
@@ -374,12 +379,192 @@ const COMMUNITY_ROLE_ACCOUNTS: Record<
 };
 
 const CORE_COMMUNITY_ORDER = [
+  'community-chat-max10',
   'community-game-max10',
   'community-study-max10',
   'community-boys-max10',
   'community-girls-max10',
-  'community-chat-max10',
 ];
+
+interface CoreSubChannelConfig {
+  id: string;
+  label: string;
+  desc: string;
+  category?: string;
+  iconType?: 'bullhorn' | 'book' | 'hash' | 'bot';
+}
+
+interface CoreCommunityConfig {
+  defaultChannel: string;
+  questions: string[];
+  subChannels: CoreSubChannelConfig[];
+}
+
+const CORE_COMMUNITY_CONFIGS: Record<string, CoreCommunityConfig> = {
+  'community-game-max10': {
+    defaultChannel: 'game_all',
+    questions: [
+      'Bạn thích chơi tựa game nào nhất (Minecraft, Roblox, hay game khác)?',
+      'Bạn thường online chơi game vào khung giờ nào?',
+    ],
+    subChannels: [
+      { id: 'game_admin', label: '📢 Thông báo chung', desc: 'Tin tức và sự kiện mới nhất của Cộng Đồng Trò Chơi' },
+      { id: 'game_all', label: '🌐 Tất cả Trò chơi', desc: 'Sảnh chung quy tụ toàn bộ trò chơi & Mini Game Max10' },
+      { id: 'game_minigame_quiz', label: '🎮 Mini Game Trắc nghiệm', desc: 'Chơi Mini Game trắc nghiệm kiến thức 10 câu nhận XP & Huy hiệu' },
+      { id: 'game_math_challenge', label: '🧮 Thử thách Toán học', desc: 'Giải nhanh thử thách Đại số & Hình học tích lũy XP' },
+      { id: 'game_xp_spin', label: '🎡 Vòng quay XP Lên Cấp', desc: 'Quay vòng quay may mắn nhận XP Lên Cấp & hiệu ứng đặc biệt' },
+      { id: 'game_minecraft', label: '🧱 Minecraft (Java/Bedrock/PE)', desc: 'Sinh tồn, xây dựng, Redstone, Mod/Addon & server chung đa nền tảng' },
+      { id: 'game_roblox', label: '🧊 Roblox (Blox Fruits, Doors)', desc: 'Tìm team săn boss Blox Fruits, Brookhaven, Doors, Obby & Tycoon' },
+      { id: 'game_lienquan', label: '📱 Liên Quân & Tốc Chiến', desc: 'Tìm đồng đội 5v5 leo Rank, tướng tủ & giải đấu MOBA Mobile' },
+      { id: 'game_freefire_pubg', label: '🔫 Free Fire, PUBG & COD', desc: 'Tạo phòng Custom, lập Squad 4 người săn Booyah / Top 1' },
+      { id: 'game_valorant_cs2', label: '🎯 Valorant, CS2 & Apex', desc: 'Tìm 5-stack Valorant, CS2, Apex Legends, Overwatch 2 trên PC' },
+      { id: 'game_lol_tft', label: '💻 Liên Minh & TFT', desc: 'Đánh Normal, ARAM, leo Rank LoL & chia sẻ đội hình meta TFT' },
+      { id: 'game_hoyoverse', label: '✨ Genshin, HSR & ZZZ', desc: 'Build nhân vật, đi bí cảnh Co-op, Honkai: Star Rail & Zenless Zone Zero' },
+      { id: 'game_fortnite', label: '🏆 Fortnite & Rocket League', desc: 'Lập Squad Zero Build, Creative Map, Fall Guys & Rocket League' },
+      { id: 'game_party_coop', label: '🛸 Among Us & Fall Guys', desc: 'Tạo phòng chơi chung Among Us, Stumble Guys, Goose Goose Duck' },
+      { id: 'game_playtogether', label: '🏝️ Play Together & Blockman', desc: 'Câu cá, trang trí nhà, săn kho báu Play Together & Eggy Party' },
+      { id: 'game_supercell', label: '⚡ Brawl Stars & Clash Royale', desc: 'Lập Clan, cày cúp Brawl Stars, Clash Royale & Clash of Clans' },
+      { id: 'game_sports_racing', label: '⚽ FC Online & eFootball', desc: 'Giao lưu EA FC, FC Online, eFootball, NBA 2K & đua xe Asphalt' },
+      { id: 'game_board_web', label: '♟️ Cờ Vua, Ma Sói & Web', desc: 'Đấu trí Chess.com, Cờ Tướng, Ma Sói, Skribbl.io & game trình duyệt' },
+      { id: 'game_steam_sandbox', label: '🖥️ Steam, GTA V & Terraria', desc: 'GTA V, Terraria, Stardew Valley, Dota 2, Palworld & Steam PC' },
+      { id: 'game_nintendo', label: '🕹️ Nintendo Switch', desc: 'Mario Kart 8, Pokémon, Zelda, Smash Bros & Splatoon 3' },
+      { id: 'game_ps_xbox', label: '🎮 PlayStation & Xbox', desc: 'PS5, Xbox Series X/S, Elden Ring, Spider-Man & God of War' },
+      { id: 'game_retro_rhythm', label: '👾 osu!, Đối kháng & Retro', desc: 'osu!, Project Sekai, Street Fighter, Tekken & game Retro/Arcade' },
+      { id: 'game_other', label: '🎯 Game Khác', desc: 'Thảo luận & rủ bạn chơi mọi tựa game khác' },
+    ],
+  },
+  'community-study-max10': {
+    defaultChannel: 'study_main',
+    questions: [
+      'Bạn đang học lớp mấy hoặc đang quan tâm môn học nào nhất?',
+      'Mục tiêu học tập sắp tới của bạn là gì?',
+    ],
+    subChannels: [
+      { id: 'study_main', label: '📖 Góc Học Tập & Sơ Đồ', desc: 'Tài liệu ôn thi & vẽ sơ đồ tư duy cùng AI' },
+    ],
+  },
+  'community-boys-max10': {
+    defaultChannel: 'boys_main',
+    questions: [
+      'Sở thích ngoài giờ học của bạn là gì (Thể thao, Game, Công nghệ)?',
+      'Gửi một lời chào làm quen tới anh em trong nhóm nhé!',
+    ],
+    subChannels: [
+      { id: 'boys_main', label: '⚽ Trò chuyện Con trai', desc: 'Thảo luận thể thao, công nghệ & chém gió' },
+    ],
+  },
+  'community-girls-max10': {
+    defaultChannel: 'girls_main',
+    questions: [
+      'Chủ đề bạn yêu thích nhất là gì (Học tập, Làm đẹp, Âm nhạc, Phim ảnh)?',
+      'Gửi một lời chào dễ thương tới các bạn nữ trong nhóm nhé!',
+    ],
+    subChannels: [
+      { id: 'girls_main', label: '🌸 Trò chuyện Con gái', desc: 'Chia sẻ sở thích, học tập và tâm sự' },
+    ],
+  },
+  'community-chat-max10': {
+    defaultChannel: 'tro_chuyen_chung',
+    questions: [
+      'Bạn muốn khám phá chủ đề AI hoặc môn học nào cùng cộng đồng Max10 AI?',
+      'Gửi lời chào tới mọi người và thử gõ @Max10 nhé!',
+    ],
+    subChannels: [
+      {
+        id: 'thong_bao',
+        label: 'thông-báo',
+        desc: 'Cập nhật tính năng mới từ Max10 AI',
+        category: 'Thông tin chung',
+        iconType: 'bullhorn',
+      },
+      {
+        id: 'noi_quy_max10',
+        label: 'nội-quy',
+        desc: 'Quy định sinh hoạt tại cộng đồng Max10 AI',
+        category: 'Thông tin chung',
+        iconType: 'book',
+      },
+      {
+        id: 'tro_chuyen_chung',
+        label: 'trò-chuyện-chung',
+        desc: 'Nơi giao lưu tự do của thành viên Max10 AI',
+        category: 'Thảo luận & AI',
+        iconType: 'hash',
+      },
+      {
+        id: 'chia_se_prompt',
+        label: 'chia-sẻ-prompt',
+        desc: 'Cùng chia sẻ câu lệnh AI hay và hiệu quả',
+        category: 'Thảo luận & AI',
+        iconType: 'hash',
+      },
+      {
+        id: 'hoi_dap_max10_bot',
+        label: 'hỏi-đáp-max10-bot',
+        desc: 'Gõ @Max10 để hỏi trực tiếp trợ lý AI',
+        category: 'Thảo luận & AI',
+        iconType: 'bot',
+      },
+    ],
+  },
+};
+
+const LEGACY_GAME_TO_SUBCHANNEL: Record<string, string> = {
+  'community-game-minecraft': 'game_minecraft',
+  'community-game-roblox': 'game_roblox',
+  'community-game-hoyoverse': 'game_hoyoverse',
+  'community-game-fortnite': 'game_fortnite',
+  'community-game-party-coop': 'game_party_coop',
+  'community-game-sports-racing': 'game_sports_racing',
+  'community-game-board-web': 'game_board_web',
+  'community-game-lienquan': 'game_lienquan',
+  'community-game-pubg-ff': 'game_freefire_pubg',
+  'community-game-supercell': 'game_supercell',
+  'community-game-playtogether': 'game_playtogether',
+  'community-game-lol-tft': 'game_lol_tft',
+  'community-game-valorant-cs2': 'game_valorant_cs2',
+  'community-game-steam-sandbox': 'game_steam_sandbox',
+  'community-game-nintendo': 'game_nintendo',
+  'community-game-ps-xbox': 'game_ps_xbox',
+  'community-game-retro-rhythm': 'game_retro_rhythm',
+};
+
+const LEGACY_SEPARATE_GAME_IDS = new Set(Object.keys(LEGACY_GAME_TO_SUBCHANNEL));
+
+const getDefaultChannelForGroup = (groupId?: string): string =>
+  (groupId && CORE_COMMUNITY_CONFIGS[groupId]?.defaultChannel) || 'general';
+
+const getActiveChannelMeta = (
+  channelId: string,
+  groupId?: string
+): { label: string; desc: string } => {
+  if (groupId && CORE_COMMUNITY_CONFIGS[groupId]) {
+    const sub = CORE_COMMUNITY_CONFIGS[groupId].subChannels.find((c) => c.id === channelId);
+    if (sub) return { label: sub.label, desc: sub.desc };
+  }
+  if (channelId === 'admin_news') {
+    return {
+      label: 'thông-báo-admin',
+      desc: 'Cập nhật hệ thống & Trả lời trực tiếp từ Admin',
+    };
+  }
+  if (channelId === 'ai_tutor') {
+    return {
+      label: 'hỏi-bài-ai',
+      desc: 'Hỏi bài Gia sư @Max10 AI theo chủ đề',
+    };
+  }
+  if (channelId === 'duel') {
+    return {
+      label: 'thi-đấu-kiến-thức',
+      desc: 'Đấu trường Thi đấu kiến thức',
+    };
+  }
+  return {
+    label: 'thảo-luận-chung',
+    desc: 'Kênh thảo luận chung của cộng đồng / nhóm',
+  };
+};
 
 const STORAGE_KEY_GROUPS = 'max10_real_groups_v15';
 const STORAGE_KEY_GROUP_MSGS = 'max10_real_group_messages_v15';
@@ -389,6 +574,7 @@ const STORAGE_KEY_DIRECT_MSGS = 'max10_real_direct_chat_messages_v15';
 const STORAGE_KEY_REPLIED_ADMIN_THREADS = 'max10_replied_admin_threads_v1';
 const STORAGE_KEY_HIDDEN_BROADCAST_AT = 'max10_hidden_other_broadcast_at_v1';
 const STORAGE_KEY_READ_GROUP_SERVERS = 'max10_read_group_servers_v1';
+const STORAGE_KEY_JOINED_COMMUNITIES = 'max10_joined_communities_v1';
 
 interface ReadGroupServerState {
   lastReadMsgId: string;
@@ -538,6 +724,9 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
   // Communities Directory & Admin Game Pinning / Approval / Management state
   const [showCommunitiesView, setShowCommunitiesView] = useState<boolean>(false);
+  const [showMiniGameQuizModal, setShowMiniGameQuizModal] = useState<boolean>(false);
+  const [showMathChallengeModal, setShowMathChallengeModal] = useState<boolean>(false);
+  const [gameChannelSearch, setGameChannelSearch] = useState<string>('');
   const [communityCategoryFilter, setCommunityCategoryFilter] = useState<'all' | 'game' | 'chat' | 'study' | 'pending'>('all');
   const [communityPlatformFilter, setCommunityPlatformFilter] = useState<'all' | 'Cross-Platform' | 'Mobile' | 'PC' | 'Console'>('all');
   const [communitySearchQuery, setCommunitySearchQuery] = useState<string>('');
@@ -637,7 +826,20 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     typeof window !== 'undefined' ? window.innerWidth >= 1200 : false
   );
   const [rightDrawerTab, setRightDrawerTab] = useState<'members' | 'files'>('members');
-  const [discordChannel, setDiscordChannel] = useState<'admin_news' | 'general' | 'ai_tutor' | 'duel'>('general');
+  const [discordChannel, setDiscordChannel] = useState<string>('general');
+  const [joinedCommunities, setJoinedCommunities] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_JOINED_COMMUNITIES);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch {}
+    return {};
+  });
+  const [welcomeAnswers, setWelcomeAnswers] = useState<Record<number, string>>({});
+  const [globalBanner, setGlobalBanner] = useState<string | null>(null);
+  const globalBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [myDecoration, setMyDecoration] = useState<UserDecorationConfig>(() =>
     loadLocalDecorations(isRealAdmin)
   );
@@ -733,7 +935,9 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.filter((g: ChatGroup) => !isLegacyAutoCreatedClassGroup(g));
+          return parsed.filter(
+            (g: ChatGroup) => !isLegacyAutoCreatedClassGroup(g) && !LEGACY_SEPARATE_GAME_IDS.has(g.id)
+          );
         }
       }
     } catch (e) {
@@ -745,6 +949,31 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
   const [activeGroupId, setActiveGroupId] = useState<string>(() => {
     return groups[0]?.id || '';
   });
+
+  useEffect(() => {
+    if (!activeGroupId) return;
+    const cfg = CORE_COMMUNITY_CONFIGS[activeGroupId];
+    if (cfg) {
+      const validIds = new Set([
+        ...cfg.subChannels.map((c) => c.id),
+        'admin_news',
+        'ai_tutor',
+        'duel',
+      ]);
+      setDiscordChannel((prev) => (validIds.has(prev) ? prev : cfg.defaultChannel));
+    } else {
+      setDiscordChannel((prev) =>
+        prev === 'admin_news' || prev === 'general' || prev === 'ai_tutor' || prev === 'duel'
+          ? prev
+          : 'general'
+      );
+    }
+  }, [activeGroupId]);
+
+  const isCommunityLockedForUser = (groupId?: string): boolean => {
+    if (!groupId || groupId === 'community-game-max10' || !CORE_COMMUNITY_CONFIGS[groupId]) return false;
+    return !joinedCommunities[`${activeUserId}::${groupId}`];
+  };
 
   // Friends list state: ONLY actual friends added by user (no fake strangers)
   const [friends, setFriends] = useState<FriendItem[]>(() => {
@@ -1181,7 +1410,12 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         const data = await res.json();
         if (data && data.success && Array.isArray(data.groups)) {
           const cleanServerGroups = data.groups
-            .filter((g: ChatGroup) => !isLegacyAutoCreatedClassGroup(g) && !deletedGroupIdsRef.current.has(g.id))
+            .filter(
+              (g: ChatGroup) =>
+                !isLegacyAutoCreatedClassGroup(g) &&
+                !LEGACY_SEPARATE_GAME_IDS.has(g.id) &&
+                !deletedGroupIdsRef.current.has(g.id)
+            )
             .map((g: ChatGroup) =>
               g.isCommunity
                 ? { ...g, onlyAdminCanAdd: false, members: (g.members || []).filter((m) => !isAiEntity(m)) }
@@ -1192,7 +1426,12 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           setGroups((prev) => {
             const map = new Map<string, ChatGroup>();
             prev
-              .filter((g) => !isLegacyAutoCreatedClassGroup(g) && !deletedGroupIdsRef.current.has(g.id))
+              .filter(
+                (g) =>
+                  !isLegacyAutoCreatedClassGroup(g) &&
+                  !LEGACY_SEPARATE_GAME_IDS.has(g.id) &&
+                  !deletedGroupIdsRef.current.has(g.id)
+              )
               .forEach((g: ChatGroup) => map.set(g.id, g));
             cleanServerGroups.forEach((g: ChatGroup) => {
               const existing = map.get(g.id);
@@ -1271,6 +1510,143 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     } catch {}
   };
 
+  // Open the unified Cộng Đồng Trò Chơi so ALL games appear inside Kênh văn bản
+  const handleOpenUnifiedGameCommunity = (preferredChannel?: string) => {
+    const existingGameComm =
+      groups.find((g) => g.id === 'community-game-max10') ||
+      serverGroups.find((g) => g.id === 'community-game-max10');
+    if (!existingGameComm) {
+      const fallbackGameComm: ChatGroup = {
+        id: 'community-game-max10',
+        name: 'Cộng Đồng Trò Chơi',
+        description:
+          'Tổng hợp tất cả các trò chơi chung & Mini Game ngay trong Kênh văn bản.',
+        grade: 'Lớp 9',
+        subject: 'Trò chơi · Cross-Platform',
+        avatarIcon: '🎮',
+        createdAt: Date.now(),
+        createdBy: 'admin-mac-khanh-duy',
+        createdByName: 'Ban Quản Trị Max10',
+        channelAdminId: 'admin_game',
+        channelAdminName: 'Admin Game',
+        createdByAdmin: true,
+        isCommunity: true,
+        communityCategory: 'game',
+        gamePlatform: 'Cross-Platform',
+        gameTitle: 'Tổng hợp Tất cả Trò chơi & Mini Game',
+        gameGenre: 'Đa thể loại',
+        isPinnedTrending: true,
+        trendingBadge: 'Tất cả Trò chơi',
+        approvalStatus: 'approved',
+        isPublic: true,
+        onlyAdminCanAdd: false,
+        code: 'CD-TROCHOI',
+        pinnedNotice:
+          '🎮 Cộng Đồng Trò Chơi — Tất cả các trò chơi đều nằm trong mục Kênh văn bản bên trái!',
+        members: activeUserId
+          ? [
+              {
+                id: activeUserId,
+                name: activeUserName,
+                avatar: activeUserAvatar || '',
+                role: isRealAdmin ? 'admin' : 'member',
+                school: currentUser?.schoolName || 'Thành viên Max10',
+              },
+            ]
+          : [],
+        mutedUsers: {},
+      };
+      setGroups((prev) =>
+        prev.some((g) => g.id === 'community-game-max10') ? prev : [fallbackGameComm, ...prev]
+      );
+    }
+
+    setShowCommunitiesView(false);
+    setActiveMode('group');
+    setActiveGroupId('community-game-max10');
+    setSidebarTab('groups');
+    setCollapsedDiscordCats((prev) => ({ ...prev, text: false }));
+    setDiscordChannel(preferredChannel || 'game_all');
+    setWelcomeAnswers({});
+    setMobileShowChat(false);
+    markGroupServerAsRead('community-game-max10');
+    syncGroupMessages('community-game-max10');
+  };
+
+  const handleOpenMax10Community = (preferredChannel?: string) => {
+    const existingMainComm =
+      groups.find((g) => g.id === 'community-chat-max10') ||
+      serverGroups.find((g) => g.id === 'community-chat-max10');
+    if (!existingMainComm) {
+      const fallbackMainComm: ChatGroup = {
+        id: 'community-chat-max10',
+        name: 'Max10 AI Community',
+        description:
+          'Cộng đồng chính thức Max10 AI — Cập nhật tính năng mới, nội quy, trò chuyện tự do, chia sẻ prompt AI và hỏi đáp trực tiếp cùng @Max10.',
+        grade: 'Lớp 9',
+        subject: 'Thảo luận & AI',
+        avatarIcon: 'M10',
+        createdAt: Date.now(),
+        createdBy: 'admin-mac-khanh-duy',
+        createdByName: 'Ban Quản Trị Max10',
+        channelAdminId: 'super_admin',
+        channelAdminName: 'Tổng Quản Trị',
+        createdByAdmin: true,
+        isCommunity: true,
+        communityCategory: 'chat',
+        isPinnedTrending: true,
+        trendingBadge: 'Official M10',
+        approvalStatus: 'approved',
+        isPublic: true,
+        onlyAdminCanAdd: false,
+        code: 'CD-MAX10-AI',
+        pinnedNotice:
+          '🤖 Chào mừng bạn đến với Max10 AI Community! Gõ @Max10 kèm câu hỏi hoặc vào #hỏi-đáp-max10-bot để được trợ lý AI giải đáp ngay.',
+        members: activeUserId
+          ? [
+              {
+                id: activeUserId,
+                name: activeUserName,
+                avatar: activeUserAvatar || '',
+                role: isRealAdmin ? 'admin' : 'member',
+                school: currentUser?.schoolName || 'Thành viên M10',
+              },
+            ]
+          : [],
+        mutedUsers: {},
+      };
+      setGroups((prev) =>
+        prev.some((g) => g.id === 'community-chat-max10') ? prev : [fallbackMainComm, ...prev]
+      );
+    }
+
+    setShowCommunitiesView(false);
+    setActiveMode('group');
+    setActiveGroupId('community-chat-max10');
+    setSidebarTab('groups');
+    setCollapsedDiscordCats((prev) => ({ ...prev, text: false }));
+    setDiscordChannel(preferredChannel || 'tro_chuyen_chung');
+    setWelcomeAnswers({});
+    setMobileShowChat(true);
+    markGroupServerAsRead('community-chat-max10');
+    syncGroupMessages('community-chat-max10');
+  };
+
+  const handleSelectGameChannel = (channelId: string) => {
+    setDiscordChannel(channelId);
+    setShowCommunitiesView(false);
+    setMobileShowChat(true);
+    if ((channelId === 'ai_tutor' || channelId === 'hoi_dap_max10_bot') && !inputMessage.trim()) {
+      setInputMessage('@Max10 ');
+    } else if (channelId === 'game_minigame_quiz') {
+      setShowMiniGameQuizModal(true);
+    } else if (channelId === 'game_math_challenge') {
+      setShowMathChallengeModal(true);
+    } else if (channelId === 'game_xp_spin') {
+      window.dispatchEvent(new CustomEvent('max10_open_xp_spin'));
+    }
+  };
+
   // Auto-switch to conversation if notified + listen to ContextPanel selection & modals
   useEffect(() => {
     const checkTargetOpen = () => {
@@ -1279,13 +1655,17 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         if (raw) {
           const parsed = JSON.parse(raw);
           if (parsed && parsed.targetId && Date.now() - parsed.timestamp < 15000) {
-            setShowCommunitiesView(false);
-            if (parsed.type === 'group') {
-              setActiveMode('group');
-              setActiveGroupId(parsed.targetId);
+            if (parsed.type === 'group' && (parsed.targetId === 'community-game-max10' || LEGACY_SEPARATE_GAME_IDS.has(parsed.targetId))) {
+              handleOpenUnifiedGameCommunity(LEGACY_GAME_TO_SUBCHANNEL[parsed.targetId]);
             } else {
-              setActiveMode('direct');
-              setActiveFriendId(parsed.targetId);
+              setShowCommunitiesView(false);
+              if (parsed.type === 'group') {
+                setActiveMode('group');
+                setActiveGroupId(parsed.targetId);
+              } else {
+                setActiveMode('direct');
+                setActiveFriendId(parsed.targetId);
+              }
             }
             localStorage.removeItem('max10_target_chat_open');
           }
@@ -1298,6 +1678,10 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     const onCommunitySelect = (e: Event) => {
       const detail = (e as CustomEvent<{ type: 'group' | 'direct'; id: string }>).detail;
       if (!detail?.id) return;
+      if (detail.type === 'group' && (detail.id === 'community-game-max10' || LEGACY_SEPARATE_GAME_IDS.has(detail.id))) {
+        handleOpenUnifiedGameCommunity(LEGACY_GAME_TO_SUBCHANNEL[detail.id]);
+        return;
+      }
       setShowCommunitiesView(false);
       if (detail.type === 'group') {
         setActiveMode('group');
@@ -1308,8 +1692,16 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       }
     };
 
+    const onOpenGameCommunity = () => {
+      handleOpenUnifiedGameCommunity();
+    };
+
     const onOpenCommunities = (e: Event) => {
       const detail = (e as CustomEvent<{ category?: 'all' | 'game' | 'chat' | 'study' | 'pending' }>).detail;
+      if (detail?.category === 'game') {
+        handleOpenUnifiedGameCommunity();
+        return;
+      }
       if (detail?.category) {
         setCommunityCategoryFilter(detail.category);
         if (detail.category === 'study' || detail.category === 'chat') setCommunityPlatformFilter('all');
@@ -1334,12 +1726,14 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     };
 
     window.addEventListener('max10_community_select', onCommunitySelect);
+    window.addEventListener('max10_open_game_community', onOpenGameCommunity);
     window.addEventListener('max10_open_communities', onOpenCommunities);
     window.addEventListener('max10_open_notifications_in_chat', onOpenNotificationsInChat);
     window.addEventListener('max10_community_modal', onCommunityModal);
     return () => {
       clearInterval(interval);
       window.removeEventListener('max10_community_select', onCommunitySelect);
+      window.removeEventListener('max10_open_game_community', onOpenGameCommunity);
       window.removeEventListener('max10_open_communities', onOpenCommunities);
       window.removeEventListener('max10_open_notifications_in_chat', onOpenNotificationsInChat);
       window.removeEventListener('max10_community_modal', onCommunityModal);
@@ -1800,7 +2194,12 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
   const communityGroups = useMemo(() => {
     const map = new Map<string, ChatGroup>();
     [...groups, ...serverGroups].forEach((g) => {
-      if (g && g.isCommunity && !deletedGroupIdsRef.current.has(g.id)) {
+      if (
+        g &&
+        g.isCommunity &&
+        !LEGACY_SEPARATE_GAME_IDS.has(g.id) &&
+        !deletedGroupIdsRef.current.has(g.id)
+      ) {
         const cleanMembers = (g.members || []).filter((m) => !isAiEntity(m));
         const existing = map.get(g.id);
         if (existing) {
@@ -2637,6 +3036,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     const userMsg: GroupChatMessage = {
       id: 'msg-' + Date.now(),
       groupId: activeGroupId,
+      subChannelId: discordChannel,
       senderId: activeUserId,
       senderName: activeUserName,
       senderAvatar: activeUserAvatar,
@@ -2732,6 +3132,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           const adminReplyMsg: GroupChatMessage = {
             id: 'admin-auto-' + Date.now(),
             groupId: activeGroupId,
+            subChannelId: discordChannel,
             senderId: ADMIN_ID,
             senderName: 'Quản trị viên Max10 (Tự động)',
             senderAvatar: REAL_ADMIN_AVATAR,
@@ -2763,9 +3164,15 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       }
     }
 
-    const isSlashCommand = /^\/(ve|sodo|ai)(\s|$)/i.test(text);
+    const isBotTrigger =
+      /^\/(ve|sodo|ai)(\s|$)/i.test(text) ||
+      /^@ai(\s|$|[.,!?])/i.test(lower) ||
+      lower.startsWith('vẽ ') ||
+      lower.startsWith('ve ') ||
+      lower.includes('sơ đồ tư duy') ||
+      lower.includes('so do tu duy');
 
-    if (isSlashCommand) {
+    if (isBotTrigger) {
       setIsAiReplying(true);
       try {
         const commCat: 'game' | 'chat' | 'study' =
@@ -2794,6 +3201,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         const botMsg: GroupChatMessage = {
           id: 'bot-reply-' + Date.now(),
           groupId: activeGroupId,
+          subChannelId: discordChannel,
           senderId: 'ai-bot-community',
           senderName: 'AI Bot',
           senderAvatar: '/max10-avatar.jpg',
@@ -2835,13 +3243,12 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       }
     }
 
-    // Trigger @Max10 AI in group/community when explicitly tagged OR inside #hoi-max10-ai channel
+    // Trigger @Max10 AI in group/community when explicitly tagged OR inside #hoi-max10-ai / #hoi-dap-max10-bot channel
     const isTaggingAi =
-      !isSlashCommand &&
+      !isBotTrigger &&
       (lower.includes('@max10 ai') ||
         lower.includes('@max10') ||
-        /(^|\s)@ai(\s|$|[.,!?])/.test(lower) ||
-        (discordChannel === 'ai_tutor' && !isTaggingAdmin));
+        ((discordChannel === 'ai_tutor' || discordChannel === 'hoi_dap_max10_bot') && !isTaggingAdmin));
 
     if (isTaggingAi) {
       setIsAiReplying(true);
@@ -2893,6 +3300,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         const aiGroupReply: GroupChatMessage = {
           id: 'ai-group-' + Date.now(),
           groupId: activeGroupId,
+          subChannelId: discordChannel,
           senderId: 'ai-max10-group',
           senderName: 'Max10 AI (AI trong cộng đồng)',
           senderAvatar: '/max10-avatar.jpg',
@@ -3267,6 +3675,11 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
     const isAlreadyMember = (targetGroup.members || []).some((m) => m.id === activeUserId);
     if (isAlreadyMember) {
+      if (targetGroup.id === 'community-game-max10') {
+        handleOpenUnifiedGameCommunity();
+        setShowSearchGroupsModal(false);
+        return;
+      }
       setShowCommunitiesView(false);
       setActiveGroupId(targetGroup.id);
       setActiveMode('group');
@@ -3310,10 +3723,14 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
       });
     } catch {}
 
-    setShowCommunitiesView(false);
-    setActiveGroupId(targetGroup.id);
-    setActiveMode('group');
-    setSidebarTab('groups');
+    if (targetGroup.id === 'community-game-max10') {
+      handleOpenUnifiedGameCommunity();
+    } else {
+      setShowCommunitiesView(false);
+      setActiveGroupId(targetGroup.id);
+      setActiveMode('group');
+      setSidebarTab('groups');
+    }
     setShowSearchGroupsModal(false);
     await syncGroupMessages(targetGroup.id);
     await syncServerGroups();
@@ -3566,7 +3983,8 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     } else {
       setActiveMode('group');
       setActiveGroupId(item.id);
-      setDiscordChannel('general');
+      setDiscordChannel(getDefaultChannelForGroup(item.id));
+      setWelcomeAnswers({});
       markGroupServerAsRead(item.id);
     }
   };
@@ -3651,6 +4069,17 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           return true;
         })
         .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    } else if (CORE_COMMUNITY_CONFIGS[activeGroupId]) {
+      const defCh = CORE_COMMUNITY_CONFIGS[activeGroupId].defaultChannel;
+      if (discordChannel === defCh) {
+        scopedMsgs = cleanMsgs.filter((m) => !m.subChannelId || m.subChannelId === defCh);
+      } else {
+        scopedMsgs = cleanMsgs.filter((m) => m.subChannelId === discordChannel);
+      }
+    } else {
+      scopedMsgs = cleanMsgs.filter(
+        (m) => !m.subChannelId || m.subChannelId === discordChannel || discordChannel === 'general'
+      );
     }
 
     if (!chatSearchText.trim()) return scopedMsgs;
@@ -4029,6 +4458,64 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
     onLoginSuccess?.(newAccount);
   };
 
+  const handleCompleteWelcome = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeGroup || !CORE_COMMUNITY_CONFIGS[activeGroup.id]) return;
+    const cfg = CORE_COMMUNITY_CONFIGS[activeGroup.id];
+    const allFilled = cfg.questions.every((_, idx) => (welcomeAnswers[idx] || '').trim().length > 0);
+    if (!allFilled) {
+      setToastMessage('Vui lòng trả lời đầy đủ các câu hỏi chào mừng để vào phòng chat!');
+      setTimeout(() => setToastMessage(''), 3000);
+      return;
+    }
+
+    const qaLines = cfg.questions
+      .map((q, idx) => `• **${q}** → ${welcomeAnswers[idx]?.trim()}`)
+      .join('\n');
+    const nowMs = Date.now();
+    const announcementMsg: GroupChatMessage = {
+      id: `welcome-join-${nowMs}`,
+      groupId: activeGroup.id,
+      subChannelId: cfg.defaultChannel,
+      senderId: 'system-welcome',
+      senderName: 'Hệ thống Chào mừng',
+      senderRole: 'system',
+      isAnnouncement: true,
+      content: `🎉 **CHÀO MỪNG THÀNH VIÊN MỚI!**\n**@${activeUserName}** vừa chính thức gia nhập **${activeGroup.name}**!\n\n${qaLines}`,
+      createdAt: nowMs,
+      timestamp: formatAccurateTime(nowMs),
+    };
+
+    setGroupMessages((prev) => ({
+      ...prev,
+      [activeGroup.id]: [...(prev[activeGroup.id] || []), announcementMsg],
+    }));
+
+    fetch(`/api/groups/${encodeURIComponent(activeGroup.id)}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(announcementMsg),
+    }).catch(() => {});
+
+    const joinKey = `${activeUserId}::${activeGroup.id}`;
+    setJoinedCommunities((prev) => {
+      const next = { ...prev, [joinKey]: true };
+      try {
+        localStorage.setItem(STORAGE_KEY_JOINED_COMMUNITIES, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    if (globalBannerTimerRef.current) clearTimeout(globalBannerTimerRef.current);
+    setGlobalBanner(
+      `📢 Thông báo tới tất cả mọi người: ${activeUserName} vừa gia nhập ${activeGroup.name}!`
+    );
+    globalBannerTimerRef.current = setTimeout(() => setGlobalBanner(null), 8000);
+
+    setWelcomeAnswers({});
+    setDiscordChannel(cfg.defaultChannel);
+  };
+
   const handleDownloadAttachment = async (url: string, label: string) => {
     try {
       const res = await fetch(url);
@@ -4213,6 +4700,23 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
         </div>
       )}
 
+      {globalBanner && (
+        <div className="bg-[#23a559] text-white px-4 py-2 text-xs sm:text-sm font-bold flex items-center justify-between gap-3 shrink-0 shadow-sm z-40">
+          <div className="flex items-center gap-2 min-w-0">
+            <Bell className="w-4 h-4 shrink-0" />
+            <span className="truncate">{globalBanner}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setGlobalBanner(null)}
+            className="p-1 rounded hover:bg-white/20 text-white shrink-0 cursor-pointer"
+            title="Đóng thông báo"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* DISCORD 4-COLUMN WORKSPACE: 1. Server Rail | 2. Channels / DM Sidebar | 3. Chat Area | 4. Member List */}
       <div className="flex flex-1 min-h-0 w-full overflow-hidden relative">
         {/* 1. DISCORD SERVER / GUILD RAIL */}
@@ -4259,7 +4763,9 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
           {/* Server Icons for Communities & Study Groups */}
           <div className="flex flex-col items-center gap-2 w-full">
-            {groups.map((g) => {
+            {groups
+              .filter((g) => !LEGACY_SEPARATE_GAME_IDS.has(g.id))
+              .map((g) => {
               const isSelectedServer = activeMode === 'group' && activeGroupId === g.id && !showCommunitiesView;
               const unreadCount = getUnreadCountInServer(g.id);
               const hasUnreadInServer = unreadCount > 0;
@@ -4277,10 +4783,15 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      if (g.id === 'community-game-max10') {
+                        handleOpenUnifiedGameCommunity();
+                        return;
+                      }
                       setShowCommunitiesView(false);
                       setActiveMode('group');
                       setActiveGroupId(g.id);
-                      setDiscordChannel('general');
+                      setDiscordChannel(getDefaultChannelForGroup(g.id));
+                      setWelcomeAnswers({});
                       setMobileShowChat(true);
                       markGroupServerAsRead(g.id);
                     }}
@@ -4296,7 +4807,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                     }${
                       g.isCommunity
                         ? g.communityCategory === 'game'
-                          ? ' · Cộng đồng Trò chơi'
+                          ? ' · Cộng đồng Trò chơi (Tất cả trò chơi trong Kênh văn bản)'
                           : g.communityCategory === 'chat'
                           ? ' · Cộng đồng Trò chuyện tự do'
                           : ' · Cộng đồng Học tập'
@@ -4304,12 +4815,16 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                     }`}
                   >
                     <span>
-                      {g.avatarIcon ||
+                      {g.id === 'community-chat-max10' ? (
+                        <span className="text-sm font-black tracking-tight">M10</span>
+                      ) : (
+                        g.avatarIcon ||
                         (g.communityCategory === 'game'
                           ? '🎮'
                           : g.communityCategory === 'chat'
                           ? '💬'
-                          : '📚')}
+                          : '📚')
+                      )}
                     </span>
                     {hasUnreadInServer && !isSelectedServer && (
                       <span
@@ -4335,19 +4850,47 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
           <div className={`w-8 h-[2px] rounded-full shrink-0 my-0.5 ${isDark ? 'bg-[#35363c]' : 'bg-slate-300'}`} />
 
-          {/* Discord Community Category Quick Access (Trò chơi · Trò chuyện tự do · Học tập) */}
+          {/* Discord Community Quick Access (Cộng đồng Prompt · Hỗ trợ Bot · Trò chơi · Học tập) */}
+          <div className="relative flex items-center justify-center w-full group">
+            <button
+              type="button"
+              onClick={() => handleOpenMax10Community('chia_se_prompt')}
+              className={`w-12 h-12 flex items-center justify-center transition-all duration-200 cursor-pointer ${
+                activeMode === 'group' && activeGroupId === 'community-chat-max10' && discordChannel === 'chia_se_prompt'
+                  ? 'rounded-[16px] bg-[#23a559] text-white shadow-sm'
+                  : isDark
+                  ? 'rounded-[24px] hover:rounded-[16px] bg-[#313338] text-[#dbdee1] hover:bg-[#23a559] hover:text-white'
+                  : 'rounded-[24px] hover:rounded-[16px] bg-white text-slate-700 hover:bg-[#23a559] hover:text-white shadow-2xs'
+              }`}
+              title="Cộng đồng Prompt · #chia-sẻ-prompt"
+            >
+              <Wand2 className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="relative flex items-center justify-center w-full group">
+            <button
+              type="button"
+              onClick={() => handleOpenMax10Community('hoi_dap_max10_bot')}
+              className={`w-12 h-12 flex items-center justify-center transition-all duration-200 cursor-pointer ${
+                activeMode === 'group' && activeGroupId === 'community-chat-max10' && discordChannel === 'hoi_dap_max10_bot'
+                  ? 'rounded-[16px] bg-[#5865f2] text-white shadow-sm'
+                  : isDark
+                  ? 'rounded-[24px] hover:rounded-[16px] bg-[#313338] text-[#dbdee1] hover:bg-[#5865f2] hover:text-white'
+                  : 'rounded-[24px] hover:rounded-[16px] bg-white text-slate-700 hover:bg-[#5865f2] hover:text-white shadow-2xs'
+              }`}
+              title="Hỗ trợ Kỹ thuật & Hỏi đáp @Max10 Bot"
+            >
+              <Code2 className="w-5 h-5" />
+            </button>
+          </div>
+
           {[
             {
               cat: 'game' as const,
               emoji: '🎮',
-              title: 'Cộng đồng Trò chơi',
+              title: 'Cộng đồng Trò chơi (Tất cả trò chơi trong Kênh văn bản)',
               activeBg: 'bg-[#23a559]',
-            },
-            {
-              cat: 'chat' as const,
-              emoji: '💬',
-              title: 'Cộng đồng Trò chuyện tự do',
-              activeBg: 'bg-sky-500',
             },
             {
               cat: 'study' as const,
@@ -4356,7 +4899,11 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
               activeBg: 'bg-indigo-500',
             },
           ].map((item) => {
-            const isCatSelected = showCommunitiesView && communityCategoryFilter === item.cat;
+            const isCatSelected =
+              item.cat === 'game'
+                ? (!showCommunitiesView && activeMode === 'group' && activeGroupId === 'community-game-max10') ||
+                  (showCommunitiesView && communityCategoryFilter === 'game')
+                : showCommunitiesView && communityCategoryFilter === item.cat;
             return (
               <div key={item.cat} className="relative flex items-center justify-center w-full group">
                 <span
@@ -4369,6 +4916,10 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 <button
                   type="button"
                   onClick={() => {
+                    if (item.cat === 'game') {
+                      handleOpenUnifiedGameCommunity();
+                      return;
+                    }
                     setCommunityCategoryFilter(item.cat);
                     setShowCommunitiesView(true);
                     setMobileShowChat(true);
@@ -4504,7 +5055,86 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           <div className="flex-1 overflow-y-auto px-2 py-2.5 space-y-3">
             {activeMode === 'group' && activeGroup ? (
               <>
-                {/* TEXT CHANNELS CATEGORY */}
+                {activeGroup.id === 'community-chat-max10' ? (
+                  <>
+                    {/* Nhóm kênh Thông tin chung */}
+                    <div>
+                      <div className="px-2 text-[11px] font-bold uppercase tracking-wider mb-1 text-[#949ba4]">
+                        Thông tin chung
+                      </div>
+                      <div className="space-y-0.5">
+                        {CORE_COMMUNITY_CONFIGS['community-chat-max10'].subChannels
+                          .filter((sc) => sc.category === 'Thông tin chung')
+                          .map((ch) => {
+                            const isActiveCh = discordChannel === ch.id;
+                            return (
+                              <button
+                                key={ch.id}
+                                type="button"
+                                onClick={() => handleSelectGameChannel(ch.id)}
+                                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-[5px] text-sm font-medium transition-colors cursor-pointer ${
+                                  isActiveCh
+                                    ? isDark
+                                      ? 'bg-[#404249] text-white font-semibold'
+                                      : 'bg-[#d4d7dc] text-slate-900 font-semibold'
+                                    : isDark
+                                    ? 'text-[#949ba4] hover:bg-[#35373c] hover:text-[#dbdee1]'
+                                    : 'text-[#4e5058] hover:bg-[#e3e5e8] hover:text-slate-900'
+                                }`}
+                                title={ch.desc}
+                              >
+                                {ch.iconType === 'bullhorn' ? (
+                                  <Megaphone className="w-4 h-4 shrink-0 text-[#80848e]" />
+                                ) : (
+                                  <BookOpen className="w-4 h-4 shrink-0 text-[#80848e]" />
+                                )}
+                                <span className="truncate">{ch.label}</span>
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
+
+                    {/* Nhóm kênh Thảo luận & AI */}
+                    <div>
+                      <div className="px-2 text-[11px] font-bold uppercase tracking-wider mb-1 text-[#949ba4]">
+                        Thảo luận &amp; AI
+                      </div>
+                      <div className="space-y-0.5">
+                        {CORE_COMMUNITY_CONFIGS['community-chat-max10'].subChannels
+                          .filter((sc) => sc.category === 'Thảo luận & AI')
+                          .map((ch) => {
+                            const isActiveCh = discordChannel === ch.id;
+                            return (
+                              <button
+                                key={ch.id}
+                                type="button"
+                                onClick={() => handleSelectGameChannel(ch.id)}
+                                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-[5px] text-sm font-medium transition-colors cursor-pointer ${
+                                  isActiveCh
+                                    ? isDark
+                                      ? 'bg-[#404249] text-white font-semibold'
+                                      : 'bg-[#d4d7dc] text-slate-900 font-semibold'
+                                    : isDark
+                                    ? 'text-[#949ba4] hover:bg-[#35373c] hover:text-[#dbdee1]'
+                                    : 'text-[#4e5058] hover:bg-[#e3e5e8] hover:text-slate-900'
+                                }`}
+                                title={ch.desc}
+                              >
+                                {ch.iconType === 'bot' ? (
+                                  <Bot className="w-4 h-4 shrink-0 text-[#5865f2]" />
+                                ) : (
+                                  <Hash className="w-4 h-4 shrink-0 text-[#80848e]" />
+                                )}
+                                <span className="truncate">{ch.label}</span>
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                /* TEXT CHANNELS CATEGORY */
                 <div>
                   <div className="flex items-center justify-between px-1 mb-1">
                     <button
@@ -4532,41 +5162,126 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                   </div>
 
                   {!collapsedDiscordCats.text && (
-                    <div className="space-y-0.5">
-                      {[
-                        {
-                          id: 'admin_news' as const,
-                          label: 'thông-báo-admin',
-                          title: 'Thông báo hệ thống & Nhắn hỏi Admin',
-                        },
-                        {
-                          id: 'general' as const,
-                          label: 'thảo-luận-chung',
-                          title: 'Kênh thảo luận chung của cộng đồng / nhóm',
-                        },
-                        {
-                          id: 'ai_tutor' as const,
-                          label: 'hỏi-bài-ai',
-                          title: 'Hỏi bài trực tiếp cùng Gia sư @Max10 AI',
-                        },
-                        {
-                          id: 'duel' as const,
-                          label: 'thi-đấu-kiến-thức',
-                          title: 'Mở kèo Thi đấu kiến thức cùng thành viên',
-                        },
-                      ].map((ch) => {
+                    <div className="space-y-1">
+                      {activeGroup.id === 'community-game-max10' && (
+                        <div className="px-1 pb-1">
+                          <div className="relative">
+                            <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-[#949ba4] pointer-events-none" />
+                            <input
+                              type="text"
+                              value={gameChannelSearch}
+                              onChange={(e) => setGameChannelSearch(e.target.value)}
+                              placeholder="Tìm trò chơi..."
+                              className={`w-full pl-6 pr-6 py-1 rounded-[4px] text-[11px] outline-none transition-colors ${
+                                isDark
+                                  ? 'bg-[#1e1f22] text-[#dbdee1] placeholder-[#949ba4]'
+                                  : 'bg-[#e3e5e8] text-slate-900 placeholder-slate-500'
+                              }`}
+                            />
+                            {gameChannelSearch && (
+                              <button
+                                type="button"
+                                onClick={() => setGameChannelSearch('')}
+                                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[#949ba4] hover:text-white cursor-pointer"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-0.5">
+                      {(CORE_COMMUNITY_CONFIGS[activeGroup.id]
+                        ? [
+                            ...CORE_COMMUNITY_CONFIGS[activeGroup.id].subChannels.map((sc) => ({
+                              id: sc.id,
+                              label: sc.label,
+                              title: sc.desc,
+                              isSubChannel: true,
+                              externalGameGroup: null as ChatGroup | null,
+                            })),
+                            ...(activeGroup.id === 'community-game-max10'
+                              ? approvedGameCommunities
+                                  .filter((cg) => cg.id !== 'community-game-max10')
+                                  .map((cg) => ({
+                                    id: `custom_game_${cg.id}`,
+                                    label: `${cg.avatarIcon || '🎮'} ${cg.gameTitle || cg.name}`,
+                                    title: cg.description,
+                                    isSubChannel: true,
+                                    externalGameGroup: cg,
+                                  }))
+                              : []),
+                            {
+                              id: 'duel',
+                              label: activeGroup.id === 'community-game-max10' ? '⚔️ Đấu trường Tri thức 1v1' : 'thi-đấu-kiến-thức',
+                              title: 'Mở kèo Thi đấu kiến thức cùng thành viên',
+                              isSubChannel: false,
+                              externalGameGroup: null as ChatGroup | null,
+                            },
+                            {
+                              id: 'admin_news',
+                              label: 'thông-báo-admin',
+                              title: 'Thông báo hệ thống & Nhắn hỏi Admin',
+                              isSubChannel: false,
+                              externalGameGroup: null as ChatGroup | null,
+                            },
+                            {
+                              id: 'ai_tutor',
+                              label: 'hỏi-bài-ai',
+                              title: 'Hỏi bài trực tiếp cùng Gia sư @Max10 AI',
+                              isSubChannel: false,
+                              externalGameGroup: null as ChatGroup | null,
+                            },
+                          ]
+                        : [
+                            {
+                              id: 'admin_news',
+                              label: 'thông-báo-admin',
+                              title: 'Thông báo hệ thống & Nhắn hỏi Admin',
+                              isSubChannel: false,
+                              externalGameGroup: null as ChatGroup | null,
+                            },
+                            {
+                              id: 'general',
+                              label: 'thảo-luận-chung',
+                              title: 'Kênh thảo luận chung của cộng đồng / nhóm',
+                              isSubChannel: false,
+                              externalGameGroup: null as ChatGroup | null,
+                            },
+                            {
+                              id: 'ai_tutor',
+                              label: 'hỏi-bài-ai',
+                              title: 'Hỏi bài trực tiếp cùng Gia sư @Max10 AI',
+                              isSubChannel: false,
+                              externalGameGroup: null as ChatGroup | null,
+                            },
+                            {
+                              id: 'duel',
+                              label: 'thi-đấu-kiến-thức',
+                              title: 'Mở kèo Thi đấu kiến thức cùng thành viên',
+                              isSubChannel: false,
+                              externalGameGroup: null as ChatGroup | null,
+                            },
+                          ]
+                      )
+                        .filter((ch) => {
+                          if (activeGroup.id !== 'community-game-max10' || !gameChannelSearch.trim()) return true;
+                          const q = gameChannelSearch.trim().toLowerCase();
+                          return ch.label.toLowerCase().includes(q) || ch.title.toLowerCase().includes(q);
+                        })
+                        .map((ch) => {
                         const isActiveCh = discordChannel === ch.id;
                         return (
                           <button
                             key={ch.id}
                             type="button"
                             onClick={() => {
-                              setDiscordChannel(ch.id);
-                              setShowCommunitiesView(false);
-                              setMobileShowChat(true);
-                              if (ch.id === 'ai_tutor' && !inputMessage.trim()) {
-                                setInputMessage('@Max10 AI ');
+                              if (ch.externalGameGroup) {
+                                handleJoinGroup(ch.externalGameGroup);
+                                return;
                               }
+                              handleSelectGameChannel(ch.id);
                             }}
                             className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-[5px] text-sm font-medium transition-colors cursor-pointer ${
                               isActiveCh
@@ -4597,9 +5312,11 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                         <ShieldCheck className="w-4 h-4 shrink-0 text-[#80848e]" />
                         <span className="truncate">noi-quy-nhom</span>
                       </button>
+                      </div>
                     </div>
                   )}
                 </div>
+                )}
 
                 {/* VOICE & VIDEO CHANNELS CATEGORY */}
                 <div>
@@ -4729,11 +5446,27 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setCommunityCategoryFilter('game');
-                      setShowCommunitiesView(true);
-                      setMobileShowChat(true);
-                    }}
+                    onClick={() => handleOpenMax10Community()}
+                    className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-[5px] text-sm font-semibold transition-colors cursor-pointer ${
+                      isDark
+                        ? 'text-[#949ba4] hover:bg-[#35373c] hover:text-[#dbdee1]'
+                        : 'text-[#4e5058] hover:bg-[#e3e5e8] hover:text-slate-900'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5 truncate">
+                      <span className="w-5 h-5 rounded-[6px] bg-[#5865f2] text-white text-[9px] font-black flex items-center justify-center shrink-0">
+                        M10
+                      </span>
+                      <span className="truncate">Max10 AI Community</span>
+                    </span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#5865f2]/15 text-[#5865f2] dark:text-[#949cf7]">
+                      AI
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenUnifiedGameCommunity()}
                     className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-[5px] text-sm font-semibold transition-colors cursor-pointer ${
                       isDark
                         ? 'text-[#949ba4] hover:bg-[#35373c] hover:text-[#dbdee1]'
@@ -4742,10 +5475,10 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                   >
                     <span className="flex items-center gap-2.5 truncate">
                       <Gamepad2 className="w-4 h-4 shrink-0 text-[#23a559]" />
-                      <span className="truncate">Cộng đồng Game</span>
+                      <span className="truncate">Cộng đồng Trò chơi</span>
                     </span>
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#23a559]/15 text-[#23a559]">
-                      {approvedGameCommunities.length}
+                      {CORE_COMMUNITY_CONFIGS['community-game-max10'].subChannels.length - 1}
                     </span>
                   </button>
 
@@ -5976,15 +6709,11 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
             </p>
             <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
               <button
-                onClick={() => {
-                  setCommunityCategoryFilter('game');
-                  setShowCommunitiesView(true);
-                  setMobileShowChat(true);
-                }}
+                onClick={() => handleOpenUnifiedGameCommunity()}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-[4px] bg-[#248046] hover:bg-[#1a6334] text-white text-xs font-bold shadow-sm transition-all cursor-pointer"
               >
                 <Gamepad2 className="w-4 h-4" />
-                <span>Cộng đồng Game ({approvedGameCommunities.length})</span>
+                <span>Cộng đồng Trò chơi ({CORE_COMMUNITY_CONFIGS['community-game-max10'].subChannels.length - 1} game)</span>
               </button>
               <button
                 onClick={() => {
@@ -6051,13 +6780,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
                 <h2 className="text-sm sm:text-[15px] font-bold truncate">
                   {activeMode === 'group'
-                    ? discordChannel === 'admin_news'
-                      ? 'thông-báo-admin'
-                      : discordChannel === 'ai_tutor'
-                      ? 'hỏi-bài-ai'
-                      : discordChannel === 'duel'
-                      ? 'thi-đấu-kiến-thức'
-                      : 'thảo-luận-chung'
+                    ? getActiveChannelMeta(discordChannel, activeGroupId).label
                     : activeConversationTitle}
                 </h2>
 
@@ -6089,15 +6812,7 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                   {activeMode === 'group'
                     ? `${activeGroup?.name}${
                         activeGroup?.channelAdminId ? ` · Quản trị viên: @${activeGroup.channelAdminId}` : ''
-                      } · ${
-                        discordChannel === 'admin_news'
-                          ? 'Cập nhật hệ thống & Trả lời trực tiếp từ Admin'
-                          : discordChannel === 'ai_tutor'
-                          ? 'Hỏi bài Gia sư @Max10 AI theo chủ đề'
-                          : discordChannel === 'duel'
-                          ? 'Đấu trường Thi đấu kiến thức'
-                          : activeConversationStatus
-                      }`
+                      } · ${getActiveChannelMeta(discordChannel, activeGroupId).desc}`
                     : activeConversationStatus}
                 </p>
               </div>
@@ -6292,6 +7007,64 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           </div>
         )}
 
+        {activeMode === 'group' && activeGroup && isCommunityLockedForUser(activeGroup.id) ? (
+          <div className="flex-1 overflow-y-auto p-4 sm:p-8 flex items-center justify-center">
+            <div
+              className={`w-full max-w-lg rounded-2xl border p-6 sm:p-7 shadow-xl space-y-5 ${
+                isDark ? 'bg-[#2b2d31] border-[#1f2023]' : 'bg-[#f8f9fa] border-slate-200'
+              }`}
+            >
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-[#5865f2]/15 flex items-center justify-center text-2xl shrink-0">
+                    {activeGroup.avatarIcon || '🎉'}
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white leading-tight">
+                      Chào mừng tới {activeGroup.name}
+                    </h3>
+                    <p className="text-xs text-[#4e5058] dark:text-[#b5bac1] mt-0.5">
+                      Hãy trả lời nhanh vài câu hỏi làm quen để mở khóa tất cả phòng chat và giới thiệu bản thân tới mọi người!
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <form onSubmit={handleCompleteWelcome} className="space-y-4">
+                {CORE_COMMUNITY_CONFIGS[activeGroup.id].questions.map((question, idx) => (
+                  <div key={idx}>
+                    <label className="block text-xs sm:text-sm font-bold mb-1.5 text-slate-800 dark:text-[#f2f3f5]">
+                      {idx + 1}. {question}
+                    </label>
+                    <input
+                      type="text"
+                      value={welcomeAnswers[idx] || ''}
+                      onChange={(e) =>
+                        setWelcomeAnswers((prev) => ({ ...prev, [idx]: e.target.value }))
+                      }
+                      placeholder="Nhập câu trả lời của bạn..."
+                      required
+                      className={`w-full px-3.5 py-2.5 rounded-lg text-sm outline-none border transition-colors ${
+                        isDark
+                          ? 'bg-[#1e1f22] border-[#111214] text-white focus:border-[#5865f2]'
+                          : 'bg-white border-slate-300 text-slate-900 focus:border-[#5865f2]'
+                      }`}
+                    />
+                  </div>
+                ))}
+
+                <button
+                  type="submit"
+                  className="w-full py-3 px-4 rounded-xl bg-[#5865f2] hover:bg-[#4752c4] text-white font-bold text-sm transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Gửi câu trả lời &amp; Tham gia ngay</span>
+                </button>
+              </form>
+            </div>
+          </div>
+        ) : (
+        <>
         {/* DISCORD MESSAGES FEED */}
         <div className="flex-1 overflow-y-auto py-4">
           {/* Beginning of Channel / DM Discord Welcome Header */}
@@ -6306,20 +7079,12 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                   <Hash className="w-9 h-9" />
                 </div>
                 <h3 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
-                  Chào mừng đến với #
-                  {discordChannel === 'admin_news'
-                    ? 'thông-báo-admin'
-                    : discordChannel === 'ai_tutor'
-                    ? 'hỏi-bài-ai'
-                    : discordChannel === 'duel'
-                    ? 'thi-đấu-kiến-thức'
-                    : 'thảo-luận-chung'}
-                  !
+                  Chào mừng đến với #{getActiveChannelMeta(discordChannel, activeGroupId).label}!
                 </h3>
                 <p className="text-xs sm:text-sm text-[#4e5058] dark:text-[#b5bac1]">
                   {discordChannel === 'admin_news'
                     ? 'Kênh chính thức cập nhật tính năng Max10 AI & nhắn hỏi trực tiếp Quản trị viên (Tự động trả lời hoặc Admin trả lời).'
-                    : `Đây là phần đầu của kênh trong ${activeGroup.name}. Bấm vào ảnh đại diện thành viên để xem thẻ hồ sơ Discord, kết bạn & thách đấu!`}
+                    : `${getActiveChannelMeta(discordChannel, activeGroupId).desc} · Bấm vào ảnh đại diện thành viên để xem hồ sơ Discord, kết bạn & thách đấu!`}
                 </p>
                 {discordChannel === 'duel' && (
                   <div className="pt-1">
@@ -6331,6 +7096,160 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                       <Swords className="w-3.5 h-3.5" />
                       <span>Mở kèo Thi đấu trong Server ngay</span>
                     </button>
+                  </div>
+                )}
+                {discordChannel === 'game_minigame_quiz' && (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowMiniGameQuizModal(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[4px] bg-[#5865f2] hover:bg-[#4752c4] text-white text-xs font-bold cursor-pointer"
+                    >
+                      <Gamepad2 className="w-3.5 h-3.5" />
+                      <span>Chơi Mini Game Trắc nghiệm ngay</span>
+                    </button>
+                  </div>
+                )}
+                {discordChannel === 'game_math_challenge' && (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowMathChallengeModal(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[4px] bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold cursor-pointer"
+                    >
+                      <Rocket className="w-3.5 h-3.5" />
+                      <span>Mở Thử thách Toán học ngay</span>
+                    </button>
+                  </div>
+                )}
+                {discordChannel === 'game_xp_spin' && (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => window.dispatchEvent(new CustomEvent('max10_open_xp_spin'))}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[4px] bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Mở Vòng quay XP Lên Cấp ngay</span>
+                    </button>
+                  </div>
+                )}
+                {activeGroup.id === 'community-game-max10' && discordChannel === 'game_all' && (
+                  <div className="pt-2 space-y-2">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                      Tất cả trò chơi trong Cộng đồng Trò chơi (chọn nhanh hoặc xem ở Kênh văn bản bên trái):
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {CORE_COMMUNITY_CONFIGS['community-game-max10'].subChannels
+                        .filter((sc) => sc.id !== 'game_admin' && sc.id !== 'game_all')
+                        .map((sc) => (
+                          <button
+                            key={sc.id}
+                            type="button"
+                            onClick={() => handleSelectGameChannel(sc.id)}
+                            className={`px-2.5 py-1 rounded-[5px] text-xs font-semibold border transition-colors cursor-pointer ${
+                              isDark
+                                ? 'bg-[#2b2d31] border-[#3f4147] hover:bg-[#404249] text-[#dbdee1]'
+                                : 'bg-[#f2f3f5] border-slate-200 hover:bg-[#e3e5e8] text-slate-800'
+                            }`}
+                            title={sc.desc}
+                          >
+                            {sc.label}
+                          </button>
+                        ))}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectGameChannel('duel')}
+                        className="px-2.5 py-1 rounded-[5px] text-xs font-bold bg-[#248046] hover:bg-[#1a6334] text-white cursor-pointer"
+                      >
+                        ⚔️ Đấu trường Tri thức 1v1
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {activeGroup.id === 'community-chat-max10' && (
+                  <div className="pt-3 space-y-3">
+                    {/* Max10 AI Bot Welcome Card */}
+                    <div className={`flex items-start gap-3 p-3 rounded-lg transition-colors ${isDark ? 'bg-[#2e3035]/70' : 'bg-[#f2f3f5]'}`}>
+                      <div className="w-10 h-10 rounded-full bg-[#5865f2] flex items-center justify-center text-white font-bold text-sm shrink-0">
+                        AI
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-sm text-slate-900 dark:text-white">
+                            Max10 AI Bot
+                          </span>
+                          <span className="bg-[#5865f2] text-white text-[10px] px-1.5 py-0.5 rounded font-bold uppercase">
+                            BOT
+                          </span>
+                          <span className="text-xs text-[#80848e] dark:text-gray-400">
+                            Trực tuyến
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-700 dark:text-gray-300 mt-1 leading-relaxed">
+                          Chào mừng bạn đến với cộng đồng <strong>Max10 AI</strong>! Hãy nhập tin nhắn bên dưới hoặc gõ{' '}
+                          <code className="px-1.5 py-0.5 rounded bg-[#5865f2]/15 text-[#5865f2] dark:text-[#949cf7] font-mono text-xs">
+                            @Max10
+                          </code>{' '}
+                          kèm câu hỏi để nhận phản hồi tự động nhé.
+                        </p>
+                      </div>
+                    </div>
+
+                    {discordChannel === 'thong_bao' && (
+                      <div className={`p-3 rounded-lg border text-xs space-y-2 ${isDark ? 'bg-[#2b2d31] border-[#3f4147] text-gray-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                        <div className="font-bold text-sm text-slate-900 dark:text-white">
+                          Cập nhật mới nhất từ Max10 AI
+                        </div>
+                        <ul className="space-y-1.5 list-disc pl-4">
+                          <li>Đã hỗ trợ tải ứng dụng <strong>Max10 AI</strong> ra màn hình chính điện thoại từ Chrome, Safari, Edge và Cốc Cốc.</li>
+                          <li>Gộp toàn bộ 22+ trò chơi &amp; Mini Game vào một <strong>Cộng Đồng Trò Chơi</strong> trong mục Kênh văn bản.</li>
+                          <li>Kênh <strong>#hỏi-đáp-max10-bot</strong> tự động gọi trợ lý AI trả lời mọi câu hỏi học tập và kỹ thuật.</li>
+                        </ul>
+                      </div>
+                    )}
+
+                    {discordChannel === 'noi_quy_max10' && (
+                      <div className={`p-3 rounded-lg border text-xs space-y-2 ${isDark ? 'bg-[#2b2d31] border-[#3f4147] text-gray-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                        <div className="font-bold text-sm text-slate-900 dark:text-white">
+                          Quy định sinh hoạt tại Max10 AI Community
+                        </div>
+                        <ol className="space-y-1.5 list-decimal pl-4">
+                          <li>Tôn trọng các thành viên, học sinh và giáo viên trong cộng đồng.</li>
+                          <li>Đăng bài đúng chuyên mục (#chia-sẻ-prompt cho câu lệnh hay, #hỏi-đáp-max10-bot để hỏi AI).</li>
+                          <li>Không spam tin nhắn, không gửi liên kết lạ hoặc nội dung phản cảm.</li>
+                        </ol>
+                      </div>
+                    )}
+
+                    {discordChannel === 'chia_se_prompt' && (
+                      <div className="space-y-1.5">
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-[#80848e] dark:text-[#949ba4]">
+                          Prompt gợi ý (bấm để dùng nhanh):
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {[
+                            '@Max10 Giải phương trình bậc 2 từng bước dễ hiểu và chỉ ra bẫy thường gặp',
+                            '@Max10 Lập dàn ý chi tiết bài văn nghị luận xã hội đạt điểm 9+',
+                            '@Max10 Tổng hợp công thức KHTN trọng tâm bằng bảng ngắn gọn',
+                          ].map((samplePrompt) => (
+                            <button
+                              key={samplePrompt}
+                              type="button"
+                              onClick={() => setInputMessage(samplePrompt)}
+                              className={`px-2.5 py-1.5 rounded-[5px] text-xs font-medium border text-left transition-colors cursor-pointer ${
+                                isDark
+                                  ? 'bg-[#2b2d31] border-[#3f4147] hover:bg-[#404249] text-[#dbdee1]'
+                                  : 'bg-[#f2f3f5] border-slate-200 hover:bg-[#e3e5e8] text-slate-800'
+                              }`}
+                            >
+                              {samplePrompt}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -6758,6 +7677,32 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
             displayedGroupMsgs.map((msg, idx) => {
               const isMe = msg.senderId === activeUserId;
               const isAi = msg.isAi || msg.senderRole === 'ai_tutor';
+
+              if (msg.isAnnouncement) {
+                return (
+                  <div
+                    key={msg.id}
+                    className={`mx-4 my-3 p-4 rounded-xl border shadow-sm ${
+                      isDark
+                        ? 'bg-[#2b2d31] border-[#23a559]/50 text-[#f2f3f5]'
+                        : 'bg-emerald-50/90 border-emerald-200 text-slate-900'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-black text-[#23a559]">
+                        <Sparkles className="w-4 h-4" />
+                        <span>{msg.senderName || 'Hệ thống Chào mừng'}</span>
+                      </span>
+                      <span className="text-[10px] text-[#80848e] shrink-0 tabular-nums">
+                        {formatAccurateTime(msg.createdAt, msg.timestamp)}
+                      </span>
+                    </div>
+                    <div className="prose dark:prose-invert max-w-none text-xs sm:text-[13.5px] leading-relaxed">
+                      <Markdown>{formatDolaMath(msg.content)}</Markdown>
+                    </div>
+                  </div>
+                );
+              }
 
               if (msg.isSystemNotice) {
                 return (
@@ -7335,15 +8280,9 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                 isAiReplying
                   ? 'Đang phản hồi...'
                   : activeMode === 'group'
-                  ? `Nhắn tin tới #${
-                      discordChannel === 'admin_news'
-                        ? 'thông-báo-admin'
-                        : discordChannel === 'ai_tutor'
-                        ? 'hỏi-bài-ai'
-                        : discordChannel === 'duel'
-                        ? 'thi-đấu-kiến-thức'
-                        : 'thảo-luận-chung'
-                    } (dùng /ve, /sodo, /ai hoặc @Max10 AI)`
+                  ? activeGroupId === 'community-chat-max10'
+                    ? `Nhắn tin tới #${getActiveChannelMeta(discordChannel, activeGroupId).label} (Gõ @Max10 để gọi AI)...`
+                    : `Nhắn tin tới #${getActiveChannelMeta(discordChannel, activeGroupId).label} (gõ @Max10, /ve, /sodo hoặc "vẽ ...")`
                   : `Nhắn tin tới @${activeConversationTitle}`
               }
               className="flex-1 min-w-0 bg-transparent border-none text-xs sm:text-sm outline-none text-slate-900 dark:text-[#dbdee1] placeholder-[#6d6f78] dark:placeholder-[#87898c]"
@@ -7415,6 +8354,8 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
             )}
           </form>
         </div>
+        </>
+        )}
           </>
         )}
       </div>
@@ -7616,18 +8557,20 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
 
                         {renderMemberGroup('ADMIN', admins)}
 
-                        {/* GIA SƯ AI */}
+                        {/* MAX10 AI BOT */}
                         <div className="space-y-1.5">
                           <div className="px-1.5 text-[10.5px] font-extrabold uppercase tracking-wider text-[#80848e] dark:text-[#949ba4]">
-                            GIA SƯ AI — 1
+                            TRỰC TUYẾN BOT — 1
                           </div>
                           <NameplateBannerStrip
                             nameplateId={aiDeco.nameplateId}
                             compact
                             onClick={() => {
-                              setDiscordChannel('ai_tutor');
+                              setDiscordChannel(
+                                activeGroup.id === 'community-chat-max10' ? 'hoi_dap_max10_bot' : 'ai_tutor'
+                              );
                               if (!inputMessage.toLowerCase().includes('@max10')) {
-                                setInputMessage('@Max10 AI ');
+                                setInputMessage('@Max10 ');
                               }
                             }}
                             className="rounded-xl px-2 py-1.5 shadow-xs"
@@ -7641,21 +8584,16 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
                                 size="sm"
                               />
                               <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-1 flex-wrap">
+                                <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="text-[12.5px] font-black text-white truncate drop-shadow-xs">
                                     Max10 AI
                                   </span>
-                                  <UserBadgesStrip
-                                    role="ai_tutor"
-                                    isAi
-                                    countryCode={countryCode}
-                                    badges={aiDeco.badges}
-                                    maxCustomBadges={1}
-                                    size="xs"
-                                  />
+                                  <span className="bg-[#5865f2] text-[9px] px-1.5 py-0.5 rounded text-white font-bold uppercase">
+                                    BOT
+                                  </span>
                                 </div>
                                 <div className="text-[10px] text-white/80 truncate">
-                                  Gia sư theo chủ đề {activeGroup.communityCategory === 'game' ? 'Game' : activeGroup.communityCategory === 'chat' ? 'Trò chuyện' : 'Học tập'}
+                                  Đang hỗ trợ cộng đồng
                                 </div>
                               </div>
                             </div>
@@ -10500,6 +11438,24 @@ export const GroupChatStudio: React.FC<GroupChatStudioProps> = ({
           onChallengeUpdated={handleDuelChallengeUpdated}
         />
       )}
+
+      {/* MINI GAME QUIZ & MATH CHALLENGE MODALS */}
+      <MiniGameQuizModal
+        isOpen={showMiniGameQuizModal}
+        onClose={() => setShowMiniGameQuizModal(false)}
+        grade={currentGrade}
+        subjectTitle="Tổng hợp kiến thức THCS"
+        userName={activeUserName}
+        isDark={isDark}
+      />
+
+      <MathChallengeModal
+        isOpen={showMathChallengeModal}
+        onClose={() => setShowMathChallengeModal(false)}
+        grade={currentGrade}
+        isDark={isDark}
+        userName={activeUserName}
+      />
 
       {/* Lightbox Zoom Modal for Community AI Bot Images */}
       {zoomedAttachmentUrl && (

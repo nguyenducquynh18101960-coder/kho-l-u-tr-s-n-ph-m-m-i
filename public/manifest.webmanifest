@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Max10 - Gia Sư Chinh Phục Điểm 10",
-  "short_name": "Max10",
-  "description": "Max10 - Trợ lý AI đồng hành học tập toàn diện cho học sinh săn điểm 10 trọn năm",
+  "name": "Max10 AI - Gia Sư Chinh Phục Điểm 10",
+  "short_name": "Max10 AI",
+  "description": "Max10 AI - Trợ lý AI đồng hành học tập toàn diện cho học sinh săn điểm 10 trọn năm",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

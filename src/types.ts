@@ -249,6 +249,8 @@ export interface GroupChatMessage {
   };
   video?: GeneratedVideoInfo;
   challengeId?: string;
+  subChannelId?: string;
+  isAnnouncement?: boolean;
 }
 
 export interface UserMuteRecord {

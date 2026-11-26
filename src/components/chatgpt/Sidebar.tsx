@@ -29,6 +29,7 @@ import { GradeLevel, ChatSession } from '../../types';
 import { BackgroundTheme } from '../../types/theme';
 import { UserAccount } from '../../types/auth';
 import { getUserInitials } from './UserNameModal';
+import { PWAInstallButton } from './PWAInstallButton';
 
 export type MainTabId =
   | 'chat'
@@ -123,6 +124,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentUser,
   onOpenAuthModal,
   userAvatar,
+  onOpenStoreModal,
   isAdmin = false,
   isFullscreen = false,
   unreadGroupMessagesCount = 0,
@@ -453,29 +455,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             </div>
 
-            <div className="pt-3 border-t border-slate-200 dark:border-white/10 mt-4 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  onOpenAdminNotifications?.();
-                  onClose();
-                }}
-                className="relative flex-1 px-3 py-2 rounded-xl bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center justify-center gap-1.5"
-              >
-                <Bell className="w-3.5 h-3.5" />
-                <span>Thông báo</span>
-                {showNotifDot && (
-                  <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={onToggleTheme}
-                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-zinc-700 text-xs font-bold flex items-center gap-1.5"
-              >
-                {isDark ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-indigo-500" />}
-                <span>{isDark ? 'Sáng' : 'Tối'}</span>
-              </button>
+            <div className="mt-4">
+              <PWAInstallButton
+                variant="sidebar"
+                onOpenStoreModal={
+                  onOpenStoreModal
+                    ? () => {
+                        onOpenStoreModal();
+                        onClose();
+                      }
+                    : undefined
+                }
+              />
+              <div className="pt-3 border-t border-slate-200 dark:border-white/10 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenAdminNotifications?.();
+                    onClose();
+                  }}
+                  className="relative flex-1 px-3 py-2 rounded-xl bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center justify-center gap-1.5"
+                >
+                  <Bell className="w-3.5 h-3.5" />
+                  <span>Thông báo</span>
+                  {showNotifDot && (
+                    <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={onToggleTheme}
+                  className="px-3 py-2 rounded-xl border border-slate-200 dark:border-zinc-700 text-xs font-bold flex items-center gap-1.5"
+                >
+                  {isDark ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-indigo-500" />}
+                  <span>{isDark ? 'Sáng' : 'Tối'}</span>
+                </button>
+              </div>
             </div>
           </aside>
         </div>

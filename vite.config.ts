@@ -84,8 +84,8 @@ export default defineConfig(() => {
         ],
         manifest: {
           id: '/',
-          name: 'Max10 - Gia Sư Chinh Phục Điểm 10',
-          short_name: 'Max10',
+          name: 'Max10 AI - Gia Sư Chinh Phục Điểm 10',
+          short_name: 'Max10 AI',
           description: 'Gia sư AI đồng hành học tập toàn diện cho học sinh Lớp 1 - 12 săn điểm 10',
           theme_color: '#0f172a',
           background_color: '#0f172a',
@@ -150,7 +150,8 @@ export default defineConfig(() => {
           ],
         },
         devOptions: {
-          enabled: false,
+          enabled: true,
+          type: 'module',
         },
       }),
     ],

@@ -147,9 +147,32 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
     !qCommunity ? true : (f.name || '').toLowerCase().includes(qCommunity)
   );
 
+  const LEGACY_SEPARATE_GAME_IDS = new Set([
+    'community-game-minecraft',
+    'community-game-roblox',
+    'community-game-hoyoverse',
+    'community-game-fortnite',
+    'community-game-party-coop',
+    'community-game-sports-racing',
+    'community-game-board-web',
+    'community-game-lienquan',
+    'community-game-pubg-ff',
+    'community-game-supercell',
+    'community-game-playtogether',
+    'community-game-lol-tft',
+    'community-game-valorant-cs2',
+    'community-game-steam-sandbox',
+    'community-game-nintendo',
+    'community-game-ps-xbox',
+    'community-game-retro-rhythm',
+  ]);
+
   const regularGroups = visibleGroups.filter((g) => !g.isCommunity);
   const communityGroups = visibleGroups.filter(
-    (g) => Boolean(g.isCommunity) && (g.approvalStatus || 'approved') === 'approved'
+    (g) =>
+      Boolean(g.isCommunity) &&
+      (g.approvalStatus || 'approved') === 'approved' &&
+      !LEGACY_SEPARATE_GAME_IDS.has(g.id)
   );
   const gameCommunityGroups = communityGroups.filter((g) => g.communityCategory === 'game');
   const pinnedTrendingGames = gameCommunityGroups.filter((g) => Boolean(g.isPinnedTrending));
@@ -169,7 +192,13 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
   };
 
   const handleOpenCommunitiesDirectory = (category: 'all' | 'game' | 'study' | 'chat' = 'all') => {
-    setSelectedCommunityKey(category === 'game' ? 'communities_game' : 'communities_directory');
+    if (category === 'game') {
+      setSelectedCommunityKey('group:community-game-max10');
+      setActiveTab('group');
+      window.dispatchEvent(new CustomEvent('max10_open_game_community'));
+      return;
+    }
+    setSelectedCommunityKey('communities_directory');
     setActiveTab('group');
     window.dispatchEvent(new CustomEvent('max10_open_communities', { detail: { category } }));
   };
@@ -439,7 +468,7 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
               type="button"
               onClick={() => handleOpenCommunitiesDirectory('game')}
               className={`w-full flex items-center justify-between gap-2 py-2 px-3 rounded-xl border text-xs font-extrabold transition-all cursor-pointer ${
-                selectedCommunityKey === 'communities_game'
+                selectedCommunityKey === 'communities_game' || selectedCommunityKey === 'group:community-game-max10'
                   ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
                   : isDark
                   ? 'bg-emerald-500/12 border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-300'
@@ -448,10 +477,10 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
             >
               <span className="flex items-center gap-2 truncate">
                 <Gamepad2 className="w-4 h-4 shrink-0" />
-                <span className="truncate">Cộng đồng Game</span>
+                <span className="truncate">Cộng đồng Trò chơi</span>
               </span>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/15 shrink-0 tabular-nums">
-                {gameCommunityGroups.length}
+                21+
               </span>
             </button>
 
