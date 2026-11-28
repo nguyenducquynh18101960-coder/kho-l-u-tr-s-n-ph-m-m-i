@@ -15,7 +15,6 @@ import {
   RARITY_TIERS,
   RARITY_MAP,
   GiftRarity,
-  getVisibleHolidays,
   HolidayId,
   HOLIDAY_CONFIGS,
   HOLIDAY_GIFT_POOLS,
@@ -357,6 +356,48 @@ function describeWedge(cx: number, cy: number, r: number, startAngle: number, en
   return ['M', cx, cy, 'L', start.x, start.y, 'A', r, r, 0, largeArc, 0, end.x, end.y, 'Z'].join(' ');
 }
 
+const FEATURED_HOLIDAY_THEMES: Array<{
+  id: HolidayId;
+  emoji: string;
+  label: string;
+  backEmoji: string;
+  actionText: string;
+}> = [
+  { id: 'tet', emoji: '🧧', label: 'Tết Nguyên Đán', backEmoji: '🧧', actionText: 'Hái Lộc Đầu Xuân' },
+  { id: 'noel', emoji: '🎄', label: 'Giáng Sinh (Noel)', backEmoji: '🎁', actionText: 'Mở Quà Ông Già Noel' },
+  { id: 'trung_thu', emoji: '🥮', label: 'Tết Trung Thu', backEmoji: '🏮', actionText: 'Phá Cỗ Trông Trăng' },
+  { id: '20_11', emoji: '💐', label: 'Ngày Nhà Giáo 20/11', backEmoji: '🎓', actionText: 'Mở Hộp Tri Ân 20/11' },
+  { id: '20_10', emoji: '🌷', label: 'Phụ Nữ VN 20/10', backEmoji: '💝', actionText: 'Tặng Quà 20/10' },
+  { id: '08_03', emoji: '🌸', label: 'Quốc Tế Phụ Nữ 8/3', backEmoji: '🌺', actionText: 'Mở Hộp Hoa 8/3' },
+];
+
+function detectCurrentHolidayMode(now: Date = new Date()): 'xp' | HolidayId {
+  const month = now.getMonth() + 1;
+  const day = now.getDate();
+  if (month === 1 || (month === 2 && day <= 15)) return 'tet';
+  if (month === 3 && day <= 10) return '08_03';
+  if (month === 9 || (month === 10 && day <= 5)) return 'trung_thu';
+  if (month === 10 && day >= 15 && day <= 22) return '20_10';
+  if (month === 11 && day >= 15 && day <= 28) return '20_11';
+  if (month === 12 && day >= 15) return 'noel';
+  return 'xp';
+}
+
+function getPoolForMode(mode: 'xp' | HolidayId): XpSpinItem[] {
+  if (mode === 'xp') return XP_SPIN_POOL;
+  const hPool = HOLIDAY_GIFT_POOLS[mode] || [];
+  return hPool.map((item) => ({
+    id: item.id,
+    name: item.name,
+    icon: item.icon,
+    rarity: item.rarity,
+    xpBonus: item.xpBonus,
+    description: item.description,
+    isRonaldoSiu: item.rarity === 'mythic',
+    holidayId: mode,
+  }));
+}
+
 export interface XpSpinScreenProps {
   isDark: boolean;
   userName?: string;
@@ -372,19 +413,17 @@ export const XpSpinScreen: React.FC<XpSpinScreenProps> = ({
   onClose,
   onNavigateToTab,
 }) => {
-  const visibleHolidays = useMemo(() => getVisibleHolidays(new Date()), []);
-  const currentMonth = new Date().getMonth() + 1;
-
-  const [spinMode, setSpinMode] = useState<'xp' | HolidayId>('xp');
+  const [spinMode, setSpinMode] = useState<'xp' | HolidayId>(() => detectCurrentHolidayMode());
   const [stats, setStats] = useState<StudentAchievementStats>(() => loadStudentAchievements());
   const [phase, setPhase] = useState<'ready' | 'spinning' | 'spinning_multi' | 'result'>('ready');
-  const [spinTrack, setSpinTrack] = useState<XpSpinItem[]>(() => [
-    ...XP_SPIN_POOL,
-    ...XP_SPIN_POOL,
-  ]);
+  const [spinTrack, setSpinTrack] = useState<XpSpinItem[]>(() => {
+    const initialPool = getPoolForMode(detectCurrentHolidayMode());
+    return [...initialPool, ...initialPool, ...initialPool];
+  });
   const [trackOffsetPx, setTrackOffsetPx] = useState<number>(0);
   const [wheelRotationDeg, setWheelRotationDeg] = useState<number>(0);
   const [wonItems, setWonItems] = useState<XpSpinItem[]>([]);
+  const [flippedCards, setFlippedCards] = useState<Array<{ item: XpSpinItem; revealed: boolean }>>([]);
   const [spinCount, setSpinCount] = useState<number>(() => loadSpinCount());
   const [sessionXpEarned, setSessionXpEarned] = useState<number>(0);
   const [levelUpNotice, setLevelUpNotice] = useState<{
@@ -400,21 +439,10 @@ export const XpSpinScreen: React.FC<XpSpinScreenProps> = ({
   const spinTimersRef = useRef<number[]>([]);
 
   const activeHolidayConfig = spinMode !== 'xp' ? HOLIDAY_CONFIGS[spinMode] : null;
+  const activeHolidayMeta =
+    FEATURED_HOLIDAY_THEMES.find((h) => h.id === spinMode) || null;
 
-  const activePool: XpSpinItem[] = useMemo(() => {
-    if (spinMode === 'xp') return XP_SPIN_POOL;
-    const hPool = HOLIDAY_GIFT_POOLS[spinMode] || [];
-    return hPool.map((item) => ({
-      id: item.id,
-      name: item.name,
-      icon: item.icon,
-      rarity: item.rarity,
-      xpBonus: item.xpBonus,
-      description: item.description,
-      isRonaldoSiu: item.rarity === 'mythic',
-      holidayId: spinMode,
-    }));
-  }, [spinMode]);
+  const activePool: XpSpinItem[] = useMemo(() => getPoolForMode(spinMode), [spinMode]);
 
   const activeWedges = useMemo(() => buildWedgesFromPool(activePool), [activePool]);
 
@@ -441,24 +469,54 @@ export const XpSpinScreen: React.FC<XpSpinScreenProps> = ({
     setShowRonaldoSiu(false);
     setLevelUpNotice(null);
     setWonItems([]);
+    setFlippedCards([]);
     setPhase('ready');
     setTrackOffsetPx(0);
     setSpinMode(nextMode);
 
-    if (nextMode === 'xp') {
-      setSpinTrack([...XP_SPIN_POOL, ...XP_SPIN_POOL]);
+    const nextPool = getPoolForMode(nextMode);
+    setSpinTrack([...nextPool, ...nextPool, ...nextPool]);
+  };
+
+  const handleDrawHolidayCards = () => {
+    if (phase === 'spinning' || phase === 'spinning_multi') return;
+    clearSpinTimers();
+    setShowRonaldoSiu(false);
+    setLevelUpNotice(null);
+    setWonItems([]);
+    setPhase('ready');
+    const drawn = Array.from({ length: 3 }, () => ({
+      item: rollWeightedFromPool(activePool),
+      revealed: false,
+    }));
+    setFlippedCards(drawn);
+    soundEffects.playClick();
+  };
+
+  const handleRevealHolidayCard = (index: number) => {
+    const target = flippedCards[index];
+    if (!target || target.revealed) return;
+    const nextCards = flippedCards.map((c, idx) =>
+      idx === index ? { ...c, revealed: true } : c
+    );
+    setFlippedCards(nextCards);
+    setSpinCount((c) => {
+      const next = c + 1;
+      saveSpinCount(next);
+      return next;
+    });
+    awardItemsXp([target.item]);
+    setWonItems([target.item]);
+    setPhase('result');
+
+    if (target.item.rarity === 'mythic') {
+      triggerRonaldoSiuCelebration(6800);
+    } else if (target.item.rarity === 'legendary' || target.item.rarity === 'super_rare') {
+      celebrateMilestone();
+      launchGoldenStarBurst();
+      soundEffects.playBadgeUnlocked();
     } else {
-      const hPool = (HOLIDAY_GIFT_POOLS[nextMode] || []).map((item) => ({
-        id: item.id,
-        name: item.name,
-        icon: item.icon,
-        rarity: item.rarity,
-        xpBonus: item.xpBonus,
-        description: item.description,
-        isRonaldoSiu: item.rarity === 'mythic',
-        holidayId: nextMode,
-      }));
-      setSpinTrack([...hPool, ...hPool, ...hPool]);
+      soundEffects.playCheckInReward();
     }
   };
 
@@ -785,7 +843,7 @@ export const XpSpinScreen: React.FC<XpSpinScreenProps> = ({
           </div>
         </div>
 
-        {/* Mode Switcher: Quay XP Lên Cấp + Chỉ các ngày lễ thuộc tháng hiện tại */}
+        {/* Mode Switcher: Năng Lượng Max10 + 6 Chủ Đề Ngày Lễ Việt Nam & Quốc Tế */}
         <div className="mt-3 pt-3 border-t border-white/15 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <button
@@ -799,10 +857,10 @@ export const XpSpinScreen: React.FC<XpSpinScreenProps> = ({
               }`}
             >
               <Zap className="w-3.5 h-3.5 fill-current" />
-              <span>Quay XP Lên Cấp</span>
+              <span>⚡ Năng Lượng Max10</span>
             </button>
 
-            {visibleHolidays.map((holiday) => {
+            {FEATURED_HOLIDAY_THEMES.map((holiday) => {
               const isSelected = spinMode === holiday.id;
               return (
                 <button
@@ -816,19 +874,18 @@ export const XpSpinScreen: React.FC<XpSpinScreenProps> = ({
                       : 'bg-black/20 hover:bg-black/35 text-white/90'
                   }`}
                 >
-                  <Gift className="w-3.5 h-3.5" />
                   <span>
-                    {holiday.petals[0]} {holiday.badgeText}
+                    {holiday.emoji} {holiday.label}
                   </span>
                 </button>
               );
             })}
           </div>
 
-          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-white/80">
+          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-white/85">
             <Calendar className="w-3.5 h-3.5" />
             <span>
-              Tháng {currentMonth}: {visibleHolidays.length > 0 ? `${visibleHolidays.length} lễ đang mở` : 'Chưa tới tháng lễ'} (lễ tháng khác tự ẩn)
+              Tự động nhận diện hôm nay: {activeHolidayMeta ? `${activeHolidayMeta.emoji} ${activeHolidayMeta.label}` : '⚡ Năng Lượng Max10'}
             </span>
           </span>
         </div>
@@ -1100,30 +1157,107 @@ export const XpSpinScreen: React.FC<XpSpinScreenProps> = ({
                 </div>
               </div>
 
-              {/* Action Buttons (Chỉ hiển thị nút quay XP lên cấp & quay nhanh x5) */}
+              {/* Action Buttons (Quay XP + Quay Nhanh x5 + Lật 3 Thẻ Quà Ngày Lễ) */}
               <div className="flex flex-wrap items-center gap-2.5">
                 <button
                   type="button"
                   disabled={isSpinning}
                   onClick={handleSpinSingle}
-                  className="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 via-green-600 to-teal-600 hover:brightness-110 disabled:opacity-60 text-white font-black text-xs sm:text-sm shadow-lg shadow-emerald-600/25 transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0"
+                  className="px-4 sm:px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 via-green-600 to-teal-600 hover:brightness-110 disabled:opacity-60 text-white font-black text-xs sm:text-sm shadow-lg shadow-emerald-600/25 transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <RotateCw className={`w-4 h-4 ${phase === 'spinning' ? 'animate-spin' : ''}`} />
-                  <span>{phase === 'spinning' ? 'Đang quay 1 lượt...' : 'Quay 1 Lượt Nhận XP'}</span>
+                  <span>
+                    {phase === 'spinning'
+                      ? 'Đang quay 1 lượt...'
+                      : activeHolidayMeta
+                      ? activeHolidayMeta.actionText
+                      : 'Quay 1 Lượt Nhận XP'}
+                  </span>
                 </button>
 
                 <button
                   type="button"
                   disabled={isSpinning}
                   onClick={handleSpinMulti5}
-                  className="px-5 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-amber-500/25 transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0"
+                  className="px-4 sm:px-5 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-amber-500/25 transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <Zap className="w-4 h-4 fill-current" />
                   <span>{phase === 'spinning_multi' ? 'Đang mở x5...' : 'Quay Nhanh x5 Lượt'}</span>
                 </button>
+
+                <button
+                  type="button"
+                  disabled={isSpinning}
+                  onClick={handleDrawHolidayCards}
+                  className="px-4 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-black text-xs sm:text-sm shadow-lg shadow-indigo-600/25 transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <Gift className="w-4 h-4" />
+                  <span>Lật 3 Thẻ Quà</span>
+                </button>
               </div>
             </div>
           </div>
+
+          {/* Interactive 3-Card Holiday Flip Area */}
+          {flippedCards.length > 0 && (
+            <div className="pt-2 border-t border-white/10 space-y-2.5">
+              <div className="flex items-center justify-between text-xs font-bold">
+                <span className="text-emerald-500 dark:text-emerald-400">
+                  {activeHolidayMeta
+                    ? `${activeHolidayMeta.emoji} Chọn 1 thẻ quà ${activeHolidayMeta.label} để lật nhận XP:`
+                    : '⚡ Chọn thẻ bí ẩn để lật nhận XP:'}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleDrawHolidayCards}
+                  className="text-[11px] font-bold text-indigo-500 hover:underline cursor-pointer"
+                >
+                  Trộn lại 3 thẻ
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-2.5 max-w-xl mx-auto">
+                {flippedCards.map((card, idx) => {
+                  const tier = RARITY_MAP[card.item.rarity];
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleRevealHolidayCard(idx)}
+                      disabled={card.revealed}
+                      className={`p-3 rounded-2xl border-2 text-center transition-all cursor-pointer min-h-[116px] flex flex-col items-center justify-center gap-1 ${
+                        card.revealed
+                          ? `bg-gradient-to-b ${tier.cardBg} ${tier.cardBorder} ${tier.glowClass}`
+                          : `bg-gradient-to-br ${
+                              activeHolidayConfig ? activeHolidayConfig.accentGradient : 'from-emerald-600 to-teal-700'
+                            } border-white/50 text-white hover:-translate-y-1 shadow-md`
+                      }`}
+                    >
+                      {card.revealed ? (
+                        <>
+                          <span className={`text-[10px] font-black uppercase ${tier.textClass}`}>
+                            {tier.label}
+                          </span>
+                          <span className="text-3xl select-none">{card.item.icon}</span>
+                          <span className="text-[11px] font-extrabold line-clamp-1">{card.item.name}</span>
+                          <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
+                            +{card.item.xpBonus.toLocaleString()} XP
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-3xl select-none">
+                            {activeHolidayMeta ? activeHolidayMeta.backEmoji : '⚡'}
+                          </span>
+                          <span className="text-xs font-black">Thẻ Quà #{idx + 1}</span>
+                          <span className="text-[10px] opacity-85">Bấm để mở</span>
+                        </>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Multi-5 Spin Progress Strip */}
           {phase === 'spinning_multi' && (

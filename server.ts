@@ -1608,12 +1608,16 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
       "vẽ chân dung",
       "làm ảnh",
       "tạo bức ảnh",
+      "tạo bức hình",
+      "vẽ cho mình",
       "tạo ảnh như chatgpt",
       "tạo ảnh như gpt",
       "tạo ảnh đúng",
       "tạo ảnh phải đúng",
       "tạo ảnh không làm sai",
       "tạo ảnh chuẩn",
+      "create image",
+      "make an image",
       "generate image",
       "draw an image",
       "paint an image",
@@ -1911,6 +1915,206 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
     }
   });
 
+  function buildAttachmentPart(att?: { mimeType?: string; data?: string; name?: string } | null): any | null {
+    if (!att || !att.data) return null;
+    const mime = String(att.mimeType || "application/octet-stream").toLowerCase();
+    const name = String(att.name || "tep-dinh-kem");
+    const isTextOrCode =
+      mime.startsWith("text/") ||
+      mime.includes("json") ||
+      mime.includes("javascript") ||
+      mime.includes("typescript") ||
+      mime.includes("xml") ||
+      /\.(txt|md|csv|json|js|ts|tsx|jsx|py|html|css|sql|yaml|yml|log)$/i.test(name);
+
+    if (isTextOrCode) {
+      try {
+        const decoded = Buffer.from(att.data, "base64").toString("utf-8").slice(0, 48000);
+        return { text: `\n[Nội dung tệp đính kèm: ${name}]\n\`\`\`\n${decoded}\n\`\`\`\n` };
+      } catch {
+        // fallback to inlineData
+      }
+    }
+
+    const safeMime =
+      mime === "image/jpg"
+        ? "image/jpeg"
+        : mime || "application/octet-stream";
+
+    return {
+      inlineData: {
+        mimeType: safeMime,
+        data: att.data,
+      },
+    };
+  }
+
+  function detectUserImageIntent(
+    prompt: string,
+    hasAttachment: boolean,
+    hasPreviousGeneratedImage: boolean,
+    forceImageMode: boolean
+  ): "chat" | "create_image" | "edit_image" {
+    if (hasAttachment) return "chat";
+    const lower = (prompt || "").toLowerCase().trim();
+    const editKeywords = [
+      "sửa ảnh",
+      "chỉnh ảnh",
+      "thêm vào ảnh",
+      "đổi màu",
+      "làm sáng hơn",
+      "thay nền",
+      "biến thành",
+      "chỉnh lại ảnh",
+      "chỉnh sửa ảnh",
+      "edit image",
+      "modify image",
+      "change background",
+    ];
+    if (hasPreviousGeneratedImage && editKeywords.some((k) => lower.includes(k))) {
+      return "edit_image";
+    }
+    if (
+      forceImageMode &&
+      hasPreviousGeneratedImage &&
+      /^(thêm|đổi|bỏ|xóa|sửa|chỉnh|làm|biến|chuyển|tô)\b/i.test(lower)
+    ) {
+      return "edit_image";
+    }
+    if (forceImageMode || isImageGenerationRequest(lower) || isPosterGenerationRequest(lower)) {
+      return "create_image";
+    }
+    return "chat";
+  }
+
+  async function mergeImageEditPrompt(previousPrompt: string, editInstruction: string): Promise<string> {
+    try {
+      const merged = await generateContentWithRetry({
+        contents: `Bạn là chuyên gia viết prompt tạo ảnh. Hãy kết hợp mô tả bức ảnh gốc với yêu cầu chỉnh sửa mới của người dùng thành một mô tả tiếng Anh ngắn gọn (dưới 55 từ), giữ nguyên bố cục và nhân vật chính của ảnh gốc, chỉ thay đổi đúng phần người dùng yêu cầu. Chỉ trả về prompt tiếng Anh, không giải thích.\n\nMô tả ảnh gốc: "${previousPrompt}"\nYêu cầu chỉnh sửa: "${editInstruction}"`,
+      });
+      if (merged?.text?.trim()) {
+        return merged.text.trim().replace(/^"|"$/g, "");
+      }
+    } catch (err) {
+      console.warn("Merge image edit prompt fallback:", err);
+    }
+    return `${previousPrompt}, modified with: ${editInstruction}`;
+  }
+
+  // Unified Max10 AI Endpoint (supports contextual create_image / edit_image / multimodal chat)
+  app.post("/api/max10", async (req, res) => {
+    try {
+      const { mode = "chat", prompt = "", messages = [], forceImageMode = false, aspectRatio = "1:1" } = req.body || {};
+
+      if (!process.env.GEMINI_API_KEY) {
+        return res.status(500).json({
+          error: "Chưa cấu hình GEMINI_API_KEY trong môi trường máy chủ.",
+        });
+      }
+
+      const incoming = Array.isArray(messages) ? messages : [];
+      const lastUserMsg = incoming[incoming.length - 1];
+      const promptText = String(lastUserMsg?.content || prompt || "").trim();
+      const lastGeneratedImgMsg = [...incoming]
+        .reverse()
+        .find((m: any) => m?.role === "assistant" && (m?.type === "image" || m?.revisedPrompt || m?.generatedImagePrompt));
+      const hasAttachment = Boolean(lastUserMsg?.attachment?.data);
+      const intent =
+        mode === "image"
+          ? detectUserImageIntent(promptText, false, Boolean(lastGeneratedImgMsg), true)
+          : detectUserImageIntent(promptText, hasAttachment, Boolean(lastGeneratedImgMsg), Boolean(forceImageMode));
+
+      if (intent === "create_image" || intent === "edit_image") {
+        if (!promptText) {
+          return res.status(400).json({ error: "Vui lòng nhập mô tả ảnh cần tạo." });
+        }
+        let finalPrompt = promptText;
+        if (intent === "edit_image" && lastGeneratedImgMsg) {
+          const prevPrompt = String(
+            lastGeneratedImgMsg.revisedPrompt || lastGeneratedImgMsg.generatedImagePrompt || ""
+          ).trim();
+          if (prevPrompt) {
+            finalPrompt = await mergeImageEditPrompt(prevPrompt, promptText);
+          }
+        }
+        const inferredFormat = inferChatImageFormatFromText(promptText);
+        const targetRatio =
+          aspectRatio && aspectRatio !== "1:1"
+            ? aspectRatio
+            : inferredFormat === "banner"
+            ? "16:9"
+            : inferredFormat === "poster"
+            ? "9:16"
+            : "1:1";
+        const enhanced = await generateEnhancedImage(
+          finalPrompt,
+          inferredFormat === "poster" ? "academic_poster" : "chatgpt",
+          targetRatio
+        );
+        const imgResult = await hamTaoHinhAnh(enhanced.enhancedPrompt, inferredFormat, promptText);
+        return res.json({
+          success: true,
+          type: "image",
+          intent,
+          content: imgResult.imageUrl,
+          fallbackUrl: imgResult.fallbackUrl,
+          enhancedPrompt: imgResult.enhancedPrompt,
+          revisedPrompt: imgResult.enhancedPrompt,
+          aspectRatio: imgResult.aspectRatio,
+        });
+      }
+
+      const formattedContents = incoming
+        .map((msg: any) => {
+          if (msg?.type === "image" && msg?.role === "assistant") {
+            return {
+              role: "model",
+              parts: [{ text: `[Đã tạo một bức ảnh với nội dung: ${msg.revisedPrompt || msg.generatedImagePrompt || "Hình ảnh AI"}]` }],
+            };
+          }
+          const parts: any[] = [];
+          if (msg?.content) {
+            parts.push({ text: String(msg.content) });
+          }
+          const attPart = buildAttachmentPart(msg?.attachment);
+          if (attPart) {
+            parts.push(attPart);
+          }
+          if (parts.length === 0) {
+            parts.push({ text: "Hãy phân tích nội dung này giúp mình." });
+          }
+          return {
+            role: msg?.role === "user" ? "user" : "model",
+            parts,
+          };
+        })
+        .filter((m: any) => m.parts.length > 0);
+
+      if (formattedContents.length === 0 && prompt) {
+        formattedContents.push({ role: "user", parts: [{ text: String(prompt) }] });
+      }
+
+      const response = await generateContentWithRetry({
+        contents: formattedContents,
+        config: {
+          systemInstruction:
+            "Bạn là Max10 AI, trợ lý trí tuệ nhân tạo đa năng. Hãy trả lời rõ ràng, chính xác, hỗ trợ giải toán (trình bày từng bước dễ hiểu), lập trình, phân tích hình ảnh và tài liệu bằng tiếng Việt tự nhiên.",
+        },
+      });
+
+      return res.json({
+        success: true,
+        type: "text",
+        content: response.text,
+      });
+    } catch (error: any) {
+      console.error("Max10 API Error:", error);
+      return res.status(500).json({
+        error: "Max10 đang bận hoặc gặp lỗi xử lý. Vui lòng thử lại.",
+      });
+    }
+  });
+
   // Dedicated Gemini AI Voice (TTS) Endpoint
   app.post("/api/tts", async (req, res) => {
     try {
@@ -2116,9 +2320,11 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
       subject = "Toán học",
       mode = "tutor", // 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector' | 'all_in_one'
       isThinking = false,
+      isImageMode = false,
       messages: incomingMessages = [],
       message: singleMessage,
-      image = null, // { mimeType: string, data: string }
+      image = null, // { mimeType: string, data: string, name?: string }
+      attachment = null, // { mimeType: string, data: string, name?: string }
       userName = "Bạn học",
       countryCode = "VN",
       bilingualMode = true,
@@ -2128,6 +2334,7 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
       communityContext = null,
       studyContext = null,
     } = req.body || {};
+    const activeAttachment = attachment || image;
 
     const messages = [...incomingMessages];
     if (messages.length === 0 && singleMessage) {
@@ -2377,14 +2584,70 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
         }
       }
 
+      const hasAttachment = Boolean(activeAttachment?.data);
+      const lastGeneratedImgMsg = [...messages]
+        .reverse()
+        .find((m: any) => m?.role === "assistant" && (m?.type === "image" || m?.revisedPrompt || m?.generatedImagePrompt));
+      const detectedImageIntent = !bypassFastPaths
+        ? detectUserImageIntent(lastRawMsg, hasAttachment, Boolean(lastGeneratedImgMsg), Boolean(isImageMode))
+        : "chat";
+
       // Unified intent hints (for safety-net fallbacks while letting Gemini Function Calling orchestrate all tools)
-      const wantsCombined = !bypassFastPaths && isCombinedImageAndVideoRequest(lastMsg);
-      const wantsVideo = !bypassFastPaths && isVideoGenerationRequest(lastMsg);
-      const wantsPoster = !bypassFastPaths && isAcademicVietnamesePosterRequest(lastMsg);
-      const wantsMindMap = !bypassFastPaths && isMindMapGenerationRequest(lastMsg);
+      const wantsCombined = !bypassFastPaths && !hasAttachment && isCombinedImageAndVideoRequest(lastMsg);
+      const wantsVideo = !bypassFastPaths && !hasAttachment && isVideoGenerationRequest(lastMsg);
+      const wantsPoster = !bypassFastPaths && !hasAttachment && isAcademicVietnamesePosterRequest(lastMsg);
+      const wantsMindMap = !bypassFastPaths && !hasAttachment && isMindMapGenerationRequest(lastMsg);
       const wantsImageFallback =
         !bypassFastPaths &&
-        (isImageGenerationRequest(lastMsg) || isPosterGenerationRequest(lastMsg) || lastMsg.includes("banner") || lastMsg.includes("avatar"));
+        !hasAttachment &&
+        (detectedImageIntent === "create_image" ||
+          detectedImageIntent === "edit_image" ||
+          lastMsg.includes("banner") ||
+          lastMsg.includes("avatar"));
+
+      // Contextual Image Editing (edit_image) OR Explicit "Tạo ảnh" mode toggle fast-path
+      if (!bypassFastPaths && !hasAttachment && lastRawMsg.trim() && (detectedImageIntent === "edit_image" || isImageMode)) {
+        try {
+          const isEditingPrevious = detectedImageIntent === "edit_image" && Boolean(lastGeneratedImgMsg);
+          const cleanImagePrompt = lastRawMsg
+            .replace(/^(tạo ảnh|vẽ ảnh|vẽ cho tôi|create image|draw|sửa ảnh|chỉnh ảnh|chỉnh lại ảnh)\s*[:\-]?\s*/i, "")
+            .trim() || lastRawMsg.trim();
+          const prevImgPrompt = String(
+            lastGeneratedImgMsg?.revisedPrompt || lastGeneratedImgMsg?.generatedImagePrompt || ""
+          ).trim();
+          const finalPromptToEnhance =
+            isEditingPrevious && prevImgPrompt
+              ? await mergeImageEditPrompt(prevImgPrompt, cleanImagePrompt)
+              : cleanImagePrompt;
+          const inferredFormat = inferChatImageFormatFromText(cleanImagePrompt);
+          const targetRatio =
+            inferredFormat === "banner" ? "16:9" : inferredFormat === "poster" ? "9:16" : "1:1";
+          const enhanced = await generateEnhancedImage(
+            finalPromptToEnhance,
+            inferredFormat === "poster" ? "academic_poster" : "chatgpt",
+            targetRatio
+          );
+          const imgResult = await hamTaoHinhAnh(enhanced.enhancedPrompt, inferredFormat, cleanImagePrompt);
+          return res.json({
+            success: true,
+            reply: isEditingPrevious
+              ? `✨ **Max10 AI** đã chỉnh sửa bức ảnh trước đó theo yêu cầu của **${userName || "bạn"}**: *"${cleanImagePrompt}"*. Bạn có thể xem hoặc **Tải ảnh** mới bên dưới!`
+              : `🎨 **Max10 AI** đã vẽ xong bức ảnh theo mô tả của **${userName || "bạn"}**: *"${cleanImagePrompt}"* (${imgResult.aspectRatio}). Bạn có thể bấm phóng to hoặc **Tải ảnh** ngay bên dưới!`,
+            generatedImage: {
+              url: imgResult.imageUrl,
+              fallbackUrl: imgResult.fallbackUrl,
+              prompt: cleanImagePrompt,
+              enhancedPrompt: imgResult.enhancedPrompt,
+              seed: imgResult.seed,
+              aspectRatio: imgResult.aspectRatio,
+              style: imgResult.style,
+              loaiAnh: imgResult.loaiAnh,
+            },
+          });
+        } catch (imgModeErr) {
+          console.warn("Explicit image/edit mode fallback to Gemini tool calling:", imgModeErr);
+        }
+      }
 
       // Keep dedicated educational Vietnamese infographic SVG poster only when explicitly requesting Vietnamese study poster content
       if (wantsPoster && !wantsVideo && !wantsMindMap) {
@@ -2427,7 +2690,7 @@ Constraint: Under 45 words. Return ONLY the English prompt text without quotes o
 
       const ai = getGenAIClient();
       const useHighThinking = Boolean(
-        !interactiveQuizMode && (isThinking || mode === "grade_10_secret" || mode === "trap_detector" || Boolean(image?.data))
+        !interactiveQuizMode && (isThinking || mode === "grade_10_secret" || mode === "trap_detector" || Boolean(activeAttachment?.data))
       );
 
       const effectiveLanguageMode: "vi" | "native" | "bilingual" =
@@ -2576,19 +2839,20 @@ Chế độ hiện tại: ${
       for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
         const isLatestUser = i === messages.length - 1 && msg.role === "user";
+        const msgAttachment = msg?.attachment?.data ? msg.attachment : isLatestUser ? activeAttachment : null;
+        const attachmentPart = buildAttachmentPart(msgAttachment);
 
-        if (isLatestUser && image && image.data && image.mimeType) {
+        if (attachmentPart) {
+          const defaultAttachPrompt =
+            msgAttachment?.mimeType && String(msgAttachment.mimeType).startsWith("image/")
+              ? "Hãy đọc kỹ nội dung trong ảnh này, kiểm tra dữ kiện chính xác và hướng dẫn giải chi tiết từng bước để đạt điểm 10."
+              : "Hãy đọc kỹ và phân tích nội dung tệp đính kèm này thật chi tiết, chính xác giúp mình nhé.";
           contentsPayload.push({
             role: msg.role === "assistant" ? "model" : "user",
             parts: [
+              attachmentPart,
               {
-                inlineData: {
-                  mimeType: image.mimeType,
-                  data: image.data,
-                },
-              },
-              {
-                text: msg.content || "Hãy đọc kỹ nội dung trong ảnh này, kiểm tra dữ kiện chính xác và hướng dẫn giải chi tiết từng bước để đạt điểm 10.",
+                text: msg.content || defaultAttachPrompt,
               },
             ],
           });

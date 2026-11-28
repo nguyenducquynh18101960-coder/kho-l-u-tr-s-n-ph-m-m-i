@@ -4,6 +4,7 @@ import {
   Search,
   MessageSquare,
   Trash2,
+  Edit2,
   Pin,
   Smartphone,
   Zap,
@@ -44,6 +45,7 @@ interface ContextPanelProps {
   onSelectSession: (id: string) => void;
   onNewChat: () => void;
   onDeleteSession: (id: string, e: React.MouseEvent) => void;
+  onRenameSession?: (id: string, newTitle: string) => void;
   // Modals & User
   currentUser: UserAccount | null;
   isAdmin: boolean;
@@ -68,6 +70,7 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
   onSelectSession,
   onNewChat,
   onDeleteSession,
+  onRenameSession,
   currentUser,
   isAdmin,
   subscriptionPlan,
@@ -77,6 +80,21 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
 }) => {
   const [historySearch, setHistorySearch] = useState('');
   const [friendSearch, setFriendSearch] = useState('');
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+
+  const startRename = (id: string, title: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSessionId(id);
+    setEditingTitle(title);
+  };
+
+  const commitRename = (id: string) => {
+    if (onRenameSession && editingTitle.trim()) {
+      onRenameSession(id, editingTitle.trim());
+    }
+    setEditingSessionId(null);
+  };
 
   // Community Groups & Friends synced with GroupChatStudio
   const [groups, setGroups] = useState<ChatGroup[]>([]);
@@ -310,15 +328,49 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
                             : 'hover:bg-slate-200/60 text-slate-700'
                         }`}
                       >
-                        <span className="truncate flex-1">{s.title}</span>
-                        <button
-                          type="button"
-                          onClick={(e) => onDeleteSession(s.id, e)}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:text-rose-500 shrink-0 cursor-pointer"
-                          title="Xóa bài hỏi"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                        {editingSessionId === s.id ? (
+                          <input
+                            type="text"
+                            value={editingTitle}
+                            onChange={(e) => setEditingTitle(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onBlur={() => commitRename(s.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') commitRename(s.id);
+                              if (e.key === 'Escape') setEditingSessionId(null);
+                            }}
+                            className={`flex-1 min-w-0 px-2 py-0.5 rounded-lg text-xs border outline-none ${
+                              isDark
+                                ? 'bg-zinc-900 border-emerald-500 text-white'
+                                : 'bg-white border-emerald-500 text-slate-900'
+                            }`}
+                            autoFocus
+                          />
+                        ) : (
+                          <>
+                            <span className="truncate flex-1">{s.title}</span>
+                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                              {onRenameSession && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => startRename(s.id, s.title, e)}
+                                  className="p-1 rounded-md hover:text-emerald-500 cursor-pointer"
+                                  title="Đổi tên cuộc trò chuyện"
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => onDeleteSession(s.id, e)}
+                                className="p-1 rounded-md hover:text-rose-500 cursor-pointer"
+                                title="Xóa bài hỏi"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     );
                   })}
@@ -351,18 +403,52 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
                             : 'hover:bg-slate-200/60 text-slate-700'
                         }`}
                       >
-                        <span className="flex items-center gap-2 min-w-0 flex-1">
-                          <MessageSquare className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                          <span className="truncate">{s.title}</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={(e) => onDeleteSession(s.id, e)}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:text-rose-500 shrink-0 cursor-pointer"
-                          title="Xóa bài hỏi"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                        {editingSessionId === s.id ? (
+                          <input
+                            type="text"
+                            value={editingTitle}
+                            onChange={(e) => setEditingTitle(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onBlur={() => commitRename(s.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') commitRename(s.id);
+                              if (e.key === 'Escape') setEditingSessionId(null);
+                            }}
+                            className={`flex-1 min-w-0 px-2 py-0.5 rounded-lg text-xs border outline-none ${
+                              isDark
+                                ? 'bg-zinc-900 border-emerald-500 text-white'
+                                : 'bg-white border-emerald-500 text-slate-900'
+                            }`}
+                            autoFocus
+                          />
+                        ) : (
+                          <>
+                            <span className="flex items-center gap-2 min-w-0 flex-1">
+                              <MessageSquare className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                              <span className="truncate">{s.title}</span>
+                            </span>
+                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                              {onRenameSession && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => startRename(s.id, s.title, e)}
+                                  className="p-1 rounded-md hover:text-emerald-500 cursor-pointer"
+                                  title="Đổi tên cuộc trò chuyện"
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => onDeleteSession(s.id, e)}
+                                className="p-1 rounded-md hover:text-rose-500 cursor-pointer"
+                                title="Xóa bài hỏi"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     );
                   })}

@@ -39,6 +39,7 @@ import {
   ArrowRight,
   Award,
   ClipboardPaste,
+  FileText,
 } from 'lucide-react';
 import { GradeLevel, ChatMessage } from '../../types';
 import { UserAccount } from '../../types/auth';
@@ -92,10 +93,22 @@ interface ChatViewProps {
   loading: boolean;
   onSendMessage: (
     text: string,
-    image?: { data: string; mimeType: string; previewUrl: string } | null,
+    image?: {
+      data: string;
+      mimeType: string;
+      previewUrl?: string;
+      name?: string;
+      isImage?: boolean;
+      size?: number;
+    } | null,
     isThinking?: boolean,
     mode?: 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector' | 'all_in_one',
-    quizOverrides?: { interactiveQuizMode?: boolean; quizSubject?: QuizTopicId; quizRole?: QuizRole }
+    quizOverrides?: {
+      interactiveQuizMode?: boolean;
+      quizSubject?: QuizTopicId;
+      quizRole?: QuizRole;
+      isImageMode?: boolean;
+    }
   ) => void;
   onRegenerate: () => void;
   isDark: boolean;
@@ -200,7 +213,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
     data: string;
     mimeType: string;
     previewUrl: string;
+    name: string;
+    isImage: boolean;
+    size: number;
   } | null>(null);
+  const [isImageMode, setIsImageMode] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
   const [failedImgUrls, setFailedImgUrls] = useState<Record<string, boolean>>({});
@@ -493,14 +510,27 @@ export const ChatView: React.FC<ChatViewProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 15 * 1024 * 1024) {
+      showToast('Tệp vượt quá 15MB. Vui lòng chọn tệp hoặc ảnh nhỏ hơn.');
+      e.target.value = '';
+      return;
+    }
+
+    const isImg =
+      file.type.startsWith('image/') ||
+      /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file.name);
+
     const reader = new FileReader();
     reader.onload = () => {
-      const result = reader.result as string;
-      const base64Data = result.split(',')[1];
+      const result = (reader.result as string) || '';
+      const base64Data = result.includes(',') ? result.split(',')[1] : '';
       setAttachedImage({
         data: base64Data,
-        mimeType: file.type,
-        previewUrl: result,
+        mimeType: file.type || (isImg ? 'image/png' : 'text/plain'),
+        previewUrl: isImg ? result : '',
+        name: file.name,
+        isImage: isImg,
+        size: file.size,
       });
     };
     reader.readAsDataURL(file);
@@ -594,7 +624,18 @@ export const ChatView: React.FC<ChatViewProps> = ({
         : selectedModel === 'allinone'
         ? 'all_in_one'
         : 'tutor';
-    onSendMessage(input.trim(), attachedImage, deepThinking || selectedModel === 'deepthink', activeModePayload);
+    const userTextPayload =
+      input.trim() ||
+      (attachedImage && !attachedImage.isImage
+        ? `Hãy đọc và phân tích nội dung tệp "${attachedImage.name}" giúp mình.`
+        : '');
+    onSendMessage(
+      userTextPayload,
+      attachedImage,
+      deepThinking || selectedModel === 'deepthink',
+      activeModePayload,
+      !attachedImage && isImageMode ? { isImageMode: true } : undefined
+    );
     setInput('');
     setAttachedImage(null);
     if (textareaRef.current) {
@@ -729,12 +770,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
           : 'flex-1 flex flex-col h-full overflow-hidden relative'
       }`}
     >
-      {/* Hidden File Input */}
+      {/* Hidden File & Image Input */}
       <input
         type="file"
         ref={fileInputRef}
         onChange={handleImageSelect}
-        accept="image/*"
+        accept="image/*,.pdf,.txt,.md,.csv,.json,.js,.ts,.tsx,.jsx,.py,.html,.css,.sql,.log"
         className="hidden"
       />
 
@@ -1542,13 +1583,25 @@ export const ChatView: React.FC<ChatViewProps> = ({
                             : 'bg-emerald-50 border-emerald-200/70 text-slate-800 font-medium'
                         }`}
                       >
-                        {msg.imagePreview && (
+                        {(msg.imagePreview || msg.attachment?.previewUrl) && (
                           <div className="mb-2">
                             <img
-                              src={msg.imagePreview}
-                              alt="Đề bài đính kèm"
+                              src={msg.imagePreview || msg.attachment?.previewUrl || ''}
+                              alt={msg.attachment?.name || 'Đề bài đính kèm'}
                               className="max-h-52 rounded-2xl object-contain border border-black/10 shadow-xs"
                             />
+                          </div>
+                        )}
+                        {msg.attachment && !msg.attachment.isImage && (
+                          <div
+                            className={`mb-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold ${
+                              isDark
+                                ? 'bg-white/[0.06] border-white/10 text-emerald-300'
+                                : 'bg-white border-emerald-200 text-emerald-700'
+                            }`}
+                          >
+                            <FileText className="w-4 h-4 shrink-0" />
+                            <span className="truncate max-w-[220px]">{msg.attachment.name}</span>
                           </div>
                         )}
                         <p className="whitespace-pre-wrap">{msg.content}</p>
@@ -1898,10 +1951,25 @@ export const ChatView: React.FC<ChatViewProps> = ({
                                   </div>
                                 )}
                                 <div className="px-3.5 py-2 border-t border-black/5 dark:border-zinc-800/80 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-zinc-400">
-                                  <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                  <span className="font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
                                     {formatLabel}
                                   </span>
-                                  <span className="truncate opacity-80">{imgItem.prompt}</span>
+                                  <span className="truncate opacity-80 flex-1">{imgItem.prompt}</span>
+                                  {!isBroken && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleDownloadImage(
+                                          activeUrl || '',
+                                          imgItem.prompt || 'max10-ai'
+                                        )
+                                      }
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 font-bold shrink-0 cursor-pointer"
+                                    >
+                                      <Download className="w-3 h-3" />
+                                      <span>Tải ảnh</span>
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -2121,17 +2189,35 @@ export const ChatView: React.FC<ChatViewProps> = ({
               )}
 
               {attachedImage && (
-                <div className="relative inline-block">
-                  <img
-                    src={attachedImage.previewUrl}
-                    alt="Ảnh bài tập đính kèm"
-                    className="h-16 w-auto rounded-2xl border-2 border-emerald-500/50 shadow-md object-cover bg-white"
-                  />
+                <div className="relative inline-flex items-center">
+                  {attachedImage.isImage && attachedImage.previewUrl ? (
+                    <img
+                      src={attachedImage.previewUrl}
+                      alt={attachedImage.name || 'Ảnh bài tập đính kèm'}
+                      className="h-16 w-auto rounded-2xl border-2 border-emerald-500/50 shadow-md object-cover bg-white"
+                    />
+                  ) : (
+                    <div
+                      className={`flex items-center gap-2.5 pl-3 pr-7 py-2 rounded-2xl border-2 border-emerald-500/45 shadow-md text-xs font-bold ${
+                        isDark
+                          ? 'bg-[#101622] text-emerald-300'
+                          : 'bg-white text-emerald-700'
+                      }`}
+                    >
+                      <FileText className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="truncate max-w-[200px]">{attachedImage.name}</div>
+                        <div className="text-[10px] font-medium opacity-75">
+                          {(attachedImage.size / 1024).toFixed(1)} KB
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => setAttachedImage(null)}
                     className="absolute -top-2 -right-2 bg-slate-900 text-white rounded-full p-1 hover:bg-rose-500 transition-colors shadow-sm cursor-pointer"
-                    title="Gỡ ảnh"
+                    title="Gỡ tệp đính kèm"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -2248,16 +2334,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     : 'bg-white/95 border-slate-200/95 shadow-[0_12px_36px_-8px_rgba(15,23,42,0.16)]'
                 }`}
               >
-                {/* Prominent Large Photo Upload Button */}
+                {/* Prominent File & Photo Upload Button */}
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2.5 rounded-full bg-emerald-50 dark:bg-emerald-500/15 hover:bg-emerald-100 dark:hover:bg-emerald-500/25 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-extrabold text-xs sm:text-sm transition-all shrink-0 cursor-pointer whitespace-nowrap"
-                  title="Chụp hoặc tải ảnh bài tập cần giải"
+                  className="inline-flex items-center gap-2 px-3 sm:px-3.5 py-2.5 rounded-full bg-emerald-50 dark:bg-emerald-500/15 hover:bg-emerald-100 dark:hover:bg-emerald-500/25 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-extrabold text-xs sm:text-sm transition-all shrink-0 cursor-pointer whitespace-nowrap"
+                  title="Đính kèm ảnh bài tập hoặc tệp tài liệu (PDF, TXT, Code...)"
                 >
-                  <Camera className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                  <span className="hidden sm:inline">Tải ảnh bài tập</span>
-                  <span className="sm:hidden">Ảnh BT</span>
+                  <Paperclip className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span className="hidden sm:inline">Ảnh / Tệp</span>
+                  <span className="sm:hidden">Tệp</span>
                 </button>
 
                 {/* Extra Tools Popover Button */}
@@ -2321,7 +2407,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           className="w-full flex items-center gap-2.5 p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer"
                         >
                           <Paperclip className="w-4 h-4 text-emerald-500" />
-                          <span className="font-semibold">Chọn ảnh bài tập ({grade})</span>
+                          <span className="font-semibold">Đính kèm ảnh / tài liệu ({grade})</span>
                         </button>
 
                         <button
@@ -2339,14 +2425,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            setInput('Tạo ảnh AI minh họa: ');
+                            setIsImageMode((prev) => !prev);
                             setShowPlusMenu(false);
                             textareaRef.current?.focus();
                           }}
                           className="w-full flex items-center gap-2.5 p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer"
                         >
-                          <ImageIcon className="w-4 h-4 text-emerald-500" />
-                          <span className="font-semibold">Tạo ảnh AI trong chat</span>
+                          <ImageIcon className="w-4 h-4 text-indigo-500" />
+                          <span className="font-semibold">
+                            {isImageMode ? 'Tắt chế độ Tạo ảnh AI' : 'Bật chế độ Tạo ảnh AI'}
+                          </span>
                         </button>
 
                         <button
@@ -2387,11 +2475,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={
-                    activeStudyBuddy
+                    isImageMode
+                      ? 'Mô tả hình ảnh bạn muốn Max10 AI vẽ (VD: Phi hành gia học toán trên sao Hỏa)...'
+                      : activeStudyBuddy
                       ? `Nhắn tin với ${activeStudyBuddy.flag} ${activeStudyBuddy.name}#${activeStudyBuddy.tag} (${activeStudyBuddy.nativeLanguage}) hoặc gõ / để dùng lệnh...`
                       : quizVoiceMode
                       ? `Trả lời câu hỏi của ${quizRole === 'deskmate' ? 'bạn học cùng bàn' : 'gia sư'} (${activeCountry.nativeName}) bằng chữ hoặc nhấn Mic...`
-                      : `Hỏi bài tập ${grade}, gõ lệnh /timban, /ngonngu, /hoibai hoặc tải ảnh bài cần giải...`
+                      : `Hỏi bài tập ${grade}, gõ lệnh /timban, /ngonngu, /hoibai hoặc đính kèm ảnh/tệp...`
                   }
                   rows={1}
                   className={`flex-1 min-w-0 bg-transparent border-0 focus:outline-none focus:ring-0 text-xs sm:text-sm resize-none leading-relaxed py-2 px-1 ${
@@ -2401,6 +2491,31 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
                 {/* Right Controls inside Pill */}
                 <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !isImageMode;
+                      setIsImageMode(next);
+                      showToast(
+                        next
+                          ? 'Đã bật chế độ Tạo ảnh AI — gõ mô tả để vẽ ngay!'
+                          : 'Đã quay lại chế độ Trò chuyện & Giải bài.'
+                      );
+                      textareaRef.current?.focus();
+                    }}
+                    className={`inline-flex items-center gap-1 px-2.5 sm:px-3 py-2 rounded-full text-xs font-extrabold border transition-all cursor-pointer whitespace-nowrap ${
+                      isImageMode
+                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-xs'
+                        : isDark
+                        ? 'bg-white/[0.04] border-white/10 text-indigo-300 hover:bg-white/[0.08]'
+                        : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
+                    }`}
+                    title={isImageMode ? 'Đang bật chế độ Tạo ảnh AI (bấm để tắt)' : 'Bật chế độ Tạo ảnh AI'}
+                  >
+                    <ImageIcon className="w-3.5 h-3.5 shrink-0" />
+                    <span className="hidden md:inline">Tạo ảnh</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => setDeepThinking(!deepThinking)}

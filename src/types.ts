@@ -67,6 +67,13 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   imagePreview?: string;
+  attachment?: {
+    name: string;
+    mimeType: string;
+    isImage: boolean;
+    previewUrl?: string | null;
+    size?: number;
+  };
   generatedImage?: GeneratedImageInfo;
   generatedImages?: GeneratedImageInfo[];
   generatedVideo?: GeneratedVideoInfo;

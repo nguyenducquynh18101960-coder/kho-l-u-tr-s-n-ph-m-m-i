@@ -325,7 +325,7 @@ export const Max10IntroSplash: React.FC<Max10IntroSplashProps> = ({
               </span>
             </div>
             <div className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
-              Hệ sinh thái học tập thông minh <strong className="text-slate-800 dark:text-zinc-200">Max10 Education</strong>
+              Hệ sinh thái học tập thông minh <strong className="text-slate-800 dark:text-zinc-200">Max10 AI</strong>
             </div>
           </div>
         </div>
@@ -441,7 +441,7 @@ export const Max10IntroSplash: React.FC<Max10IntroSplashProps> = ({
                 <span>
                   Nền tảng học tập{' '}
                   <strong className="font-extrabold text-slate-900 dark:text-white">
-                    Max10 Education
+                    Max10 AI
                   </strong>{' '}
                   · THCS Điểm 10 · Miễn phí 100%
                 </span>

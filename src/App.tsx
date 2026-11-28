@@ -557,7 +557,12 @@ export function App() {
           if (s.messages.length === 0 && newMessages.length > 0) {
             const firstUser = newMessages.find((m) => m.role === 'user');
             if (firstUser) {
-              updatedTitle = firstUser.content.slice(0, 32).trim() + (firstUser.content.length > 32 ? '...' : '');
+              const rawTitleSource =
+                firstUser.content?.trim() ||
+                firstUser.attachment?.name ||
+                'Đoạn chat mới';
+              updatedTitle =
+                rawTitleSource.slice(0, 32).trim() + (rawTitleSource.length > 32 ? '...' : '');
             }
           }
           return { ...s, messages: newMessages, title: updatedTitle };
@@ -605,24 +610,61 @@ export function App() {
     });
   };
 
+  // Rename chat session
+  const handleRenameSession = (id: string, newTitle: string) => {
+    const trimmed = newTitle.trim();
+    if (!trimmed) return;
+    setSessions((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, title: trimmed } : s))
+    );
+  };
+
   const sendToAiBackend = async (
     text: string,
-    image: { data: string; mimeType: string; previewUrl: string } | null | undefined,
+    image: {
+      data: string;
+      mimeType: string;
+      previewUrl?: string;
+      name?: string;
+      isImage?: boolean;
+      size?: number;
+    } | null | undefined,
     isThinking: boolean | undefined,
     mode: 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector' | 'all_in_one' | undefined,
-    quizOverrides: { interactiveQuizMode?: boolean; quizSubject?: QuizTopicId; quizRole?: QuizRole } | undefined,
+    quizOverrides:
+      | {
+          interactiveQuizMode?: boolean;
+          quizSubject?: QuizTopicId;
+          quizRole?: QuizRole;
+          isImageMode?: boolean;
+        }
+      | undefined,
     overrideBuddy?: VirtualStudyBuddy | null,
     overrideCountryCode?: CountryCode,
     overrideLanguageMode?: StudyLanguageMode,
     overrideGradeLabel?: string,
     overrideSubjectLabel?: QuizTopicId
   ) => {
+    const isImgAttachment = image
+      ? image.isImage !== undefined
+        ? image.isImage
+        : Boolean(image.mimeType?.startsWith('image/'))
+      : false;
     const userMsg: ChatMessage = {
       id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
       role: 'user',
       content: text,
       timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-      imagePreview: image?.previewUrl,
+      imagePreview: isImgAttachment ? image?.previewUrl : undefined,
+      attachment: image
+        ? {
+            name: image.name || (isImgAttachment ? 'hinh-anh.jpg' : 'tep-dinh-kem'),
+            mimeType: image.mimeType,
+            isImage: isImgAttachment,
+            previewUrl: isImgAttachment ? image.previewUrl : null,
+            size: image.size,
+          }
+        : undefined,
     };
 
     const currentMsgs = activeSession ? [...activeSession.messages, userMsg] : [userMsg];
@@ -647,12 +689,20 @@ export function App() {
           grade: effectiveGradeLabel,
           subject: effectiveQuizMode ? effectiveQuizSubject : currentSubject.name,
           mode: mode || (isThinking ? 'grade_10_secret' : 'tutor'),
+          isImageMode: image?.data ? false : Boolean(quizOverrides?.isImageMode),
           messages: currentMsgs.map((m) => ({
             role: m.role,
             content: m.content,
+            type: m.generatedImage || m.generatedImages?.length ? 'image' : 'text',
+            revisedPrompt:
+              m.generatedImage?.enhancedPrompt ||
+              m.generatedImage?.prompt ||
+              m.generatedImages?.[0]?.enhancedPrompt ||
+              m.generatedImages?.[0]?.prompt,
           })),
           message: text,
-          image: image ? { mimeType: image.mimeType, data: image.data } : null,
+          image: image ? { mimeType: image.mimeType, data: image.data, name: image.name } : null,
+          attachment: image ? { mimeType: image.mimeType, data: image.data, name: image.name } : null,
           userName,
           isThinking,
           countryCode: effectiveCountry,
@@ -1273,10 +1323,22 @@ export function App() {
   // Send message directly to Max10 AI or execute Slash Commands
   const handleSendMessage = async (
     text: string,
-    image?: { data: string; mimeType: string; previewUrl: string } | null,
+    image?: {
+      data: string;
+      mimeType: string;
+      previewUrl?: string;
+      name?: string;
+      isImage?: boolean;
+      size?: number;
+    } | null,
     isThinking?: boolean,
     mode?: 'tutor' | 'grade_10_secret' | 'mindmap' | 'trap_detector' | 'all_in_one',
-    quizOverrides?: { interactiveQuizMode?: boolean; quizSubject?: QuizTopicId; quizRole?: QuizRole }
+    quizOverrides?: {
+      interactiveQuizMode?: boolean;
+      quizSubject?: QuizTopicId;
+      quizRole?: QuizRole;
+      isImageMode?: boolean;
+    }
   ) => {
     if ((!text || !text.trim()) && !image) return;
 
@@ -1897,6 +1959,7 @@ export function App() {
             }}
             onNewChat={handleNewChat}
             onDeleteSession={handleDeleteSession}
+            onRenameSession={handleRenameSession}
             currentUser={currentUser}
             isAdmin={isAdmin}
             subscriptionPlan={subscriptionPlan}
@@ -2526,6 +2589,7 @@ export function App() {
           }}
           onNewChat={handleNewChat}
           onDeleteSession={handleDeleteSession}
+          onRenameSession={handleRenameSession}
           isDark={isDark}
         />
       )}

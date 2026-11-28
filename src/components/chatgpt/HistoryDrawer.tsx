@@ -6,6 +6,7 @@ import {
   Pin,
   MessageSquare,
   Trash2,
+  Edit2,
   Clock,
   Sparkles,
 } from 'lucide-react';
@@ -19,6 +20,7 @@ interface HistoryDrawerProps {
   onSelectSession: (id: string) => void;
   onNewChat: () => void;
   onDeleteSession: (id: string, e: React.MouseEvent) => void;
+  onRenameSession?: (id: string, newTitle: string) => void;
   isDark: boolean;
 }
 
@@ -30,9 +32,25 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
   onSelectSession,
   onNewChat,
   onDeleteSession,
+  onRenameSession,
   isDark,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+
+  const startRename = (id: string, title: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingId(id);
+    setEditTitle(title);
+  };
+
+  const commitRename = (id: string) => {
+    if (onRenameSession && editTitle.trim()) {
+      onRenameSession(id, editTitle.trim());
+    }
+    setEditingId(null);
+  };
 
   if (!isOpen) return null;
 
@@ -164,21 +182,57 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
                       }`}
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="truncate">{s.title}</div>
-                        <div className="text-[10px] text-slate-400 dark:text-zinc-500 mt-0.5 flex items-center gap-2 tabular-nums">
-                          <span>{s.grade}</span>
-                          <span>·</span>
-                          <span>{s.messages.length} tin nhắn</span>
-                        </div>
+                        {editingId === s.id ? (
+                          <input
+                            type="text"
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onBlur={() => commitRename(s.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') commitRename(s.id);
+                              if (e.key === 'Escape') setEditingId(null);
+                            }}
+                            className={`w-full px-2 py-1 rounded-lg text-xs border outline-none ${
+                              isDark
+                                ? 'bg-zinc-900 border-emerald-500 text-white'
+                                : 'bg-white border-emerald-500 text-slate-900'
+                            }`}
+                            autoFocus
+                          />
+                        ) : (
+                          <>
+                            <div className="truncate">{s.title}</div>
+                            <div className="text-[10px] text-slate-400 dark:text-zinc-500 mt-0.5 flex items-center gap-2 tabular-nums">
+                              <span>{s.grade}</span>
+                              <span>·</span>
+                              <span>{s.messages.length} tin nhắn</span>
+                            </div>
+                          </>
+                        )}
                       </div>
-                      <button
-                        type="button"
-                        onClick={(e) => onDeleteSession(s.id, e)}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-rose-500/10 hover:text-rose-500 transition-all shrink-0 cursor-pointer"
-                        title="Xóa đoạn chat"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {editingId !== s.id && (
+                        <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all shrink-0">
+                          {onRenameSession && (
+                            <button
+                              type="button"
+                              onClick={(e) => startRename(s.id, s.title, e)}
+                              className="p-1.5 rounded-lg hover:bg-emerald-500/10 hover:text-emerald-500 transition-colors cursor-pointer"
+                              title="Đổi tên đoạn chat"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => onDeleteSession(s.id, e)}
+                            className="p-1.5 rounded-lg hover:bg-rose-500/10 hover:text-rose-500 transition-colors cursor-pointer"
+                            title="Xóa đoạn chat"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -227,27 +281,63 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
                       }`}
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="truncate">{s.title}</div>
-                        <div className="text-[10px] text-slate-400 dark:text-zinc-500 mt-0.5 flex items-center gap-2 tabular-nums">
-                          <span>{s.grade}</span>
-                          <span>·</span>
-                          <span>{s.messages.length} tin nhắn</span>
-                          {s.createdAt ? (
-                            <>
+                        {editingId === s.id ? (
+                          <input
+                            type="text"
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onBlur={() => commitRename(s.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') commitRename(s.id);
+                              if (e.key === 'Escape') setEditingId(null);
+                            }}
+                            className={`w-full px-2 py-1 rounded-lg text-xs border outline-none ${
+                              isDark
+                                ? 'bg-zinc-900 border-emerald-500 text-white'
+                                : 'bg-white border-emerald-500 text-slate-900'
+                            }`}
+                            autoFocus
+                          />
+                        ) : (
+                          <>
+                            <div className="truncate">{s.title}</div>
+                            <div className="text-[10px] text-slate-400 dark:text-zinc-500 mt-0.5 flex items-center gap-2 tabular-nums">
+                              <span>{s.grade}</span>
                               <span>·</span>
-                              <span>{formatSessionTime(s.createdAt)}</span>
-                            </>
-                          ) : null}
-                        </div>
+                              <span>{s.messages.length} tin nhắn</span>
+                              {s.createdAt ? (
+                                <>
+                                  <span>·</span>
+                                  <span>{formatSessionTime(s.createdAt)}</span>
+                                </>
+                              ) : null}
+                            </div>
+                          </>
+                        )}
                       </div>
-                      <button
-                        type="button"
-                        onClick={(e) => onDeleteSession(s.id, e)}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-rose-500/10 hover:text-rose-500 transition-all shrink-0 cursor-pointer"
-                        title="Xóa bài hỏi"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {editingId !== s.id && (
+                        <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all shrink-0">
+                          {onRenameSession && (
+                            <button
+                              type="button"
+                              onClick={(e) => startRename(s.id, s.title, e)}
+                              className="p-1.5 rounded-lg hover:bg-emerald-500/10 hover:text-emerald-500 transition-colors cursor-pointer"
+                              title="Đổi tên bài hỏi"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => onDeleteSession(s.id, e)}
+                            className="p-1.5 rounded-lg hover:bg-rose-500/10 hover:text-rose-500 transition-colors cursor-pointer"
+                            title="Xóa bài hỏi"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
